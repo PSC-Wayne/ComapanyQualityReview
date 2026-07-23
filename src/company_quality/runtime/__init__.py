@@ -1,4 +1,4 @@
-"""Deterministic controlled-fixture golden path for T01."""
+"""Deterministic controlled-fixture golden path for equity research."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import re
 import uuid
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime
-from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 from zoneinfo import ZoneInfo
@@ -21,14 +20,6 @@ MODEL_VERSION = "no-rating-model.v1"
 MANIFEST_VERSION = "controlled-manifest.v1"
 SCHEMA_VERSION = "GoldenPathResult.v1"
 INVALID_TIME_SENTINEL = "1970-01-01T00:00:00+08:00"
-FOUNDATION_ARTIFACTS = MappingProxyType(
-    {
-        "admission_scan_path": "tools/admission_scan.py",
-        "validate_json_path": "tools/validate_json.py",
-        "freeze_package_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json",
-        "freeze_manifest_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json",
-    }
-)
 _ERROR_CODES = (
     "invalid_decision_time",
     "identity_ambiguous",
@@ -37,9 +28,7 @@ _ERROR_CODES = (
     "generation_mismatch",
 )
 _RFC3339 = re.compile(
-    r"^(?P<date>\d{4}-\d{2}-\d{2})T"
-    r"(?P<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)"
-    r"(?P<zone>Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
 
 
@@ -60,7 +49,6 @@ class ResolvedIdentity:
 @dataclass(frozen=True, slots=True)
 class AnalysisSnapshot:
     generation_id: str
-    producer_candidate_sha: str
     decision_time: str
     manifest_version: str
     source_version: str
@@ -78,15 +66,12 @@ class GoldenPathResult:
     report_hash: str | None
     error_code: str | None
     failure_reason: str | None
-    foundation_artifacts: Mapping[str, str]
-    contract_coverage: Decimal
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"]
     source_version: str
     formula_version: str
     model_version: str
     schema_version: Literal["GoldenPathResult.v1"]
     manifest_version: str
-    producer_candidate_sha: str | None
     snapshot: AnalysisSnapshot | None
     report: RenderedReport | None
 
@@ -98,15 +83,12 @@ class GoldenPathResult:
             "report_hash": self.report_hash,
             "error_code": self.error_code,
             "failure_reason": self.failure_reason,
-            "foundation_artifacts": dict(self.foundation_artifacts),
-            "contract_coverage": float(self.contract_coverage),
             "rating_disposition": self.rating_disposition,
             "source_version": self.source_version,
             "formula_version": self.formula_version,
             "model_version": self.model_version,
             "schema_version": self.schema_version,
             "manifest_version": self.manifest_version,
-            "producer_candidate_sha": self.producer_candidate_sha,
         }
 
 
@@ -117,19 +99,14 @@ def _thaw(value: Any) -> Any:
         return {str(key): _thaw(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [_thaw(item) for item in value]
-    if isinstance(value, Decimal):
-        return str(value)
     return value
 
 
-def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
+def _sha256(value: Any) -> str:
+    payload = json.dumps(
         _thaw(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
-
-
-def _sha256(value: Any) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _normalized_decision_time(value: Any) -> str | None:
@@ -143,8 +120,7 @@ def _normalized_decision_time(value: Any) -> str | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     local = parsed.astimezone(ZoneInfo("Asia/Taipei"))
-    timespec = "microseconds" if local.microsecond else "seconds"
-    return local.isoformat(timespec=timespec)
+    return local.isoformat(timespec="microseconds" if local.microsecond else "seconds")
 
 
 def _contract_query(query: GoldenPathQuery, normalized_time: str | None) -> GoldenPathQuery:
@@ -167,12 +143,7 @@ def _resolve(query: GoldenPathQuery) -> tuple[ResolvedIdentity | None, str | Non
     return None, "unsupported_scope", "identifier is not present in the controlled fixture scope"
 
 
-def _failure(
-    query: GoldenPathQuery,
-    error_code: str,
-    failure_reason: str,
-    producer_candidate_sha: str | None,
-) -> GoldenPathResult:
+def _failure(query: GoldenPathQuery, error_code: str, failure_reason: str) -> GoldenPathResult:
     assert error_code in _ERROR_CODES
     return GoldenPathResult(
         query=query,
@@ -181,15 +152,12 @@ def _failure(
         report_hash=None,
         error_code=error_code,
         failure_reason=failure_reason,
-        foundation_artifacts=FOUNDATION_ARTIFACTS,
-        contract_coverage=Decimal("0"),
         rating_disposition="NO_RATING_NOT_APPLICABLE",
         source_version=SOURCE_VERSION,
         formula_version=FORMULA_VERSION,
         model_version=MODEL_VERSION,
         schema_version=SCHEMA_VERSION,
         manifest_version=MANIFEST_VERSION,
-        producer_candidate_sha=producer_candidate_sha,
         snapshot=None,
         report=None,
     )
@@ -202,7 +170,6 @@ def validate_same_generation(
 ) -> str | None:
     if (
         snapshot.generation_id != report.generation_id
-        or snapshot.producer_candidate_sha != report.producer_candidate_sha
         or snapshot.decision_time != report.decision_time
         or snapshot.manifest_version != report.manifest_version
         or snapshot.model_version != report.model_version
@@ -213,48 +180,33 @@ def validate_same_generation(
     return None
 
 
-def run_golden_path(
-    query: GoldenPathQuery, *, producer_candidate_sha: str | None = None
-) -> GoldenPathResult:
+def run_golden_path(query: GoldenPathQuery) -> GoldenPathResult:
     """Resolve, freeze and render one deterministic controlled-fixture analysis."""
     normalized_time = _normalized_decision_time(query.decision_time)
     normalized_query = _contract_query(query, normalized_time)
-    if not isinstance(producer_candidate_sha, str) or re.fullmatch(
-        r"[0-9a-f]{40}", producer_candidate_sha
-    ) is None:
-        return _failure(
-            normalized_query,
-            "blocked_contract",
-            "producer_candidate_sha must be a full 40-character lowercase Git SHA",
-            None,
-        )
     if normalized_time is None:
         return _failure(
             normalized_query,
             "invalid_decision_time",
             "decision_time must be an exact timezone-aware RFC3339 instant",
-            producer_candidate_sha,
         )
     if not isinstance(query.identifier, str) or not 1 <= len(query.identifier) <= 128:
         return _failure(
             normalized_query,
             "unsupported_scope",
             "identifier must contain between 1 and 128 characters",
-            producer_candidate_sha,
         )
     identity, error_code, failure_reason = _resolve(query)
     if error_code is not None or identity is None:
         return _failure(
             normalized_query,
             error_code or "blocked_contract",
-            failure_reason or "identity resolution did not produce a governed identity",
-            producer_candidate_sha,
+            failure_reason or "identity resolution failed",
         )
 
     generation_seed = {
         "query": asdict(normalized_query),
         "identity": asdict(identity),
-        "producer_candidate_sha": producer_candidate_sha,
         "source_version": SOURCE_VERSION,
         "formula_version": FORMULA_VERSION,
         "model_version": MODEL_VERSION,
@@ -276,7 +228,6 @@ def run_golden_path(
     )
     snapshot = AnalysisSnapshot(
         generation_id=generation_id,
-        producer_candidate_sha=producer_candidate_sha,
         decision_time=normalized_time,
         manifest_version=MANIFEST_VERSION,
         source_version=SOURCE_VERSION,
@@ -288,13 +239,10 @@ def run_golden_path(
     snapshot_hash = _sha256(snapshot)
     report = render_report(
         generation_id=generation_id,
-        producer_candidate_sha=producer_candidate_sha,
         decision_time=normalized_time,
         manifest_version=MANIFEST_VERSION,
         model_version=MODEL_VERSION,
         canonical_identifier=identity.canonical_identifier,
-        error_code=None,
-        failure_reason=None,
     )
     report_hash = _sha256(report)
     seam_error = validate_same_generation(snapshot, report, report_hash)
@@ -303,7 +251,6 @@ def run_golden_path(
             normalized_query,
             seam_error,
             "snapshot/report generation or report hash did not match",
-            producer_candidate_sha,
         )
     return GoldenPathResult(
         query=normalized_query,
@@ -312,15 +259,12 @@ def run_golden_path(
         report_hash=report_hash,
         error_code=None,
         failure_reason=None,
-        foundation_artifacts=FOUNDATION_ARTIFACTS,
-        contract_coverage=Decimal("1"),
         rating_disposition="NO_RATING_NOT_APPLICABLE",
         source_version=SOURCE_VERSION,
         formula_version=FORMULA_VERSION,
         model_version=MODEL_VERSION,
         schema_version=SCHEMA_VERSION,
         manifest_version=MANIFEST_VERSION,
-        producer_candidate_sha=producer_candidate_sha,
         snapshot=snapshot,
         report=report,
     )
