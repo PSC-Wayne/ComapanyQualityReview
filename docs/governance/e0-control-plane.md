@@ -4,7 +4,7 @@ Status: E0 bootstrap only; product implementation is not authorized.
 
 ## Repository authority
 
-- Private GitHub repository: `smart40333/ComapanyQualityReview`.
+- Public GitHub Organization repository: `PSC-Wayne/ComapanyQualityReview`.
 - Protected `main` is authoritative.
 - Required planning-integrity check: `E0 governance / verify`.
 - Merge queue serializes integration.
