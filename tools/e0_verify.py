@@ -35,19 +35,64 @@ for p in work_orders:
         raise SystemExit(f"authorization boundary missing: {p.name}")
 
 evidence = json.loads((ROOT / "docs/governance/e0-evidence.json").read_text(encoding="utf-8"))
-if evidence["repository"] != "PSC-Wayne/ComapanyQualityReview":
-    raise SystemExit("unexpected repository authority")
-if evidence["product_implementation_authorized"] is not False:
-    raise SystemExit("product implementation must remain unauthorized")
-if evidence["ruleset"]["enforcement"] != "active" or evidence["ruleset"]["bypass_actors"] != []:
-    raise SystemExit("main ruleset must be active with no bypass actors")
-required_rules = {"deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks", "merge_queue"}
-if set(evidence["ruleset"]["rules"]) != required_rules:
-    raise SystemExit("ruleset contract mismatch")
-expected_permissions = {"checks": "read", "contents": "write", "metadata": "read", "pull_requests": "write"}
-if evidence["integration_app"]["permissions"] != expected_permissions:
-    raise SystemExit("integration app permission mismatch")
-if evidence["integration_app"]["repository_selection"] != "selected" or evidence["integration_app"]["repositories"] != ["PSC-Wayne/ComapanyQualityReview"]:
-    raise SystemExit("integration app must be selected-repository only")
+expected_evidence = {
+    "schema_version": "E0ControlPlaneEvidence.v1",
+    "generated_at": "2026-07-23T23:05:06+08:00",
+    "repository": "PSC-Wayne/ComapanyQualityReview",
+    "visibility": "PUBLIC",
+    "protected_branch": "main",
+    "baseline_main_sha": "eb924d779377f34ad3a99da5a55ec6663157da90",
+    "planning_integrity_run": {
+        "id": 30018023587,
+        "conclusion": "success",
+        "url": "https://github.com/PSC-Wayne/ComapanyQualityReview/actions/runs/30018023587",
+    },
+    "ruleset": {
+        "id": 19625505,
+        "name": "protected-main-merge-queue",
+        "enforcement": "active",
+        "required_check": {"context": "verify", "integration_id": 15368},
+        "rules": [
+            "deletion",
+            "non_fast_forward",
+            "required_linear_history",
+            "pull_request",
+            "required_status_checks",
+            "merge_queue",
+        ],
+        "bypass_actors": [],
+    },
+    "integration_app": {
+        "id": 4375855,
+        "slug": "psc-wayne-cqr-integrator",
+        "installation_id": 148525506,
+        "repository_selection": "selected",
+        "repositories": ["PSC-Wayne/ComapanyQualityReview"],
+        "permissions": {
+            "checks": "read",
+            "contents": "write",
+            "metadata": "read",
+            "pull_requests": "write",
+        },
+        "administration_permission": "none",
+        "actions_permission": "none",
+        "secrets_permission": "none",
+    },
+    "negative_probes": {
+        "owner_direct_main_push": "GH013_REJECTED",
+        "app_direct_main_push": "GH013_REJECTED",
+        "remote_main_unchanged": True,
+    },
+    "planning_bindings": {
+        "frozen_spec_sha256": EXPECTED["docs/specs/company-quality-product-spec.md"],
+        "decision_map_sha256": EXPECTED["docs/planning/company-quality-decision-map.md"],
+        "delivery_plan_sha256": EXPECTED["docs/planning/company-quality-multi-agent-delivery-plan.md"],
+        "r9_work_order_set_sha256": EXPECTED_R9,
+    },
+    "github_issues": {"count": 28, "generation": "r9", "status": "blocked"},
+    "product_implementation_authorized": False,
+}
+if evidence != expected_evidence:
+    raise SystemExit("E0 evidence contract mismatch")
 
 print(f"E0_VERIFY PASS | authorities=3 | work_orders=28 | r9={actual_set} | ruleset=active | app=least-privilege")
