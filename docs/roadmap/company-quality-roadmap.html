@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Company Quality Research Roadmap</title>
+  <style>
+    :root {
+      --ink:#17243b; --muted:#66758f; --line:#cbd7e8; --bg:#eaf2fb;
+      --panel:rgba(255,255,255,.82); --card:#f8fbff;
+      --done:#138a68; --confirmed:#0f78b8; --decision:#e18a09; --planned:#76839b; --later:#8c64d8;
+      --shadow:0 16px 38px rgba(59,85,120,.10);
+    }
+    *{box-sizing:border-box}
+    html{background:var(--bg); color:var(--ink); font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+    body{margin:0; min-width:1180px; background:
+      radial-gradient(circle at 10% 0%,rgba(87,154,255,.12),transparent 26%),
+      radial-gradient(circle at 90% 12%,rgba(135,91,255,.10),transparent 24%),
+      linear-gradient(180deg,#f4f8fd 0,#e7f0fa 100%)}
+    .topbar{position:sticky;top:0;z-index:20;background:rgba(246,249,253,.92);backdrop-filter:blur(16px);border-bottom:1px solid rgba(173,190,213,.65)}
+    .top-inner{max-width:2600px;margin:auto;padding:18px 26px 14px}
+    .headline{display:flex;align-items:flex-end;justify-content:space-between;gap:30px}
+    .eyebrow{font-size:12px;letter-spacing:.16em;font-weight:800;color:#3372cc;text-transform:uppercase;margin-bottom:7px}
+    h1{font-size:27px;line-height:1.15;margin:0;letter-spacing:-.025em}
+    .subtitle{color:var(--muted);font-size:13px;margin-top:7px}
+    .outputs{display:flex;gap:8px;align-items:stretch}
+    .output{min-width:145px;padding:10px 13px;border:1px solid #d4dfed;border-radius:14px;background:#fff;box-shadow:0 5px 18px rgba(45,70,105,.05)}
+    .output b{display:block;font-size:12px;margin-bottom:4px}.output span{font-size:14px;font-weight:850}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:15px;padding-top:13px;border-top:1px solid #dce5f0}
+    .legend,.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .legend-item{font-size:12px;color:#52617a;display:flex;align-items:center;gap:6px}.dot{width:8px;height:8px;border-radius:50%}
+    button{border:1px solid #ccd8e8;background:#fff;color:#4a5d78;border-radius:999px;padding:7px 12px;font:700 12px inherit;cursor:pointer}
+    button:hover,button.active{background:#203c66;border-color:#203c66;color:#fff}
+    .board-wrap{overflow-x:auto;padding:18px 20px 44px}
+    .board{display:grid;grid-template-columns:repeat(9,340px);gap:14px;width:max-content;margin:0 auto;align-items:start}
+    .wave{--accent:#2876df;background:var(--panel);border:1px solid rgba(255,255,255,.9);border-radius:23px;padding:15px;box-shadow:var(--shadow);min-height:600px}
+    .wave-head{padding:2px 2px 13px;margin-bottom:14px;border-bottom:1px solid #d5dfeb}
+    .wave-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    .wave-kicker{font-weight:900;font-size:14px}.wave-count{font-size:11px;color:#72819a}
+    .wave-purpose{margin-top:7px;color:#687892;font-size:12px;line-height:1.45;min-height:35px}
+    .module{position:relative;border:1px solid #ccd8e9;border-left:4px solid var(--accent);border-radius:17px;background:rgba(249,252,255,.97);padding:14px 14px 12px;margin-bottom:37px;box-shadow:0 5px 14px rgba(57,82,115,.03);transition:.18s ease}
+    .module:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(55,82,120,.10)}
+    .module:not(:last-child)::after{content:"↓";position:absolute;left:calc(50% - 8px);bottom:-29px;color:#9eb4d0;font-size:19px;font-weight:500}
+    .module:last-child{margin-bottom:1px}
+    .module-id{font-size:11px;letter-spacing:.11em;font-weight:900;color:var(--accent);text-transform:uppercase}
+    .module h2{font-size:15px;line-height:1.35;margin:7px 0 7px;letter-spacing:-.01em}
+    .module p{font-size:12px;line-height:1.55;color:#65758e;margin:0 0 10px}
+    .deliverable{font-size:11px;line-height:1.45;padding:8px 9px;background:#eef4fb;border-radius:9px;color:#52647e;margin-bottom:10px}
+    .deliverable b{color:#344b6c}
+    .status{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:850}
+    .status::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px color-mix(in srgb,currentColor 15%,transparent)}
+    .status.done{color:var(--done)} .status.confirmed{color:var(--confirmed)} .status.decision{color:var(--decision)} .status.planned{color:var(--planned)} .status.later{color:var(--later)} .status.researching{color:#6f50d8}
+    .gate{margin-top:15px;border:1px dashed color-mix(in srgb,var(--accent) 45%,#c9d5e5);background:color-mix(in srgb,var(--accent) 6%,#fff);border-radius:14px;padding:11px 12px}
+    .gate b{display:block;font-size:10px;letter-spacing:.12em;color:var(--accent);margin-bottom:5px}.gate span{font-size:11px;line-height:1.45;color:#576982}
+    .wave[data-wave="0"]{--accent:#246de3}.wave[data-wave="1"]{--accent:#b64055}.wave[data-wave="2"]{--accent:#0992a9}.wave[data-wave="3"]{--accent:#7544e8}.wave[data-wave="4"]{--accent:#d36b05}.wave[data-wave="5"]{--accent:#c23c56}.wave[data-wave="6"]{--accent:#13845f}.wave[data-wave="7"]{--accent:#9855c9}.wave[data-wave="8"]{--accent:#2d5db7}
+    .hidden{display:none!important}
+    .footer{max-width:2560px;margin:0 auto 28px;padding:0 26px;color:#64738b;font-size:11px;display:flex;justify-content:space-between;gap:20px}
+    @media(max-width:1400px){.headline{align-items:flex-start}.outputs{display:grid;grid-template-columns:repeat(2,1fr)}.board{grid-template-columns:repeat(9,320px)}}
+    @media print{.topbar{position:static}.toolbar{display:none}.board-wrap{overflow:visible}.board{transform-origin:top left}.module:hover{transform:none}.footer{display:none}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="top-inner">
+      <div class="headline">
+        <div>
+          <div class="eyebrow">Company Quality Research · Planning Roadmap</div>
+          <h1>公司品質、上漲潛力與下跌風險分析系統</h1>
+          <div class="subtitle">輸入股票代號／公司，一次完成財報審核、五年風險鑑識、品質估值、近兩月技術籌碼與最終評分｜重規劃版 2026-07-23</div>
+        </div>
+        <div class="outputs" aria-label="最終輸出">
+          <div class="output"><b>公司品質</b><span>0–100 分</span></div>
+          <div class="output"><b>上漲潛力</b><span>★ ～ ★★★★★</span></div>
+          <div class="output"><b>下跌風險</b><span>☹ ～ ☹☹☹☹☹</span></div>
+          <div class="output"><b>可信程度</b><span>Coverage · Confidence</span></div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="legend">
+          <span class="legend-item"><i class="dot" style="background:var(--done)"></i>研究完成</span>
+          <span class="legend-item"><i class="dot" style="background:var(--confirmed)"></i>Wayne 已確認</span>
+          <span class="legend-item"><i class="dot" style="background:var(--decision)"></i>待 Wayne 決策</span>
+          <span class="legend-item"><i class="dot" style="background:var(--planned)"></i>已規劃・未執行</span>
+          <span class="legend-item"><i class="dot" style="background:#6f50d8"></i>研究進行中</span>
+          <span class="legend-item"><i class="dot" style="background:var(--later)"></i>後續階段</span>
+        </div>
+        <div class="filters" aria-label="顯示篩選">
+          <button class="active" data-filter="all">全部</button>
+          <button data-filter="decision">只看待決策</button>
+          <button data-filter="done">只看已完成／確認</button>
+          <button id="compact">精簡卡片</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="board-wrap"><section id="board" class="board" aria-label="公司分析 Roadmap"></section></main>
+  <footer class="footer"><span>Direct source：分析公司架構.png ＋第一手財金研究＋Company Quality Decision Map V2</span><span>Roadmap 是規劃視圖；研究中、待決策、未執行與後續階段皆明確分色。</span></footer>
+
+<script src="company-quality-roadmap-v2-data.js"></script>
+<script>
+const legacyWaves = [
+ {id:0,title:'資料權威與研究底座',purpose:'先確保公司、時間、來源與每個數字都可追溯，避免在錯資料上做精密分析。',gate:'所有採用事實皆可重建「當時可知版本」，缺口不以 0 或方便 proxy 代替。',modules:[
+  ['00','研究方法與來源權威','Piotroski／Beneish／Altman、估值、風險、台灣官方端點與 PIT 契約。','三份 research authority 文件','done','研究完成'],
+  ['01','輸出語意與分析期限','區分公司品質、上漲潛力、下跌風險與信心；主期限暫定 24 個月。','領域詞彙、outcome 與 horizon 決策','decision','部分待 Wayne 確認'],
+  ['02','公司身分、同業與產業路由','上市／上櫃 single-market 身分、歷史名稱、法律實體、生命週期與有效同業。','as-of identity 與 peer-set manifest','planned','已規劃・未執行'],
+  ['03','官方資料擷取與原始留存','MOPS、TWSE、TPEx 財報、月營收、重大訊息、法說、股價、估值與公司行動。','raw artifacts＋source hash','planned','已規劃・未執行'],
+  ['04','Point-in-Time 與修訂版本鏈','effective／announced／available／retrieved 時間；原申報、更正與重編 append-only。','as-of version resolver','planned','已規劃・未執行'],
+  ['05','Canonical Facts 與 Lineage','標準欄位、單位、幣別、value basis、來源表格座標及公式版本。','canonical fact store＋lineage graph','planned','已規劃・未執行'],
+  ['06','Coverage 與資料品質 Gate','近 5 年指定公司 20 個已發布季度；gap、error、not-applicable 分流。','coverage manifest＋fail-closed gate','planned','已規劃・未執行']
+ ]},
+ {id:1,title:'可驗證財務品質',purpose:'把成長、報酬、現金與脆弱性拆成不重複的 evidence families。',gate:'公式、產業適用性與 evidence owner 固定；所有衍生數值能回到原始 fact。',modules:[
+  ['07','成長品質與穩定度','營收、毛利、營益、EPS、FCF 的趨勢、YoY／QoQ、波動與同業相對。','growth-quality family','planned','已規劃・未執行'],
+  ['08','獲利能力與毛利韌性','毛利率、營益率、ROA／ROE 與景氣、價格、成本傳導拆解。','profitability family','planned','已規劃・未執行'],
+  ['09','ROIC 與增量資本報酬','NOPAT、平均投入資本、租賃／商譽／研發調整，reported 與 adjusted 並列。','capital-return family','planned','已規劃・未執行'],
+  ['10','現金轉換與營運資金','CFO／淨利、FCF、應收／存貨／應付、現金循環與維持性投資負擔。','cash-conversion family','planned','已規劃・未執行'],
+  ['11','財務韌性與再融資','淨負債、利息保障、流動性、到期牆、契約、浮息與潛在稀釋。','solvency family','planned','已規劃・未執行'],
+  ['12','盈餘品質與財報警示','應計、一次性、重編、關係人；F／M／Z-score 作診斷，不機械疊加。','reporting-risk flags','planned','已規劃・未執行'],
+  ['13','資本配置紀錄','CAPEX、併購、股利、回購、增資與管理層歷史配置報酬。','capital-allocation evidence','planned','已規劃・未執行']
+ ]},
+ {id:2,title:'商業品質與護城河',purpose:'回答公司如何賺錢、為何能持續，以及哪些依賴會讓優勢反轉。',gate:'質化主張有日期、來源與可反證條件；驅動因不與財務結果重複加分。',modules:[
+  ['14','商業模式與收入引擎','誰付錢、為何付錢、收入確認、成本結構、單位經濟與可擴張性。','business-model map','planned','已規劃・未執行'],
+  ['15','產業結構、TAM 與週期','需求驅動、滲透率、週期位置、產能、政策與正常化基準率。','industry regime dossier','planned','已規劃・未執行'],
+  ['16','競爭格局與 Five Forces','競爭者、供應商／買方議價、替代品、新進入者與轉換成本。','competitive-force evidence','planned','已規劃・未執行'],
+  ['17','護城河 Driver 證據','品牌、規模、網路效應、專利、認證、通路與客戶整合深度。','moat driver register','planned','已規劃・未執行'],
+  ['18','客戶、產品與通路集中','留存、流失、單一客戶／產品、區域與通路依賴及訂單品質。','concentration & retention map','planned','已規劃・未執行'],
+  ['19','供應鏈與替代風險','關鍵供應商、原料、地緣、製程、技術替代與備援能力。','dependency graph','planned','已規劃・未執行'],
+  ['20','有效期同業比較','固定 as-of peer set；公司品質、投資、經營及求職四種視角分開。','peer benchmark report','planned','已規劃・未執行']
+ ]},
+ {id:3,title:'治理、人與適應能力',purpose:'評估誰在分配資本、組織是否可信，以及公司能否持續學習與轉型。',gate:'觀察事實、推論與分析師判斷分層；治理紅旗不能被普通優點掩蓋。',modules:[
+  ['21','控制權、董事會與關係人','股權控制、獨立性、關係人交易、質押、利益衝突與法遵。','governance evidence register','planned','已規劃・未執行'],
+  ['22','管理層可信度與執行紀錄','歷次 guidance、法說承諾、策略目標與實際達成率。','commitment-to-outcome ledger','planned','已規劃・未執行'],
+  ['23','誘因與股東利益一致性','薪酬、持股、稀釋、回購、短期 KPI 與長期價值創造。','incentive alignment review','planned','已規劃・未執行'],
+  ['24','接班與關鍵人風險','創辦人依賴、權責梯隊、接班計畫與單點人才風險。','succession & key-person map','planned','已規劃・未執行'],
+  ['25','員工、文化與營運品質','留才、工時、工安、公平與學習能力；資料不足時明示低信心。','people-quality evidence','planned','已規劃・未執行'],
+  ['26','創新、研發與技術韌性','研發效率、產品管線、IP、人才、數位能力與技術替代／復原。','innovation & adaptability scorecard','planned','已規劃・未執行']
+ ]},
+ {id:4,title:'下跌風險與壓力測試',purpose:'用三個可見分項合成哭臉，並保留重大風險 floor／veto。',gate:'每個風險有 exposure、transmission、buffer、severity、trigger，且未在估值中重複計算。',modules:[
+  ['27','風險分類與 Risk Register','營運、財務、會計、治理、法規、訴訟、地緣、技術、估值與模型風險。','versioned risk register','planned','已規劃・未執行'],
+  ['28','最大回撤脆弱度','固定 24 個月的價格與相對回撤，區分可逆波動、流動性與結構性壓力。','drawdown sub-rating','confirmed','三構面之一・已確認'],
+  ['29','永久性資本損失脆弱度','價值毀損、過度槓桿、稀釋、資產減損與無法恢復的基本面惡化。','permanent-loss sub-rating','confirmed','三構面之一・已確認'],
+  ['30','重大負面事件脆弱度','違約、查核／舞弊、關鍵客戶、監管、訴訟、事故與技術淘汰事件。','adverse-event sub-rating','confirmed','三構面之一・已確認'],
+  ['31','Bear／Base／Bull 壓力情境','需求、毛利、匯率、利率、原料、客戶流失、產能與再融資的一致情境。','stress scenario pack','planned','已規劃・未執行'],
+  ['32','Critical Risk Floors／Veto','繼續經營、迫近流動性、重大舞弊／查核問題可設最低哭臉、封頂或不評等。','critical-risk policy','decision','待 Wayne 確認細則'],
+  ['33','三構面哭臉合成','加權 composite＋重大風險 floor／veto；三個分項仍須分別顯示。','☹ ～ ☹☹☹☹☹','decision','聚合原則暫定・權重待決']
+ ]},
+ {id:5,title:'估值、市場預期與五星',purpose:'先保留各種估值證據，再將價格位置壓縮為可稽核的 ordinal 星級。',gate:'不以單一目標價直接定星；模型假設、分歧、敏感度與適用性全部可見。',modules:[
+  ['34','產業別估值路由','依一般企業、銀行、保險、REIT、週期、生技、控股等選擇適用方法。','valuation routing policy','decision','首發產業範圍待決'],
+  ['35','DCF／FCFE／DDM','現金流、折現率、再投資、穩態與終值；reported／adjusted 假設可追溯。','intrinsic-value evidence','planned','已規劃・未執行'],
+  ['36','Reverse DCF 市場隱含預期','從現價反解市場要求的成長、毛利、ROIC 與終值假設，檢查可達性。','implied-expectations dossier','planned','已規劃・未執行'],
+  ['37','相對估值與同業控制','P/E、P/B、EV/Sales、EV/EBITDA 等定義一致，控制成長、風險與獲利差。','peer-relative valuation','planned','已規劃・未執行'],
+  ['38','SOTP／rNPV／資產法','多事業、控股、生技與資產型公司依適用性路由，不強迫全公司套單一模型。','special-route valuation','planned','已規劃・未執行'],
+  ['39','情境、敏感度與基準率','估值矩陣、break-even、模型分歧、reference class 與 outside view。','valuation uncertainty map','planned','已規劃・未執行'],
+  ['40','模型共識與信心','保留各模型位置，使用事前固定的 robust aggregation；分歧提高不確定性。','consensus × uncertainty','planned','已規劃・未執行'],
+  ['41','五星 Ordinal Buckets','固定 24 個月；五星代表相對現價的有利程度，不是上漲機率。','★ ～ ★★★★★','decision','門檻須 PIT 樣本外校準']
+ ]},
+ {id:6,title:'綜合評分、校準與發布',purpose:'把所有證據治理成可重算、可解釋、可版本化的正式分析快照。',gate:'方法 frozen 後通過 lineage、coverage、穩定性、單調性、敏感度與獨立 review。',modules:[
+  ['42','品質 Pillars 定義','財務報酬、現金轉換、財務韌性、商業耐久、治理配置、適應能力。','canonical quality taxonomy','decision','待 Wayne 確認構面'],
+  ['43','Evidence Family 與防重複計分','raw fact × metric lineage、驅動／結果分離、同家族先合成再跨家族合成。','overlap & contribution report','planned','方法已研究・待規格'],
+  ['44','正規化、權重與聚合規則','產業基準、winsorisation、caps、penalties、floors、veto 與 no-rating。','quality score 0–100','decision','權重與門檻待決'],
+  ['45','缺值、Coverage 與 Confidence','not-applicable 改分母；必要資料 unavailable 可降信心、封頂或阻止發布。','coverage/confidence badge','decision','政策待 Wayne 決策'],
+  ['46','PIT 回測與 Champion／Challenger','時間切分、存活者偏誤控制、bucket 單調性、壓力期、簡單 benchmark 與 frozen model。','calibration & validation report','later','正式研究階段'],
+  ['47','不可變 Analysis Snapshot','品質分數、五星、哭臉三分項、信心、reason codes、sources、versions 與 limitations。','auditable rating snapshot','later','規格後實作'],
+  ['48','同業比較與綜合報告','公司品質、投資、經營、求職四視角分開輸出；列出拉高／拉低分數的主要證據。','explainable company report','later','規格後實作'],
+  ['49','治理、Override 與獨立 Review','保留 override 前後、owner、理由、期限；版本生效日與 exact-candidate review。','model registry & release gate','later','發布前完成']
+ ]}
+];
+
+const board=document.getElementById('board');
+function render(){
+ board.innerHTML=waves.map(w=>`<article class="wave" data-wave="${w.id}">
+  <header class="wave-head"><div class="wave-top"><span class="wave-kicker">Wave ${w.id}｜${w.title}</span><span class="wave-count">${w.modules.length} modules</span></div><div class="wave-purpose">${w.purpose}</div></header>
+  <div class="modules">${w.modules.map(m=>`<section class="module" data-status="${m[4]}"><div class="module-id">Module ${m[0]}</div><h2>${m[1]}</h2><p>${m[2]}</p><div class="deliverable"><b>交付物：</b>${m[3]}</div><div class="status ${m[4]}">${m[5]}</div></section>`).join('')}</div>
+  <div class="gate"><b>WAVE GATE</b><span>${w.gate}</span></div>
+ </article>`).join('');
+}
+render();
+
+document.querySelectorAll('[data-filter]').forEach(btn=>btn.addEventListener('click',()=>{
+ document.querySelectorAll('[data-filter]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+ const filter=btn.dataset.filter;
+ document.querySelectorAll('.module').forEach(card=>{
+   const s=card.dataset.status;
+   const show=filter==='all'||(filter==='decision'&&s==='decision')||(filter==='done'&&(s==='done'||s==='confirmed'));
+   card.classList.toggle('hidden',!show);
+ });
+}));
+let compact=false;
+document.getElementById('compact').addEventListener('click',e=>{
+ compact=!compact;e.currentTarget.classList.toggle('active',compact);
+ document.querySelectorAll('.module p,.deliverable').forEach(el=>el.classList.toggle('hidden',compact));
+});
+</script>
+</body>
+</html>

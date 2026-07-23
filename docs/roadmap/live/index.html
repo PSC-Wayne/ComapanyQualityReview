@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Company Quality · Live Roadmap</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23152b4a'/%3E%3Cpath d='M15 44V30m11 14V20m11 24V26m11 18V13' stroke='%2378a9ff' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=20260723-4">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div>
+        <p class="eyebrow">CompanyQualityResearch · Orchestration</p>
+        <h1>動態多 Agent Roadmap</h1>
+        <p class="subtitle">規劃真相、Agent 活動、Review blockers 與 Work-order Waves</p>
+      </div>
+    </div>
+    <div class="top-status">
+      <span id="bridgeBadge" class="badge neutral"><span class="pulse"></span>連線中</span>
+      <span id="g0Badge" class="badge danger">G0 未授權</span>
+      <button id="refreshBtn" class="icon-button" type="button" aria-label="立即刷新">↻</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="notice" aria-label="安全邊界">
+      <div><strong>PLANNING / READ ONLY</strong><span id="safetyMessage">G0 未授權前不啟動 Coding Workers、Git 或 GitHub side effects。</span></div>
+      <span id="updatedAt" class="mono">尚未載入</span>
+    </section>
+
+    <section id="kpis" class="kpi-grid" aria-label="專案摘要"></section>
+
+    <section class="panel stage-panel">
+      <div class="section-head">
+        <div><p class="section-kicker">Gates</p><h2>規劃與執行分層進度</h2></div>
+        <p>100% 規劃不等於 100% 實作；兩者永遠分開。</p>
+      </div>
+      <div id="stageRail" class="stage-rail"></div>
+    </section>
+
+    <section class="split-grid">
+      <article class="panel agent-panel">
+        <div class="section-head">
+          <div><p class="section-kicker">Live workers</p><h2>Agents 現況</h2></div>
+          <div class="segmented" role="group" aria-label="Agent 篩選">
+            <button class="active" data-agent-filter="current">目前綁定</button>
+            <button data-agent-filter="history">含歷史</button>
+          </div>
+        </div>
+        <div id="agentSummary" class="agent-summary"></div>
+        <div id="agents" class="agent-list"></div>
+      </article>
+
+      <article class="panel finding-panel">
+        <div class="section-head">
+          <div><p class="section-kicker danger-text">Review gates</p><h2>現行 Review Blockers</h2></div>
+          <span id="findingCount" class="count-pill">0</span>
+        </div>
+        <div id="findings" class="finding-list"></div>
+      </article>
+    </section>
+
+    <section class="panel roadmap-panel">
+      <div class="section-head roadmap-head">
+        <div><p class="section-kicker">Proposed dependency graph</p><h2 id="roadmapTitle">Work-order Waves</h2></div>
+        <div class="roadmap-controls">
+          <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="搜尋 ticket、Worker、依賴…"></label>
+          <div class="segmented" role="group" aria-label="Roadmap 篩選">
+            <button class="active" data-ticket-filter="all">全部</button>
+            <button data-ticket-filter="attention">待審</button>
+            <button data-ticket-filter="unblocked">無前置票</button>
+          </div>
+        </div>
+      </div>
+      <div class="graph-warning"><strong id="graphState">AWAITING REVIEW</strong><span id="graphNotice">載入 current candidate review state…</span></div>
+      <div id="waveBoard" class="wave-board" aria-label="Work-order waves"></div>
+    </section>
+
+    <section class="panel source-panel">
+      <div class="section-head"><div><p class="section-kicker">Provenance</p><h2>狀態來源</h2></div></div>
+      <div id="sources" class="source-list"></div>
+    </section>
+  </main>
+
+  <aside id="drawer" class="drawer" aria-hidden="true" aria-label="Ticket details">
+    <button id="drawerClose" class="drawer-close" type="button" aria-label="關閉">×</button>
+    <div id="drawerBody"></div>
+  </aside>
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <footer><span>CompanyQualityResearch · read-only planning telemetry</span><span class="mono">query → immutable AnalysisSnapshot → complete report</span></footer>
+  <script src="app.js?v=20260723-4"></script>
+</body>
+</html>

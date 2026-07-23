@@ -1,0 +1,2 @@
+# Markdown research notes intentionally use two trailing spaces for hard line breaks.
+docs/research/*.md whitespace=-blank-at-eol

@@ -1,0 +1,29 @@
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Local agent/control-plane runtime
+.worktrees/
+.scratch/
+.hermes/
+.tmux/
+
+# Generated live-roadmap state
+docs/roadmap/live/data/
+
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

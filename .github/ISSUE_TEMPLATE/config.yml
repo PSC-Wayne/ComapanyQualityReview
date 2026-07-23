@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Owner decision
+    url: https://github.com/smart40333/ComapanyQualityReview/issues/new
+    about: Use only when a bounded work order reaches OWNER_DECISION_NEEDED.
