@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "GoldenPathResult.v1",
+  "title": "GoldenPathResult.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "query",
+    "generation_id",
+    "snapshot_hash",
+    "report_hash",
+    "error_code",
+    "failure_reason",
+    "rating_disposition",
+    "source_version",
+    "formula_version",
+    "model_version",
+    "schema_version",
+    "manifest_version"
+  ],
+  "properties": {
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identifier", "market", "decision_time"],
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
+        "market": {"enum": [null, "TWSE", "TPEx"]},
+        "decision_time": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?\\+08:00$"
+        }
+      }
+    },
+    "generation_id": {"type": ["string", "null"], "format": "uuid"},
+    "snapshot_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "report_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "error_code": {
+      "type": ["string", "null"],
+      "enum": [null, "invalid_decision_time", "identity_ambiguous", "unsupported_scope", "blocked_contract", "generation_mismatch"]
+    },
+    "failure_reason": {"type": ["string", "null"], "minLength": 1},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "source_version": {"type": "string", "minLength": 1},
+    "formula_version": {"type": "string", "minLength": 1},
+    "model_version": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "GoldenPathResult.v1"},
+    "manifest_version": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"error_code": {"type": "null"}}},
+      "then": {
+        "properties": {
+          "generation_id": {"type": "string", "format": "uuid"},
+          "snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "report_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "failure_reason": {"type": "null"}
+        }
+      },
+      "else": {
+        "properties": {
+          "generation_id": {"type": "null"},
+          "snapshot_hash": {"type": "null"},
+          "report_hash": {"type": "null"},
+          "failure_reason": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ]
+}
