@@ -23,9 +23,10 @@ SCHEMA_VERSION = "GoldenPathResult.v1"
 INVALID_TIME_SENTINEL = "1970-01-01T00:00:00+08:00"
 FOUNDATION_ARTIFACTS = MappingProxyType(
     {
-        "validate_json": "tools/validate_json.py",
-        "admission_scan": "tools/admission_scan.py",
-        "ci_workflow": ".github/workflows/ci.yml",
+        "admission_scan_path": "tools/admission_scan.py",
+        "validate_json_path": "tools/validate_json.py",
+        "freeze_package_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json",
+        "freeze_manifest_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json",
     }
 )
 _ERROR_CODES = (
@@ -262,6 +263,9 @@ def run_golden_path(
     generation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, _sha256(generation_seed)))
     sections = MappingProxyType(
         {
+            "golden_path": MappingProxyType(
+                {"status": "complete", "contract_version": SCHEMA_VERSION}
+            ),
             "identity_resolution": MappingProxyType(
                 {"status": "resolved", "route": identity.market}
             ),

@@ -63,7 +63,7 @@ jobs:
           manifest = {
               "assignment_id": "95adf90d-6f4b-4b32-a3e7-7fcf2e7ca3f0",
               "active_binding_generation": 1,
-              "eligibility_generation": 2,
+              "eligibility_generation": 3,
               "ticket_id": "T01",
               "ticket_generation": "R9",
               "authorization": "GO-T01",

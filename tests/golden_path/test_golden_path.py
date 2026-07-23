@@ -21,3 +21,10 @@ def test_controlled_fixture_resolves_identity_into_snapshot_and_report() -> None
     assert result.snapshot.producer_candidate_sha == result.report.producer_candidate_sha == CANDIDATE_SHA
     assert result.report.complete is True
     assert result.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+    assert result.snapshot.sections["golden_path"]["status"] == "complete"
+    assert dict(result.foundation_artifacts) == {
+        "admission_scan_path": "tools/admission_scan.py",
+        "validate_json_path": "tools/validate_json.py",
+        "freeze_package_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json",
+        "freeze_manifest_schema_path": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json",
+    }

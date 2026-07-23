@@ -22,6 +22,12 @@ def test_success_and_failure_envelopes_validate() -> None:
     for query, candidate_sha in cases:
         result = run_golden_path(query, producer_candidate_sha=candidate_sha)
         VALIDATOR.validate(result.contract_dict())
+        assert set(result.contract_dict()["foundation_artifacts"]) == {
+            "admission_scan_path",
+            "validate_json_path",
+            "freeze_package_schema_path",
+            "freeze_manifest_schema_path",
+        }
 
 
 def test_contract_rejects_undeclared_fields() -> None:

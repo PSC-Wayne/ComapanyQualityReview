@@ -129,6 +129,15 @@ def test_valid_and_invalid_calibration_package_fixtures(tmp_path: Path) -> None:
     }
     assert validate(tmp_path, "CalibrationFreezePackage.v1.json", false_total) != 0
 
+    tiny_difference = deepcopy(package())
+    tiny_difference["downside_component_weights"] = {
+        "maximum_drawdown_vulnerability": 0.3,
+        "permanent_capital_loss_vulnerability": 0.3,
+        "material_adverse_event_vulnerability": 0.3999999999995,
+        "sum": 1,
+    }
+    assert validate(tmp_path, "CalibrationFreezePackage.v1.json", tiny_difference) != 0
+
 
 def test_validator_rejects_non_json_numbers_and_duplicate_thresholds(tmp_path: Path) -> None:
     duplicate = deepcopy(package())
@@ -161,6 +170,12 @@ def test_conditional_approve_requires_thresholds_and_both_passes(tmp_path: Path)
     missing_review = manifest("approve")
     missing_review["independent_review_ack"] = f"EVIDENCE:PASS:{SHA}"
     assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", missing_review) != 0
+
+    mismatched_package = manifest("approve")
+    mismatched_package["independent_review_ack"] = (
+        f"EVIDENCE:PASS:{'b' * 64};SEMANTICS:PASS:{SHA};WAYNE:APPROVE:{SHA}"
+    )
+    assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", mismatched_package) != 0
 
     false_total = manifest("approve")
     false_total["downside_component_weights"] = {

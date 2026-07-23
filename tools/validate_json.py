@@ -6,21 +6,29 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
+from decimal import Decimal
 from pathlib import Path
-from typing import cast
+
 
 from jsonschema import Draft202012Validator, FormatChecker, validators
 from jsonschema.exceptions import SchemaError, ValidationError
+
+
+def _finite_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float, Decimal))
+        and not isinstance(value, bool)
+        and (value.is_finite() if isinstance(value, Decimal) else math.isfinite(value))
+    )
 
 
 def _strictly_ascending(validator: object, enabled: bool, instance: object, schema: object):
     if not enabled or not isinstance(instance, list):
         return
     if not all(
-        isinstance(item, (int, float))
-        and not isinstance(item, bool)
-        and math.isfinite(item)
+        _finite_number(item)
         for item in instance
     ):
         return
@@ -37,22 +45,39 @@ def _sum_equals(validator: object, rule: object, instance: object, schema: objec
         return
     values = [instance.get(name) for name in names]
     if not all(
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
+        _finite_number(value)
         for value in values
     ):
         return
-    numeric_values = [float(cast(int | float, value)) for value in values]
-    if not math.isclose(
-        math.fsum(numeric_values), float(expected), rel_tol=0.0, abs_tol=1e-12
-    ):
+    numeric_values = [Decimal(str(value)) for value in values]
+    if sum(numeric_values, Decimal(0)) != Decimal(str(expected)):
         yield ValidationError(f"fields {names} must sum to {expected}")
+
+
+def _approve_hash_bindings(
+    validator: object, enabled: bool, instance: object, schema: object
+):
+    if not enabled or not isinstance(instance, dict) or instance.get("decision") != "approve":
+        return
+    ack = instance.get("independent_review_ack")
+    package_hash = instance.get("evidence_package_sha256")
+    if not isinstance(ack, str) or not isinstance(package_hash, str):
+        return
+    match = re.fullmatch(
+        r"EVIDENCE:PASS:([0-9a-f]{64});SEMANTICS:PASS:([0-9a-f]{64});WAYNE:APPROVE:([0-9a-f]{64})",
+        ack,
+    )
+    if match is not None and any(value != package_hash for value in match.groups()):
+        yield ValidationError("all APPROVE acknowledgements must bind evidence_package_sha256")
 
 
 ContractValidator = validators.extend(
     Draft202012Validator,
-    {"x-strictlyAscending": _strictly_ascending, "x-sumEquals": _sum_equals},
+    {
+        "x-strictlyAscending": _strictly_ascending,
+        "x-sumEquals": _sum_equals,
+        "x-approveHashBindings": _approve_hash_bindings,
+    },
 )
 
 
@@ -72,10 +97,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         schema = json.loads(
-            args.schema.read_text(encoding="utf-8"), parse_constant=_reject_non_json_number
+            args.schema.read_text(encoding="utf-8"),
+            parse_float=Decimal,
+            parse_constant=_reject_non_json_number,
         )
         instance = json.loads(
-            args.input.read_text(encoding="utf-8"), parse_constant=_reject_non_json_number
+            args.input.read_text(encoding="utf-8"),
+            parse_float=Decimal,
+            parse_constant=_reject_non_json_number,
         )
         ContractValidator.check_schema(schema)
     except (OSError, ValueError, SchemaError) as exc:

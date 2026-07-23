@@ -47,11 +47,12 @@
     "foundation_artifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["validate_json", "admission_scan", "ci_workflow"],
+      "required": ["admission_scan_path", "validate_json_path", "freeze_package_schema_path", "freeze_manifest_schema_path"],
       "properties": {
-        "validate_json": {"const": "tools/validate_json.py"},
-        "admission_scan": {"const": "tools/admission_scan.py"},
-        "ci_workflow": {"const": ".github/workflows/ci.yml"}
+        "admission_scan_path": {"const": "tools/admission_scan.py"},
+        "validate_json_path": {"const": "tools/validate_json.py"},
+        "freeze_package_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json"},
+        "freeze_manifest_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json"}
       }
     },
     "contract_coverage": {"type": "number", "minimum": 0, "maximum": 1},

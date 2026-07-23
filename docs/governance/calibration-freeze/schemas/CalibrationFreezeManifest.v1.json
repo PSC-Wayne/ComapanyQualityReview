@@ -3,6 +3,7 @@
   "$id": "CalibrationFreezeManifest.v1",
   "title": "CalibrationFreezeManifest.v1",
   "type": "object",
+  "x-approveHashBindings": true,
   "additionalProperties": false,
   "required": ["decision_id", "evidence_package_sha256", "validation_report_sha256", "approved_policy_version", "approved_thresholds", "decision", "decided_by", "decided_at", "independent_review_ack", "pillar_weights", "downside_component_weights", "anti_double_count_policy_version", "evidence_family_policy_scope", "evidence_family_policy_locator", "evidence_family_policy_canonicalization", "evidence_family_policy_sha256", "expiry", "evidence_package_coverage", "rating_disposition"],
   "properties": {

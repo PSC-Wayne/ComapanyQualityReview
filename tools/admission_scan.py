@@ -15,6 +15,9 @@ from typing import Any
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
     ("GitHub token", re.compile(rb"gh[pousr]_[A-Za-z0-9]{36,255}")),
@@ -113,7 +116,7 @@ def _secret_findings(
 
 
 def _parse_time(value: object, field: str) -> datetime:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or _RFC3339.fullmatch(value) is None:
         raise ValueError(f"{field} must be RFC3339")
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -168,13 +171,16 @@ def _validate_manifest(manifest: dict[str, Any], root: Path, candidate: str) -> 
     head = str(_git("rev-parse", "HEAD")).strip()
     if resolved != candidate or head != candidate:
         raise ValueError("candidate must be exact current HEAD")
+    if str(_git("status", "--porcelain=v1")).strip():
+        raise ValueError("candidate worktree must be clean")
     return str(manifest["parent_sha"])
 
 
-def _verify_authorities(manifest: dict[str, Any], root: Path) -> None:
+def _verify_authorities(manifest: dict[str, Any], candidate: str) -> None:
     for field, relative in _AUTHORITY_FILES.items():
-        path = root / relative
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        blob = _git("show", f"{candidate}:{relative}", binary=True)
+        assert isinstance(blob, bytes)
+        digest = hashlib.sha256(blob).hexdigest()
         if digest != manifest[field]:
             raise ValueError(f"authority hash mismatch: {field}")
 
@@ -194,8 +200,8 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(manifest, dict):
             raise ValueError("manifest root must be an object")
         parent = _validate_manifest(manifest, root, args.candidate)
-        _verify_authorities(manifest, root)
-        raw_paths = _git("diff", "--name-only", "-z", "--diff-filter=ACMRT", parent, args.candidate, binary=True)
+        _verify_authorities(manifest, args.candidate)
+        raw_paths = _git("diff", "--name-only", "-z", "--diff-filter=ACMRTD", parent, args.candidate, binary=True)
         assert isinstance(raw_paths, bytes)
         paths = [item.decode("utf-8") for item in raw_paths.split(b"\0") if item]
         if not paths:
@@ -206,9 +212,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError(f"unowned paths: {unowned}")
         blobs: dict[str, bytes] = {}
         for path in paths:
-            mode = str(_git("ls-tree", args.candidate, "--", path)).split(maxsplit=1)[0]
-            if mode == "120000":
-                raise ValueError(f"symlink candidate path: {path}")
+            tree_entry = str(_git("ls-tree", args.candidate, "--", path)).strip()
+            if not tree_entry:
+                continue
+            mode = tree_entry.split(maxsplit=1)[0]
+            if mode not in {"100644", "100755"}:
+                raise ValueError(f"disallowed Git mode {mode}: {path}")
             live = root / path
             if _has_symlink_component(live, root):
                 raise ValueError(f"symlink path component: {path}")
