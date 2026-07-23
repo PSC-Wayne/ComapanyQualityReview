@@ -40,7 +40,8 @@
     "deleg_fd32550c",
     "deleg_a05d5434",
     "deleg_c99a1608",
-    "deleg_7aa01ac6"
+    "deleg_7aa01ac6",
+    "deleg_f4981241"
   ],
   "waves": [
     {
@@ -355,6 +356,12 @@
       "current": true,
       "pm_state": "verified_pass",
       "binding": "candidate:5cdc9a7b17e85c7c1f71e40691cf613ba582dc6e"
+    },
+    "deleg_f4981241": {
+      "phase": "E0 Roadmap Review R1 · DUAL NOT_APPROVED",
+      "current": false,
+      "pm_state": "review_findings",
+      "binding": "candidate:938cb4ff95ae579bc075ca94a324d450198414a6"
     }
   },
   "issue_dir": "/mnt/d/Claude_Code/Hermes/CompanyQualityResearch/docs/work-orders/r9",
