@@ -39,3 +39,4 @@ python3 collector.py
 - A Worker/Reviewer final is not automatically an integrated completion.
 - Ticket planning progress and implementation progress are intentionally separate.
 - Update `delegation_registry` when a new exact-hash review supersedes an older result.
+- `control_plane` exposes the current E0 stage, status, predecessor and exact active reviewers; product `g0_authorized` remains a separate owner gate.
