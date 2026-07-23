@@ -5,9 +5,12 @@ Status: E0 bootstrap only; product implementation is not authorized.
 ## Repository authority
 
 - Public GitHub Organization repository: `PSC-Wayne/ComapanyQualityReview`.
+- Active ruleset: `protected-main-merge-queue` (`19625505`), with no bypass actors.
 - Protected `main` is authoritative.
 - Required planning-integrity check: `E0 governance / verify`.
 - Merge queue serializes integration.
+- Integration GitHub App: `psc-wayne-cqr-integrator` (`4375855`), installation `148525506`, selected repository only.
+- Machine-readable verification evidence: `docs/governance/e0-evidence.json`.
 - A dedicated least-privilege Integration GitHub App may enqueue eligible PRs; it cannot bypass protection or direct-merge.
 
 ## Identity and permissions
