@@ -1,8 +1,12 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
-from company_quality.runtime import GoldenPathQuery, run_golden_path
+from company_quality.runtime import (
+    GoldenPathQuery,
+    run_golden_path,
+    validate_same_generation,
+)
 
 CANDIDATE_SHA = "1" * 40
 
@@ -13,11 +17,10 @@ CANDIDATE_SHA = "1" * 40
         ("ACME", None, "2026-07-23T14:30:00+08:00", "identity_ambiguous"),
         ("2330", "TWSE", "2026-07-23T14:30:00", "invalid_decision_time"),
         ("2330", "NYSE", "2026-07-23T14:30:00+08:00", "unsupported_scope"),
-        ("BLOCKED", "TWSE", "2026-07-23T14:30:00+08:00", "blocked_contract"),
-        ("MISMATCH", "TWSE", "2026-07-23T14:30:00+08:00", "generation_mismatch"),
+        ("UNKNOWN", "TWSE", "2026-07-23T14:30:00+08:00", "unsupported_scope"),
     ],
 )
-def test_controlled_failures_are_explicit(
+def test_controlled_failures_do_not_create_snapshot_or_report(
     identifier: str, market: str | None, decision_time: str, error_code: str
 ) -> None:
     result = run_golden_path(
@@ -27,8 +30,24 @@ def test_controlled_failures_are_explicit(
 
     assert result.error_code == error_code
     assert result.failure_reason
-    assert result.report.complete is True
-    assert result.report.generation_id == result.snapshot.generation_id
+    assert result.generation_id is None
+    assert result.snapshot_hash is None
+    assert result.report_hash is None
+    assert result.snapshot is None
+    assert result.report is None
+
+
+@pytest.mark.parametrize(
+    "decision_time",
+    ["20260723T143000+08:00", "2026-W30-4T14:30:00+08:00", "2026-07-23"],
+)
+def test_non_rfc3339_times_fail_closed(decision_time: str) -> None:
+    result = run_golden_path(
+        GoldenPathQuery("2330", "TWSE", decision_time),
+        producer_candidate_sha=CANDIDATE_SHA,
+    )
+    assert result.error_code == "invalid_decision_time"
+    assert result.snapshot is None and result.report is None
 
 
 def test_rerun_is_semantically_deterministic_and_same_generation() -> None:
@@ -41,34 +60,30 @@ def test_rerun_is_semantically_deterministic_and_same_generation() -> None:
     assert first.report == second.report
     assert first.snapshot_hash == second.snapshot_hash
     assert first.report_hash == second.report_hash
-    assert first.snapshot.manifest_version == first.report.manifest_version
-    assert first.snapshot.model_version == first.report.model_version
-    assert first.snapshot.decision_time == first.report.decision_time
 
 
-def test_producer_candidate_changes_generation() -> None:
-    query = GoldenPathQuery("2330", "TWSE", "2026-07-23T14:30:00+08:00")
-
-    first = run_golden_path(query, producer_candidate_sha="1" * 40)
-    second = run_golden_path(query, producer_candidate_sha="2" * 40)
-
-    assert first.generation_id != second.generation_id
-    assert first.snapshot_hash != second.snapshot_hash
-    assert first.report_hash != second.report_hash
-
-
-def test_missing_producer_candidate_blocks_contract() -> None:
-    result = run_golden_path(
-        GoldenPathQuery("2330", "TWSE", "2026-07-23T14:30:00+08:00"),
-        producer_candidate_sha=None,
-    )
+def test_missing_producer_candidate_blocks_without_artifacts() -> None:
+    result = run_golden_path(GoldenPathQuery("2330", "TWSE", "2026-07-23T14:30:00+08:00"))
 
     assert result.error_code == "blocked_contract"
-    assert result.failure_reason == (
-        "producer_candidate_sha must be a full 40-character lowercase Git SHA"
+    assert result.producer_candidate_sha is None
+    assert result.generation_id is None
+    assert result.snapshot is None and result.report is None
+
+
+def test_same_generation_validator_detects_actual_seam_mismatches() -> None:
+    result = run_golden_path(
+        GoldenPathQuery("2330", "TWSE", "2026-07-23T14:30:00+08:00"),
+        producer_candidate_sha=CANDIDATE_SHA,
     )
-    assert result.producer_candidate_sha == "0" * 40
-    assert result.snapshot.producer_candidate_sha == result.report.producer_candidate_sha
+    assert result.snapshot is not None and result.report is not None
+    assert validate_same_generation(result.snapshot, result.report, result.report_hash) is None
+    assert validate_same_generation(
+        result.snapshot,
+        replace(result.report, generation_id="00000000-0000-0000-0000-000000000000"),
+        result.report_hash,
+    ) == "generation_mismatch"
+    assert validate_same_generation(result.snapshot, result.report, "0" * 64) == "blocked_contract"
 
 
 def test_snapshot_and_nested_sections_are_immutable() -> None:
@@ -76,7 +91,7 @@ def test_snapshot_and_nested_sections_are_immutable() -> None:
         GoldenPathQuery("2330", "TWSE", "2026-07-23T14:30:00+08:00"),
         producer_candidate_sha=CANDIDATE_SHA,
     )
-
+    assert result.snapshot is not None and result.report is not None
     with pytest.raises(FrozenInstanceError):
         result.snapshot.generation_id = "changed"  # type: ignore[misc]
     with pytest.raises(TypeError):

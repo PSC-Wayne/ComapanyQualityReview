@@ -1,76 +1,182 @@
 #!/usr/bin/env python3
-"""Fail-closed candidate admission for assignment-owned Git changes."""
+"""Fail-closed admission scan for one exact T01 Git candidate."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA64 = re.compile(r"^[0-9a-f]{64}$")
+_SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
+    ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+    ("GitHub token", re.compile(rb"gh[pousr]_[A-Za-z0-9]{36,255}")),
+    ("AWS access key", re.compile(rb"(?:AKIA|ASIA)[A-Z0-9]{16}")),
+    ("assigned secret", re.compile(rb"(?i)(?:password|passwd|secret|api[_-]?key|token)\s*[:=]\s*['\"][^'\"\r\n]{8,}['\"]")),
+)
+_SECRET_NAMES = re.compile(
+    r"(?i)(?:^|/)(?:\.env(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)|[^/]*\.(?:pem|key|p12|pfx|jks|keystore))$"
+)
+_REQUIRED_MANIFEST = {
+    "assignment_id",
+    "active_binding_generation",
+    "eligibility_generation",
+    "ticket_id",
+    "ticket_generation",
+    "authorization",
+    "issued_at",
+    "lease_expires_at",
+    "review_deadline_at",
+    "repository",
+    "parent_sha",
+    "branch",
+    "worktree",
+    "owned_paths",
+    "spec_sha",
+    "decision_map_sha",
+    "delivery_plan_sha",
+    "work_order_sha",
+    "ticket_set_digest",
+    "network_allowed",
+    "product_scope",
+    "stop_after_ticket",
+}
+_AUTHORITY_FILES = {
+    "spec_sha": "docs/specs/company-quality-product-spec.md",
+    "decision_map_sha": "docs/planning/company-quality-decision-map.md",
+    "delivery_plan_sha": "docs/planning/company-quality-multi-agent-delivery-plan.md",
+    "work_order_sha": "docs/work-orders/r9/01-golden-path.md",
+}
 
-def _git(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args], cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+
+def _git(*args: str, binary: bool = False) -> str | bytes:
+    return subprocess.check_output(
+        ["git", *args], stderr=subprocess.STDOUT, text=not binary
     )
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.strip() or "git command failed")
-    return completed.stdout
 
 
-def _owned(path: str, owned_paths: list[str]) -> bool:
-    normalized = PurePosixPath(path).as_posix()
-    for owned in owned_paths:
-        owned_normalized = PurePosixPath(owned).as_posix()
-        if owned.endswith("/") and normalized.startswith(owned_normalized.rstrip("/") + "/"):
-            return True
-        if normalized == owned_normalized:
+def _is_exact_sha(value: object) -> bool:
+    return isinstance(value, str) and _SHA40.fullmatch(value) is not None
+
+
+def _manifest_owned_entry(entry: str, root: Path) -> tuple[str, bool] | None:
+    directory = entry.endswith("/")
+    raw = Path(entry.rstrip("/"))
+    if raw.is_absolute():
+        try:
+            raw = raw.relative_to(root)
+        except ValueError:
+            return None
+    normalized = PurePosixPath(raw.as_posix()).as_posix()
+    if normalized in ("", ".") or normalized == ".." or normalized.startswith("../"):
+        return None
+    return normalized, directory
+
+
+def _owned(path: str, owned_paths: list[str], root: Path) -> bool:
+    candidate = PurePosixPath(path).as_posix()
+    for entry in owned_paths:
+        normalized = _manifest_owned_entry(entry, root)
+        if normalized is None:
+            continue
+        authority, directory = normalized
+        if candidate == authority or (directory and candidate.startswith(authority + "/")):
             return True
     return False
 
 
-def _secret_findings(diff: str, changed_paths: list[str]) -> list[str]:
-    findings: list[str] = []
-    forbidden_names = re.compile(r"(^|/)(?:\.env(?:\..*)?|id_(?:rsa|ed25519))$|\.(?:pem|p12|pfx|key)$", re.I)
+def _secret_findings(
+    patch: bytes, changed_paths: list[str], blobs: dict[str, bytes]
+) -> list[str]:
+    findings: set[str] = set()
     for path in changed_paths:
-        if forbidden_names.search(path):
-            findings.append(f"secret-like filename: {path}")
-
-    begin_private_key = "-----" + "BEGIN " + "PRIVATE KEY-----"
-    patterns = [
-        ("private-key material", re.compile(re.escape(begin_private_key))),
-        ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
-        ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}")),
-        (
-            "assigned secret",
-            re.compile(r"(?i)(?:password|passwd|api[_-]?key|secret|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]"),
-        ),
-    ]
-    added_lines = [
+        if _SECRET_NAMES.search(path):
+            findings.add(f"secret filename: {path}")
+    added = b"\n".join(
         line[1:]
-        for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    ]
-    for number, line in enumerate(added_lines, start=1):
-        for label, pattern in patterns:
-            if pattern.search(line):
-                findings.append(f"{label} in added line {number}")
-    return sorted(set(findings))
+        for line in patch.splitlines()
+        if line.startswith(b"+") and not line.startswith(b"+++")
+    )
+    surfaces = [("added diff", added), *[(f"blob {path}", data) for path, data in blobs.items()]]
+    for label, surface in surfaces:
+        for name, pattern in _SECRET_PATTERNS:
+            if pattern.search(surface):
+                findings.add(f"{name} in {label}")
+    return sorted(findings)
 
 
-def _load_manifest(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    required = {"parent_sha", "worktree", "owned_paths"}
-    if not isinstance(value, dict) or not required.issubset(value):
-        raise ValueError("manifest is missing parent_sha, worktree, or owned_paths")
-    if not isinstance(value["owned_paths"], list) or not all(
-        isinstance(item, str) and item for item in value["owned_paths"]
-    ):
-        raise ValueError("manifest owned_paths must be a non-empty string list")
-    return value
+def _parse_time(value: object, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be RFC3339")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return parsed
+
+
+def _has_symlink_component(path: Path, stop: Path) -> bool:
+    current = path
+    while current != stop:
+        if current.is_symlink():
+            return True
+        if stop not in current.parents:
+            return True
+        current = current.parent
+    return stop.is_symlink()
+
+
+def _validate_manifest(manifest: dict[str, Any], root: Path, candidate: str) -> str:
+    missing = sorted(_REQUIRED_MANIFEST - manifest.keys())
+    if missing:
+        raise ValueError(f"manifest missing fields: {missing}")
+    if manifest["ticket_id"] != "T01" or manifest["authorization"] != "GO-T01":
+        raise ValueError("manifest ticket/authorization mismatch")
+    if manifest["network_allowed"] is not False or manifest["product_scope"] != "T01_ONLY":
+        raise ValueError("manifest scope is not T01 fail-closed")
+    if manifest["stop_after_ticket"] is not True:
+        raise ValueError("manifest stop_after_ticket must be true")
+    if not _is_exact_sha(manifest["parent_sha"]):
+        raise ValueError("manifest parent_sha must be exact")
+    for field in ("spec_sha", "decision_map_sha", "delivery_plan_sha", "work_order_sha", "ticket_set_digest"):
+        if not isinstance(manifest[field], str) or _SHA64.fullmatch(manifest[field]) is None:
+            raise ValueError(f"manifest {field} must be SHA-256")
+    if not isinstance(manifest["owned_paths"], list) or not manifest["owned_paths"]:
+        raise ValueError("manifest owned_paths must be non-empty")
+    if any(_manifest_owned_entry(str(entry), root) is None for entry in manifest["owned_paths"]):
+        raise ValueError("manifest contains owned path outside worktree")
+    manifest_root = Path(manifest["worktree"])
+    if manifest_root.resolve() != root or _has_symlink_component(manifest_root, manifest_root.anchor and Path(manifest_root.anchor) or root):
+        raise ValueError("manifest worktree mismatch or symlink")
+    branch = str(_git("branch", "--show-current")).strip() or "DETACHED"
+    if manifest["branch"] != branch:
+        raise ValueError(f"manifest branch mismatch: expected {manifest['branch']} actual {branch}")
+    now = datetime.now().astimezone()
+    if _parse_time(manifest["issued_at"], "issued_at") > now:
+        raise ValueError("manifest issued_at is in the future")
+    if now >= _parse_time(manifest["lease_expires_at"], "lease_expires_at"):
+        raise ValueError("manifest lease expired")
+    if now >= _parse_time(manifest["review_deadline_at"], "review_deadline_at"):
+        raise ValueError("manifest review deadline expired")
+    resolved = str(_git("rev-parse", "--verify", f"{candidate}^{{commit}}")).strip()
+    head = str(_git("rev-parse", "HEAD")).strip()
+    if resolved != candidate or head != candidate:
+        raise ValueError("candidate must be exact current HEAD")
+    return str(manifest["parent_sha"])
+
+
+def _verify_authorities(manifest: dict[str, Any], root: Path) -> None:
+    for field, relative in _AUTHORITY_FILES.items():
+        path = root / relative
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != manifest[field]:
+            raise ValueError(f"authority hash mismatch: {field}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -80,39 +186,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--forbid-secrets", action="store_true")
     parser.add_argument("--forbid-unowned", action="store_true")
     args = parser.parse_args(argv)
-
-    if not args.forbid_secrets or not args.forbid_unowned:
-        print("ADMISSION_FAIL both --forbid-secrets and --forbid-unowned are required", file=sys.stderr)
-        return 2
-
     try:
-        manifest = _load_manifest(args.manifest)
-        root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()).resolve()
-        expected_root = Path(manifest["worktree"]).resolve()
-        if root != expected_root:
-            raise ValueError(f"worktree mismatch: expected {expected_root}, got {root}")
-        parent = str(manifest["parent_sha"])
-        candidate = _git(root, "rev-parse", "--verify", f"{args.candidate}^{{commit}}").strip()
-        resolved_parent = _git(root, "rev-parse", "--verify", f"{parent}^{{commit}}").strip()
-        _git(root, "merge-base", "--is-ancestor", resolved_parent, candidate)
-        changed_paths = sorted(
-            path for path in _git(root, "diff", "--name-only", resolved_parent, candidate).splitlines() if path
-        )
-        if not changed_paths:
+        if not _is_exact_sha(args.candidate):
+            raise ValueError("--candidate must be a full 40-character lowercase Git SHA")
+        root = Path.cwd().resolve()
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest root must be an object")
+        parent = _validate_manifest(manifest, root, args.candidate)
+        _verify_authorities(manifest, root)
+        raw_paths = _git("diff", "--name-only", "-z", "--diff-filter=ACMRT", parent, args.candidate, binary=True)
+        assert isinstance(raw_paths, bytes)
+        paths = [item.decode("utf-8") for item in raw_paths.split(b"\0") if item]
+        if not paths:
             raise ValueError("candidate diff is empty")
-        unowned = [path for path in changed_paths if not _owned(path, manifest["owned_paths"])]
-        if unowned:
-            raise ValueError("unowned paths: " + ", ".join(unowned))
-        patch = _git(root, "diff", "--no-ext-diff", "--unified=0", resolved_parent, candidate)
-        secret_findings = _secret_findings(patch, changed_paths)
-        if secret_findings:
-            raise ValueError("secret admission findings: " + "; ".join(secret_findings))
-    except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
+        if args.forbid_unowned:
+            unowned = [path for path in paths if not _owned(path, manifest["owned_paths"], root)]
+            if unowned:
+                raise ValueError(f"unowned paths: {unowned}")
+        blobs: dict[str, bytes] = {}
+        for path in paths:
+            mode = str(_git("ls-tree", args.candidate, "--", path)).split(maxsplit=1)[0]
+            if mode == "120000":
+                raise ValueError(f"symlink candidate path: {path}")
+            live = root / path
+            if _has_symlink_component(live, root):
+                raise ValueError(f"symlink path component: {path}")
+            blob = _git("show", f"{args.candidate}:{path}", binary=True)
+            assert isinstance(blob, bytes)
+            blobs[path] = blob
+        if args.forbid_secrets:
+            patch = _git("diff", "--binary", parent, args.candidate, binary=True)
+            assert isinstance(patch, bytes)
+            findings = _secret_findings(patch, paths, blobs)
+            if findings:
+                raise ValueError(f"secret admission findings: {findings}")
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"ADMISSION_FAIL {exc}", file=sys.stderr)
         return 1
-
     print(
-        f"ADMISSION_PASS parent={resolved_parent} candidate={candidate} paths={len(changed_paths)} secrets=clear owned=clear"
+        f"ADMISSION_PASS parent={parent} candidate={args.candidate} "
+        f"paths={len(paths)} secrets=clear owned=clear"
     )
     return 0
 

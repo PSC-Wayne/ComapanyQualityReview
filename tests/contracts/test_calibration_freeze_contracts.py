@@ -86,7 +86,9 @@ def manifest(decision: str = "hold") -> dict[str, object]:
         "decided_by": "Wayne",
         "decided_at": "2026-07-24T05:00:00+08:00",
         "independent_review_ack": (
-            "EVIDENCE:PASS;SEMANTICS:PASS" if approved else "reviews pending"
+            f"EVIDENCE:PASS:{SHA};SEMANTICS:PASS:{SHA};WAYNE:APPROVE:{SHA}"
+            if approved
+            else "reviews pending"
         ),
         "pillar_weights": pillar_weights(),
         "downside_component_weights": downside_weights(),
@@ -118,6 +120,28 @@ def test_valid_and_invalid_calibration_package_fixtures(tmp_path: Path) -> None:
     unsorted["candidate_ranges"]["quality_bands"] = [40, 20]  # type: ignore[index]
     assert validate(tmp_path, "CalibrationFreezePackage.v1.json", unsorted) != 0
 
+    false_total = deepcopy(package())
+    false_total["downside_component_weights"] = {
+        "maximum_drawdown_vulnerability": 0.25,
+        "permanent_capital_loss_vulnerability": 0.25,
+        "material_adverse_event_vulnerability": 0.25,
+        "sum": 1,
+    }
+    assert validate(tmp_path, "CalibrationFreezePackage.v1.json", false_total) != 0
+
+
+def test_validator_rejects_non_json_numbers_and_duplicate_thresholds(tmp_path: Path) -> None:
+    duplicate = deepcopy(package())
+    duplicate["candidate_ranges"]["quality_bands"] = [20, 20]  # type: ignore[index]
+    assert validate(tmp_path, "CalibrationFreezePackage.v1.json", duplicate) != 0
+
+    raw = tmp_path / "nan.json"
+    raw.write_text(json.dumps(package()).replace('"auc": 0.8', '"auc": NaN'), encoding="utf-8")
+    assert main([
+        "--schema", str(SCHEMA_DIR / "CalibrationFreezePackage.v1.json"),
+        "--input", str(raw),
+    ]) != 0
+
 
 def test_hold_manifest_requires_explicit_null_approval_fields(tmp_path: Path) -> None:
     assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", manifest("hold")) == 0
@@ -135,5 +159,14 @@ def test_conditional_approve_requires_thresholds_and_both_passes(tmp_path: Path)
     assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", missing_thresholds) != 0
 
     missing_review = manifest("approve")
-    missing_review["independent_review_ack"] = "EVIDENCE:PASS"
+    missing_review["independent_review_ack"] = f"EVIDENCE:PASS:{SHA}"
     assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", missing_review) != 0
+
+    false_total = manifest("approve")
+    false_total["downside_component_weights"] = {
+        "maximum_drawdown_vulnerability": 0.25,
+        "permanent_capital_loss_vulnerability": 0.25,
+        "material_adverse_event_vulnerability": 0.25,
+        "sum": 1,
+    }
+    assert validate(tmp_path, "CalibrationFreezeManifest.v1.json", false_total) != 0

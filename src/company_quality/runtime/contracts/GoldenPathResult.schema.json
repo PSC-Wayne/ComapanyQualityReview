@@ -28,17 +28,17 @@
       "required": ["identifier", "market", "decision_time"],
       "properties": {
         "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
-        "market": {"type": ["string", "null"], "enum": [null, "TWSE", "TPEx"]},
+        "market": {"enum": [null, "TWSE", "TPEx"]},
         "decision_time": {
           "type": "string",
           "format": "date-time",
-          "pattern": "T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?\\+08:00$"
         }
       }
     },
-    "generation_id": {"type": "string", "format": "uuid"},
-    "snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "report_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "generation_id": {"type": ["string", "null"], "format": "uuid"},
+    "snapshot_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "report_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
     "error_code": {
       "type": ["string", "null"],
       "enum": [null, "invalid_decision_time", "identity_ambiguous", "unsupported_scope", "blocked_contract", "generation_mismatch"]
@@ -47,12 +47,11 @@
     "foundation_artifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["admission_scan_path", "validate_json_path", "freeze_package_schema_path", "freeze_manifest_schema_path"],
+      "required": ["validate_json", "admission_scan", "ci_workflow"],
       "properties": {
-        "admission_scan_path": {"const": "tools/admission_scan.py"},
-        "validate_json_path": {"const": "tools/validate_json.py"},
-        "freeze_package_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json"},
-        "freeze_manifest_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json"}
+        "validate_json": {"const": "tools/validate_json.py"},
+        "admission_scan": {"const": "tools/admission_scan.py"},
+        "ci_workflow": {"const": ".github/workflows/ci.yml"}
       }
     },
     "contract_coverage": {"type": "number", "minimum": 0, "maximum": 1},
@@ -62,13 +61,30 @@
     "model_version": {"type": "string", "minLength": 1},
     "schema_version": {"const": "GoldenPathResult.v1"},
     "manifest_version": {"type": "string", "minLength": 1},
-    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+    "producer_candidate_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"}
   },
   "allOf": [
     {
       "if": {"properties": {"error_code": {"type": "null"}}},
-      "then": {"properties": {"failure_reason": {"type": "null"}}},
-      "else": {"properties": {"failure_reason": {"type": "string", "minLength": 1}}}
+      "then": {
+        "properties": {
+          "generation_id": {"type": "string", "format": "uuid"},
+          "snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "report_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "failure_reason": {"type": "null"},
+          "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "contract_coverage": {"const": 1}
+        }
+      },
+      "else": {
+        "properties": {
+          "generation_id": {"type": "null"},
+          "snapshot_hash": {"type": "null"},
+          "report_hash": {"type": "null"},
+          "failure_reason": {"type": "string", "minLength": 1},
+          "contract_coverage": {"const": 0}
+        }
+      }
     }
   ]
 }

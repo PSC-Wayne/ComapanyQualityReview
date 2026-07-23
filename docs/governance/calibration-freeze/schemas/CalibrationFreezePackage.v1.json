@@ -72,7 +72,7 @@
       "properties": {"audit_reliability": {"const": 0.1}, "earnings_capital_efficiency": {"const": 0.25}, "cash_balance_allocation": {"const": 0.25}, "business_moat": {"const": 0.25}, "governance": {"const": 0.05}, "people_adaptability": {"const": 0.1}, "sum": {"const": 1}}
     },
     "downside_weights": {
-      "type": "object", "additionalProperties": false, "required": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability", "sum"],
+      "type": "object", "additionalProperties": false, "x-sumEquals": {"fields": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability"], "value": 1}, "required": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability", "sum"],
       "properties": {"maximum_drawdown_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "permanent_capital_loss_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "material_adverse_event_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "sum": {"const": 1}}
     }
   }
