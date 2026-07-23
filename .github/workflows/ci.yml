@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  t01-golden-path:
+    name: T01 golden path
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Unit and contract suite
+        run: python -m pytest -q tests/contracts tests/golden_path
+      - name: Primary golden path seam
+        run: python -m pytest -q tests/golden_path
+      - name: Admission secret and ownership scanner tests
+        run: python -m pytest -q tests/contracts/test_admission_scan.py
+      - name: Compile mutation-free runtime
+        run: python -m compileall -q src tools

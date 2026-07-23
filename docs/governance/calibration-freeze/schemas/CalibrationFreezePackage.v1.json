@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "CalibrationFreezePackage.v1",
+  "title": "CalibrationFreezePackage.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision_package_id", "active_binding_generation", "eligibility_generation", "validation_report_sha256", "candidate_policy_sha256", "ticket_set_digest", "frozen_spec_sha256", "decision_map_sha256", "delivery_plan_sha256", "candidate_ranges", "pillar_weights", "downside_component_weights", "anti_double_count_policy_version", "evidence_family_policy_scope", "evidence_family_policy_locator", "evidence_family_policy_canonicalization", "evidence_family_policy_sha256", "metrics", "calibration_curves", "leakage_checks", "evidence_package_coverage", "rating_disposition", "review_deadline_at"],
+  "properties": {
+    "decision_package_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "active_binding_generation": {"type": "integer", "minimum": 0},
+    "eligibility_generation": {"type": "integer", "minimum": 0},
+    "validation_report_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "ticket_set_digest": {"$ref": "#/$defs/sha256"},
+    "frozen_spec_sha256": {"$ref": "#/$defs/sha256"},
+    "decision_map_sha256": {"$ref": "#/$defs/sha256"},
+    "delivery_plan_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_ranges": {"$ref": "#/$defs/thresholds"},
+    "pillar_weights": {"$ref": "#/$defs/pillar_weights"},
+    "downside_component_weights": {"$ref": "#/$defs/downside_weights"},
+    "anti_double_count_policy_version": {"$ref": "#/$defs/semver"},
+    "evidence_family_policy_scope": {"const": "quality_and_downside"},
+    "evidence_family_policy_locator": {"const": "AnalysisSnapshot.sections.candidate_policy.anti_double_count_policy.evidence_family_ownership"},
+    "evidence_family_policy_canonicalization": {"const": "RFC8785_JCS"},
+    "evidence_family_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "metrics": {
+      "type": "object", "additionalProperties": false, "required": ["auc", "brier", "calibration_error"],
+      "properties": {
+        "auc": {"$ref": "#/$defs/nullable_fraction"},
+        "brier": {"$ref": "#/$defs/nullable_fraction"},
+        "calibration_error": {"$ref": "#/$defs/nullable_fraction"}
+      }
+    },
+    "calibration_curves": {
+      "type": "array", "minItems": 1, "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["bucket", "predicted", "observed", "count"],
+        "properties": {
+          "bucket": {"type": "string", "minLength": 1, "maxLength": 32},
+          "predicted": {"type": "number", "minimum": 0, "maximum": 1},
+          "observed": {"type": "number", "minimum": 0, "maximum": 1},
+          "count": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        }
+      }
+    },
+    "leakage_checks": {
+      "type": "object", "additionalProperties": false, "required": ["pit_join_pass", "purge_pass", "embargo_pass", "survivorship_pass"],
+      "properties": {
+        "pit_join_pass": {"type": "boolean"}, "purge_pass": {"type": "boolean"}, "embargo_pass": {"type": "boolean"}, "survivorship_pass": {"type": "boolean"}
+      }
+    },
+    "evidence_package_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "review_deadline_at": {"$ref": "#/$defs/aware_datetime"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"},
+    "aware_datetime": {"type": "string", "format": "date-time", "pattern": "T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+    "nullable_fraction": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "ascending_quality": {"type": "array", "minItems": 1, "maxItems": 9, "x-strictlyAscending": true, "items": {"type": "number", "minimum": 0, "maximum": 100}},
+    "ascending_upside": {"type": "array", "minItems": 4, "maxItems": 4, "x-strictlyAscending": true, "items": {"type": "number", "minimum": -1, "maximum": 10}},
+    "ascending_downside": {"type": "array", "minItems": 4, "maxItems": 4, "x-strictlyAscending": true, "items": {"type": "number", "minimum": 0, "maximum": 100}},
+    "thresholds": {
+      "type": "object", "additionalProperties": false, "required": ["quality_bands", "upside_stars", "downside_faces", "bomb_materiality"],
+      "properties": {
+        "quality_bands": {"$ref": "#/$defs/ascending_quality"}, "upside_stars": {"$ref": "#/$defs/ascending_upside"}, "downside_faces": {"$ref": "#/$defs/ascending_downside"}, "bomb_materiality": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "pillar_weights": {
+      "type": "object", "additionalProperties": false, "required": ["audit_reliability", "earnings_capital_efficiency", "cash_balance_allocation", "business_moat", "governance", "people_adaptability", "sum"],
+      "properties": {"audit_reliability": {"const": 0.1}, "earnings_capital_efficiency": {"const": 0.25}, "cash_balance_allocation": {"const": 0.25}, "business_moat": {"const": 0.25}, "governance": {"const": 0.05}, "people_adaptability": {"const": 0.1}, "sum": {"const": 1}}
+    },
+    "downside_weights": {
+      "type": "object", "additionalProperties": false, "required": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability", "sum"],
+      "properties": {"maximum_drawdown_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "permanent_capital_loss_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "material_adverse_event_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.4}, "sum": {"const": 1}}
+    }
+  }
+}

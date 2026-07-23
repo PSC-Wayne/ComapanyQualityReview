@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "GoldenPathResult.v1",
+  "title": "GoldenPathResult.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "query",
+    "generation_id",
+    "snapshot_hash",
+    "report_hash",
+    "error_code",
+    "failure_reason",
+    "foundation_artifacts",
+    "contract_coverage",
+    "rating_disposition",
+    "source_version",
+    "formula_version",
+    "model_version",
+    "schema_version",
+    "manifest_version",
+    "producer_candidate_sha"
+  ],
+  "properties": {
+    "query": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identifier", "market", "decision_time"],
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
+        "market": {"type": ["string", "null"], "enum": [null, "TWSE", "TPEx"]},
+        "decision_time": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+        }
+      }
+    },
+    "generation_id": {"type": "string", "format": "uuid"},
+    "snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "report_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "error_code": {
+      "type": ["string", "null"],
+      "enum": [null, "invalid_decision_time", "identity_ambiguous", "unsupported_scope", "blocked_contract", "generation_mismatch"]
+    },
+    "failure_reason": {"type": ["string", "null"], "minLength": 1},
+    "foundation_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admission_scan_path", "validate_json_path", "freeze_package_schema_path", "freeze_manifest_schema_path"],
+      "properties": {
+        "admission_scan_path": {"const": "tools/admission_scan.py"},
+        "validate_json_path": {"const": "tools/validate_json.py"},
+        "freeze_package_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezePackage.v1.json"},
+        "freeze_manifest_schema_path": {"const": "docs/governance/calibration-freeze/schemas/CalibrationFreezeManifest.v1.json"}
+      }
+    },
+    "contract_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "source_version": {"type": "string", "minLength": 1},
+    "formula_version": {"type": "string", "minLength": 1},
+    "model_version": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "GoldenPathResult.v1"},
+    "manifest_version": {"type": "string", "minLength": 1},
+    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"error_code": {"type": "null"}}},
+      "then": {"properties": {"failure_reason": {"type": "null"}}},
+      "else": {"properties": {"failure_reason": {"type": "string", "minLength": 1}}}
+    }
+  ]
+}
