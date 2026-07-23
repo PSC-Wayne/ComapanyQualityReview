@@ -2,6 +2,7 @@
 """Verify E0 immutable planning bindings; no product behavior."""
 from __future__ import annotations
 import hashlib
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,4 +34,20 @@ for p in work_orders:
     if "not authorized" not in text.lower():
         raise SystemExit(f"authorization boundary missing: {p.name}")
 
-print(f"E0_VERIFY PASS | authorities=3 | work_orders=28 | r9={actual_set}")
+evidence = json.loads((ROOT / "docs/governance/e0-evidence.json").read_text(encoding="utf-8"))
+if evidence["repository"] != "PSC-Wayne/ComapanyQualityReview":
+    raise SystemExit("unexpected repository authority")
+if evidence["product_implementation_authorized"] is not False:
+    raise SystemExit("product implementation must remain unauthorized")
+if evidence["ruleset"]["enforcement"] != "active" or evidence["ruleset"]["bypass_actors"] != []:
+    raise SystemExit("main ruleset must be active with no bypass actors")
+required_rules = {"deletion", "non_fast_forward", "required_linear_history", "pull_request", "required_status_checks", "merge_queue"}
+if set(evidence["ruleset"]["rules"]) != required_rules:
+    raise SystemExit("ruleset contract mismatch")
+expected_permissions = {"checks": "read", "contents": "write", "metadata": "read", "pull_requests": "write"}
+if evidence["integration_app"]["permissions"] != expected_permissions:
+    raise SystemExit("integration app permission mismatch")
+if evidence["integration_app"]["repository_selection"] != "selected" or evidence["integration_app"]["repositories"] != ["PSC-Wayne/ComapanyQualityReview"]:
+    raise SystemExit("integration app must be selected-repository only")
+
+print(f"E0_VERIFY PASS | authorities=3 | work_orders=28 | r9={actual_set} | ruleset=active | app=least-privilege")
