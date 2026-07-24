@@ -82,6 +82,7 @@ class HighRiskNoteRegister:
     categories_covered: tuple[Category, ...]
     missing_categories: tuple[Category, ...]
     coverage: Decimal
+    available_at: str
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
         "NO_RATING_NOT_APPLICABLE"
     )
@@ -243,4 +244,5 @@ def build_high_risk_note_register(
         categories_covered=tuple(covered),
         missing_categories=tuple(missing),
         coverage=Decimal(len(covered)) / Decimal(len(CATEGORIES)),
+        available_at=inventory.available_at,
     )

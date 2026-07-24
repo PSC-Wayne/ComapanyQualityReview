@@ -149,6 +149,7 @@ def test_builds_exact_nine_category_register_with_explicit_missing() -> None:
     assert result.categories_covered == ("related_parties", "guarantees")
     assert result.missing_categories == CATEGORIES[2:]
     assert result.coverage == Decimal(2) / Decimal(9)
+    assert result.available_at == audit.available_at
     assert result.rating_disposition == "NO_RATING_NOT_APPLICABLE"
 
 
@@ -237,6 +238,7 @@ def test_json_schema_declares_closed_contract() -> None:
     assert schema["additionalProperties"] is False
     assert schema["properties"]["items"]["minItems"] == 9
     assert schema["properties"]["items"]["maxItems"] == 9
+    assert "available_at" in schema["required"]
     declared = tuple(
         entry["allOf"][1]["properties"]["category"]["const"]
         for entry in schema["properties"]["items"]["prefixItems"]
