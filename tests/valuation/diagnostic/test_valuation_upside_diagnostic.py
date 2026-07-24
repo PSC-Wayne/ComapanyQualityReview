@@ -135,12 +135,12 @@ def test_recomputes_upside_route_scenarios_and_model_disagreement() -> None:
     assert result.current_price.value == Decimal("100")
     assert result.route == "multi_model"
     assert result.relative_value.implied_value == Decimal("120")
-    assert result.relative_value.upside_pct == Decimal("20.0")
+    assert result.relative_value.upside_pct == Decimal("0.2")
     assert result.dcf.implied_value == Decimal("80")
-    assert result.dcf.upside_pct == Decimal("-20.0")
-    assert result.scenarios.bear.upside_pct == Decimal("-20.0")
-    assert result.scenarios.base.upside_pct == Decimal("10.0")
-    assert result.scenarios.bull.upside_pct == Decimal("40.0")
+    assert result.dcf.upside_pct == Decimal("-0.2")
+    assert result.scenarios.bear.upside_pct == Decimal("-0.2")
+    assert result.scenarios.base.upside_pct == Decimal("0.1")
+    assert result.scenarios.bull.upside_pct == Decimal("0.4")
     assert result.model_disagreement.range_pct == Decimal("40.0")
     assert result.model_disagreement.max_model == "relative"
     assert result.model_disagreement.min_model == "dcf"

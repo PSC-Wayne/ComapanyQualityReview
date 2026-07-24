@@ -116,8 +116,8 @@ class ValuationUpsideDiagnostic:
     source_version: Literal[
         "AdmittedFactSet.v1+CanonicalFinancialFacts.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1"
     ] = "AdmittedFactSet.v1+CanonicalFinancialFacts.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1"
-    formula_version: Literal["admitted-valuation-upside.v1"] = (
-        "admitted-valuation-upside.v1"
+    formula_version: Literal["admitted-valuation-upside-decimal-return.v2"] = (
+        "admitted-valuation-upside-decimal-return.v2"
     )
     model_version: Literal["explicit-assumptions-only.v1"] = (
         "explicit-assumptions-only.v1"
@@ -176,7 +176,7 @@ def _text(value: object, field: str, maximum: int) -> str:
 def _upside(value: Decimal, current: Decimal) -> Decimal:
     with localcontext() as context:
         context.prec = 40
-        return (value / current - Decimal("1")) * Decimal("100")
+        return value / current - Decimal("1")
 
 
 def _selected(admitted: AdmittedFactSet, fact_type: str) -> FactAdmission | None:
