@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "TechnicalChipOverlay.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "window_start",
+    "window_end",
+    "price_series_ref",
+    "price_series",
+    "technical_signals",
+    "chip_signals",
+    "insider_holding_changes",
+    "pledge_changes",
+    "tdcc_as_of",
+    "tdcc_state",
+    "tdcc_state_reason",
+    "tdcc_bands",
+    "tdcc_headline_ratios",
+    "capital_event_adjustment",
+    "warmup_state",
+    "available_at",
+    "overlay_coverage",
+    "coverage",
+    "confidence",
+    "failure_reasons",
+    "authority_records",
+    "metric_lineage",
+    "candidate_technical_score",
+    "candidate_chip_score",
+    "rating_independence",
+    "rating_disposition",
+    "independent_from_ratings",
+    "publication_status",
+    "generation_id",
+    "producer_candidate_sha",
+    "schema_version",
+    "source_version",
+    "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "decimal": {
+      "type": "number",
+      "minimum": -1000000000000000000,
+      "maximum": 1000000000000000000
+    },
+    "nonnegativeDecimal": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000000000000000
+    },
+    "nullableDecimal": {
+      "type": ["number", "null"],
+      "minimum": -1000000000000000000,
+      "maximum": 1000000000000000000
+    },
+    "percentage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "nullablePercentage": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "nullableSignedPercentage": {
+      "type": ["number", "null"],
+      "minimum": -100,
+      "maximum": 100
+    },
+    "uint64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "nullableUint64": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "int64": {
+      "type": "integer",
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "nullableDate": {
+      "type": ["string", "null"],
+      "format": "date"
+    },
+    "timezoneAware": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidenceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "factIds": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256}
+    },
+    "nullableEvidenceId": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "nullableReason": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "personType": {
+      "enum": ["director", "supervisor", "manager", "major_shareholder", "other_insider"]
+    },
+    "evidenceState": {
+      "enum": ["present", "missing", "not_applicable"]
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    }
+  },
+  "properties": {
+    "window_start": {"$ref": "#/$defs/date"},
+    "window_end": {"$ref": "#/$defs/date"},
+    "price_series_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "price_series": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "date",
+          "adjusted_open",
+          "adjusted_high",
+          "adjusted_low",
+          "adjusted_close",
+          "volume",
+          "evidence_id"
+        ],
+        "properties": {
+          "date": {"$ref": "#/$defs/date"},
+          "adjusted_open": {"$ref": "#/$defs/decimal"},
+          "adjusted_high": {"$ref": "#/$defs/decimal"},
+          "adjusted_low": {"$ref": "#/$defs/decimal"},
+          "adjusted_close": {"$ref": "#/$defs/decimal"},
+          "volume": {"$ref": "#/$defs/nonnegativeDecimal"},
+          "evidence_id": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "technical_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["return_1m", "return_2m", "ma20_gap", "ma60_gap", "volatility_20d"],
+      "properties": {
+        "return_1m": {"$ref": "#/$defs/nullableDecimal"},
+        "return_2m": {"$ref": "#/$defs/nullableDecimal"},
+        "ma20_gap": {"$ref": "#/$defs/nullableDecimal"},
+        "ma60_gap": {"$ref": "#/$defs/nullableDecimal"},
+        "volatility_20d": {"$ref": "#/$defs/nullableDecimal"}
+      }
+    },
+    "chip_signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["foreign_net_20d", "dealer_net_20d", "investment_trust_net_20d", "margin_balance_change"],
+      "properties": {
+        "foreign_net_20d": {"$ref": "#/$defs/nullableDecimal"},
+        "dealer_net_20d": {"$ref": "#/$defs/nullableDecimal"},
+        "investment_trust_net_20d": {"$ref": "#/$defs/nullableDecimal"},
+        "margin_balance_change": {"$ref": "#/$defs/nullableDecimal"}
+      }
+    },
+    "insider_holding_changes": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["person_type", "as_of", "holding_change_shares", "holding_change_pct", "state", "reason", "evidence_id"],
+        "properties": {
+          "person_type": {"$ref": "#/$defs/personType"},
+          "as_of": {"$ref": "#/$defs/date"},
+          "holding_change_shares": {"$ref": "#/$defs/int64"},
+          "holding_change_pct": {"$ref": "#/$defs/nullableSignedPercentage"},
+          "state": {"$ref": "#/$defs/evidenceState"},
+          "reason": {"$ref": "#/$defs/nullableReason"},
+          "evidence_id": {"$ref": "#/$defs/nullableEvidenceId"}
+        }
+      }
+    },
+    "pledge_changes": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["person_type", "as_of", "pledged_share_change", "pledged_ratio_change_pct", "state", "reason", "evidence_id"],
+        "properties": {
+          "person_type": {"$ref": "#/$defs/personType"},
+          "as_of": {"$ref": "#/$defs/date"},
+          "pledged_share_change": {"$ref": "#/$defs/int64"},
+          "pledged_ratio_change_pct": {"$ref": "#/$defs/nullableSignedPercentage"},
+          "state": {"$ref": "#/$defs/evidenceState"},
+          "reason": {"$ref": "#/$defs/nullableReason"},
+          "evidence_id": {"$ref": "#/$defs/nullableEvidenceId"}
+        }
+      }
+    },
+    "tdcc_as_of": {"$ref": "#/$defs/nullableDate"},
+    "tdcc_state": {"$ref": "#/$defs/evidenceState"},
+    "tdcc_state_reason": {"$ref": "#/$defs/nullableReason"},
+    "tdcc_bands": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["band", "holder_count", "share_count", "share_pct", "previous_as_of", "previous_share_pct", "change_pct_points", "evidence_id"],
+        "properties": {
+          "band": {"type": "string", "minLength": 1, "maxLength": 32},
+          "holder_count": {"$ref": "#/$defs/uint64"},
+          "share_count": {"$ref": "#/$defs/uint64"},
+          "share_pct": {"$ref": "#/$defs/percentage"},
+          "previous_as_of": {"$ref": "#/$defs/nullableDate"},
+          "previous_share_pct": {"$ref": "#/$defs/nullablePercentage"},
+          "change_pct_points": {"$ref": "#/$defs/nullableSignedPercentage"},
+          "evidence_id": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "tdcc_headline_ratios": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gte_400_lots_share_pct", "gte_1000_lots_share_pct", "denominator_outstanding_shares", "ratio_state", "reason", "evidence_id"],
+      "properties": {
+        "gte_400_lots_share_pct": {"$ref": "#/$defs/nullablePercentage"},
+        "gte_1000_lots_share_pct": {"$ref": "#/$defs/nullablePercentage"},
+        "denominator_outstanding_shares": {"$ref": "#/$defs/nullableUint64"},
+        "ratio_state": {"$ref": "#/$defs/evidenceState"},
+        "reason": {"$ref": "#/$defs/nullableReason"},
+        "evidence_id": {"$ref": "#/$defs/nullableEvidenceId"}
+      }
+    },
+    "capital_event_adjustment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applied", "rule_version", "corporate_action_ids", "pre_event_denominator", "post_event_denominator", "adjustment_factor"],
+      "properties": {
+        "applied": {"type": "boolean"},
+        "rule_version": {"$ref": "#/$defs/semver"},
+        "corporate_action_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/evidenceId"}
+        },
+        "pre_event_denominator": {"$ref": "#/$defs/nullableUint64"},
+        "post_event_denominator": {"$ref": "#/$defs/nullableUint64"},
+        "adjustment_factor": {
+          "type": ["number", "null"],
+          "minimum": 0.000001,
+          "maximum": 1000000
+        }
+      }
+    },
+    "warmup_state": {"enum": ["ready", "insufficient_history", "unavailable"]},
+    "available_at": {"anyOf": [{"$ref": "#/$defs/timezoneAware"}, {"type": "null"}]},
+    "overlay_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "failure_reasons": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "price_series": {"type": "string", "minLength": 1, "maxLength": 512},
+        "return_1m": {"type": "string", "minLength": 1, "maxLength": 512},
+        "return_2m": {"type": "string", "minLength": 1, "maxLength": 512},
+        "ma20_gap": {"type": "string", "minLength": 1, "maxLength": 512},
+        "ma60_gap": {"type": "string", "minLength": 1, "maxLength": 512},
+        "volatility_20d": {"type": "string", "minLength": 1, "maxLength": 512},
+        "foreign_net_20d": {"type": "string", "minLength": 1, "maxLength": 512},
+        "dealer_net_20d": {"type": "string", "minLength": 1, "maxLength": 512},
+        "investment_trust_net_20d": {"type": "string", "minLength": 1, "maxLength": 512},
+        "margin_balance_change": {"type": "string", "minLength": 1, "maxLength": 512},
+        "insider_holding_changes": {"type": "string", "minLength": 1, "maxLength": 512},
+        "pledge_changes": {"type": "string", "minLength": 1, "maxLength": 512},
+        "tdcc": {"type": "string", "minLength": 1, "maxLength": 512},
+        "candidate_technical_score": {"type": "string", "minLength": 1, "maxLength": 512},
+        "candidate_chip_score": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "authority_records": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "authority_type", "url", "content_sha256", "available_at", "retrieved_at", "used"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "authority_type": {"const": "official"},
+          "url": {"type": "string", "format": "uri", "minLength": 1, "maxLength": 4096},
+          "content_sha256": {"$ref": "#/$defs/sha256"},
+          "available_at": {"$ref": "#/$defs/timezoneAware"},
+          "retrieved_at": {"$ref": "#/$defs/timezoneAware"},
+          "used": {"type": "boolean"}
+        }
+      }
+    },
+    "metric_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "price_series", "return_1m", "return_2m", "ma20_gap", "ma60_gap",
+        "volatility_20d", "foreign_net_20d", "dealer_net_20d",
+        "investment_trust_net_20d", "margin_balance_change",
+        "insider_holding_changes", "pledge_changes", "tdcc_bands",
+        "tdcc_headline_ratios", "capital_event_adjustment"
+      ],
+      "properties": {
+        "price_series": {"$ref": "#/$defs/factIds"},
+        "return_1m": {"$ref": "#/$defs/factIds"},
+        "return_2m": {"$ref": "#/$defs/factIds"},
+        "ma20_gap": {"$ref": "#/$defs/factIds"},
+        "ma60_gap": {"$ref": "#/$defs/factIds"},
+        "volatility_20d": {"$ref": "#/$defs/factIds"},
+        "foreign_net_20d": {"$ref": "#/$defs/factIds"},
+        "dealer_net_20d": {"$ref": "#/$defs/factIds"},
+        "investment_trust_net_20d": {"$ref": "#/$defs/factIds"},
+        "margin_balance_change": {"$ref": "#/$defs/factIds"},
+        "insider_holding_changes": {"$ref": "#/$defs/factIds"},
+        "pledge_changes": {"$ref": "#/$defs/factIds"},
+        "tdcc_bands": {"$ref": "#/$defs/factIds"},
+        "tdcc_headline_ratios": {"$ref": "#/$defs/factIds"},
+        "capital_event_adjustment": {"$ref": "#/$defs/factIds"}
+      }
+    },
+    "candidate_technical_score": {"type": "null"},
+    "candidate_chip_score": {"type": "null"},
+    "rating_independence": {"const": "INDEPENDENT_NO_HEADLINE_EFFECT"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "independent_from_ratings": {"const": true},
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "schema_version": {"const": "TechnicalChipOverlay.v1"},
+    "source_version": {"const": "AdmittedFactSet.v1+official-market-authority.v1"},
+    "formula_version": {"const": "technical-chip-total-return.v1"},
+    "model_version": {"const": "technical-chip-deterministic-1.0.0"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"tdcc_state": {"const": "present"}}, "required": ["tdcc_state"]},
+      "then": {
+        "properties": {
+          "tdcc_as_of": {"type": "string", "format": "date"},
+          "tdcc_bands": {"minItems": 1},
+          "tdcc_headline_ratios": {
+            "properties": {"ratio_state": {"const": "present"}}
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "tdcc_bands": {"maxItems": 0}
+        }
+      }
+    }
+  ]
+}
