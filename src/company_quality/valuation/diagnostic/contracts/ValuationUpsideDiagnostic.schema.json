@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ValuationUpsideDiagnostic.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "current_price", "route", "relative_value", "dcf", "reverse_dcf",
+    "scenarios", "model_disagreement", "horizon_months", "sensitivity_24_36",
+    "evidence_ids", "metric_lineage", "coverage", "available_at",
+    "publication_status", "rating_disposition", "schema_version",
+    "source_version", "formula_version", "model_version"
+  ],
+  "$defs": {
+    "decimal": {"type": "number", "minimum": -1000000000000000000, "maximum": 1000000000000000000},
+    "positive": {"type": "number", "exclusiveMinimum": 0},
+    "id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "ids": {"type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "lineageIds": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "upside_pct", "assumption_ids"],
+      "properties": {
+        "value": {"$ref": "#/$defs/positive"},
+        "upside_pct": {"$ref": "#/$defs/decimal"},
+        "assumption_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+      }
+    }
+  },
+  "properties": {
+    "current_price": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "currency", "price_time", "fact_id", "available_at"],
+      "properties": {
+        "value": {"$ref": "#/$defs/positive"},
+        "currency": {"const": "TWD"},
+        "price_time": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+        "fact_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "available_at": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"}
+      }
+    },
+    "route": {"enum": ["relative", "dcf", "reverse_dcf", "multi_model"]},
+    "relative_value": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["peer_ids", "multiple", "issuer_multiple", "peer_median", "implied_value", "upside_pct"],
+          "properties": {
+            "peer_ids": {"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+            "multiple": {"enum": ["pe", "pb", "ev_ebitda"]},
+            "issuer_multiple": {"$ref": "#/$defs/decimal"},
+            "peer_median": {"$ref": "#/$defs/decimal"},
+            "implied_value": {"$ref": "#/$defs/positive"},
+            "upside_pct": {"$ref": "#/$defs/decimal"}
+          }
+        }
+      ]
+    },
+    "dcf": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["forecast_years", "revenue_growth", "operating_margin", "wacc", "terminal_growth", "net_debt", "shares", "implied_value", "upside_pct"],
+          "properties": {
+            "forecast_years": {"type": "integer", "minimum": 5, "maximum": 10},
+            "revenue_growth": {"type": "array", "minItems": 5, "maxItems": 10, "items": {"type": "number", "minimum": -1, "maximum": 5}},
+            "operating_margin": {"type": "array", "minItems": 5, "maxItems": 10, "items": {"type": "number", "minimum": -1, "maximum": 1}},
+            "wacc": {"type": "number", "minimum": 0, "maximum": 1},
+            "terminal_growth": {"type": "number", "minimum": -0.1, "maximum": 0.1},
+            "net_debt": {"$ref": "#/$defs/decimal"},
+            "shares": {"$ref": "#/$defs/positive"},
+            "implied_value": {"$ref": "#/$defs/positive"},
+            "upside_pct": {"$ref": "#/$defs/decimal"}
+          }
+        }
+      ]
+    },
+    "reverse_dcf": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["current_price", "implied_revenue_cagr", "implied_terminal_margin", "wacc", "feasibility"],
+          "properties": {
+            "current_price": {"$ref": "#/$defs/positive"},
+            "implied_revenue_cagr": {"type": "number", "minimum": -1, "maximum": 5},
+            "implied_terminal_margin": {"type": "number", "minimum": -1, "maximum": 1},
+            "wacc": {"type": "number", "minimum": 0, "maximum": 1},
+            "feasibility": {"enum": ["plausible", "stretched", "implausible"]}
+          }
+        }
+      ]
+    },
+    "scenarios": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bear", "base", "bull"],
+      "properties": {
+        "bear": {"$ref": "#/$defs/scenario"},
+        "base": {"$ref": "#/$defs/scenario"},
+        "bull": {"$ref": "#/$defs/scenario"}
+      }
+    },
+    "model_disagreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["range_pct", "max_model", "min_model"],
+      "properties": {
+        "range_pct": {"type": "number", "minimum": 0, "maximum": 1000},
+        "max_model": {"type": "string", "minLength": 1, "maxLength": 32},
+        "min_model": {"type": "string", "minLength": 1, "maxLength": 32}
+      }
+    },
+    "horizon_months": {"const": 12},
+    "sensitivity_24_36": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["isolated", "month24_upside_pct", "month36_upside_pct", "headline_eligible"],
+          "properties": {
+            "isolated": {"const": true},
+            "month24_upside_pct": {"$ref": "#/$defs/decimal"},
+            "month36_upside_pct": {"$ref": "#/$defs/decimal"},
+            "headline_eligible": {"const": false}
+          }
+        }
+      ]
+    },
+    "evidence_ids": {"$ref": "#/$defs/ids"},
+    "metric_lineage": {
+      "type": "object",
+      "minProperties": 5,
+      "additionalProperties": {"$ref": "#/$defs/lineageIds"}
+    },
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "available_at": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "ValuationUpsideDiagnostic.v1"},
+    "source_version": {"const": "AdmittedFactSet.v1+CanonicalFinancialFacts.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1"},
+    "formula_version": {"const": "admitted-valuation-upside.v1"},
+    "model_version": {"const": "explicit-assumptions-only.v1"}
+  }
+}
