@@ -146,7 +146,7 @@
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
     "schema_version": {"const": "ValuationUpsideDiagnostic.v1"},
     "source_version": {"const": "AdmittedFactSet.v1+CanonicalFinancialFacts.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1"},
-    "formula_version": {"const": "admitted-valuation-upside.v1"},
+    "formula_version": {"const": "admitted-valuation-upside-decimal-return.v2"},
     "model_version": {"const": "explicit-assumptions-only.v1"}
   }
 }
