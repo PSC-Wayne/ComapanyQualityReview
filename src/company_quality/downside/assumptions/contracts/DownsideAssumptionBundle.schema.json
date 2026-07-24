@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "DownsideAssumptionBundle.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status", "constructs", "risk_items", "stress_assumptions", "bomb_event",
+    "missing_reasons", "evidence_ids", "authority_source_ids", "coverage",
+    "available_at", "generation_id", "producer_candidate_sha", "publication_status",
+    "rating_disposition", "schema_version", "source_version", "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "decimal": {"type": "number", "minimum": -1000000000000000000, "maximum": 1000000000000000000},
+    "id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "ids": {"type": "array", "minItems": 0, "maxItems": 1024, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "time": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"}
+  },
+  "properties": {
+    "status": {"enum": ["ready", "blocked"]},
+    "constructs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "raw_value", "evidence_ids", "state"],
+        "properties": {
+          "name": {"enum": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability"]},
+          "raw_value": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/decimal"}]},
+          "evidence_ids": {"type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+          "state": {"enum": ["present", "missing"]}
+        }
+      }
+    },
+    "risk_items": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cause", "exposure", "transmission_path", "buffer", "indicator", "severity", "trigger", "threshold", "evidence_id", "fact_id"],
+        "properties": {
+          "cause": {"type": "string", "minLength": 1, "maxLength": 256},
+          "exposure": {"type": "string", "minLength": 1, "maxLength": 256},
+          "transmission_path": {"type": "string", "minLength": 1, "maxLength": 512},
+          "buffer": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 256}]},
+          "indicator": {"type": "string", "minLength": 1, "maxLength": 256},
+          "severity": {"enum": ["low", "medium", "high", "critical"]},
+          "trigger": {"type": "string", "minLength": 1, "maxLength": 256},
+          "threshold": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/decimal"}]},
+          "evidence_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "fact_id": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "stress_assumptions": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scenario", "assumption_ids", "equity_value_change_pct", "liquidity_state", "fact_id"],
+        "properties": {
+          "scenario": {"enum": ["bear", "base", "bull"]},
+          "assumption_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+          "equity_value_change_pct": {"$ref": "#/$defs/decimal"},
+          "liquidity_state": {"enum": ["adequate", "tight", "insolvent"]},
+          "fact_id": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "bomb_event": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_id", "event_type", "authoritative", "material", "current_relevance", "authority_source_id", "effective_at", "expires_at", "evidence_ids", "fact_id"],
+          "properties": {
+            "event_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "event_type": {"enum": ["formal_adverse_opinion", "formal_disclaimer", "confirmed_fraud", "default", "insolvency", "major_regulatory_action", "other_governed"]},
+            "authoritative": {"type": "boolean"},
+            "material": {"type": "boolean"},
+            "current_relevance": {"type": "boolean"},
+            "authority_source_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "effective_at": {"$ref": "#/$defs/time"},
+            "expires_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/time"}]},
+            "evidence_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+            "fact_id": {"type": "string", "minLength": 1, "maxLength": 128}
+          }
+        }
+      ]
+    },
+    "missing_reasons": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "evidence_ids": {"$ref": "#/$defs/ids"},
+    "authority_source_ids": {"type": "array", "minItems": 0, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "available_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/time"}]},
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "DownsideAssumptionBundle.v1"},
+    "source_version": {"const": "AdmittedFactSet.v1"},
+    "formula_version": {"const": "explicit-downside-assumptions.v1"},
+    "model_version": {"const": "no-derived-risk-model.v1"}
+  }
+}
