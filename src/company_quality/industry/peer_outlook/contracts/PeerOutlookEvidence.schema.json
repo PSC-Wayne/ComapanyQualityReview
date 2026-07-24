@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "PeerOutlookEvidence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "reason",
+    "peer_ids",
+    "inclusion_reasons",
+    "exclusion_reasons",
+    "sector_drivers",
+    "outlook_evidence_ids",
+    "counter_evidence_ids",
+    "ai_execution_ids",
+    "scenario_assumptions",
+    "scenario_evidence_ids",
+    "cycle_normalization_gate",
+    "authority_records",
+    "available_at",
+    "coverage",
+    "confidence",
+    "publication_status",
+    "rating_disposition",
+    "generation_id",
+    "producer_candidate_sha",
+    "schema_version",
+    "source_version",
+    "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "timezoneAware": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "evidenceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "scenarioStatements": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "scenarioEvidenceIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/evidenceId"}
+    }
+  },
+  "properties": {
+    "status": {
+      "enum": ["available", "blocked"]
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "peer_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "inclusion_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["peer_id", "reason_code", "evidence_id"],
+        "properties": {
+          "peer_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason_code": {
+            "enum": [
+              "industry_match",
+              "revenue_mix_match",
+              "market_match",
+              "business_model_match"
+            ]
+          },
+          "evidence_id": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "exclusion_reasons": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["issuer_id", "reason_code", "evidence_id"],
+        "properties": {
+          "issuer_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason_code": {
+            "enum": [
+              "financial_sector",
+              "wrong_market",
+              "insufficient_history",
+              "business_model_mismatch"
+            ]
+          },
+          "evidence_id": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "sector_drivers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["driver", "direction", "horizon_months", "evidence_id"],
+        "properties": {
+          "driver": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "direction": {
+            "enum": ["positive", "negative", "mixed"]
+          },
+          "horizon_months": {"const": 12},
+          "evidence_id": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "outlook_evidence_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/evidenceId"}
+    },
+    "counter_evidence_ids": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/evidenceId"}
+    },
+    "ai_execution_ids": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "scenario_assumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bear", "base", "bull"],
+      "properties": {
+        "bear": {"$ref": "#/$defs/scenarioStatements"},
+        "base": {"$ref": "#/$defs/scenarioStatements"},
+        "bull": {"$ref": "#/$defs/scenarioStatements"}
+      }
+    },
+    "scenario_evidence_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bear", "base", "bull"],
+      "properties": {
+        "bear": {"$ref": "#/$defs/scenarioEvidenceIds"},
+        "base": {"$ref": "#/$defs/scenarioEvidenceIds"},
+        "bull": {"$ref": "#/$defs/scenarioEvidenceIds"}
+      }
+    },
+    "cycle_normalization_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "satisfied",
+        "reason",
+        "normalization_evidence_ids"
+      ],
+      "properties": {
+        "required": {"type": "boolean"},
+        "satisfied": {"type": "boolean"},
+        "reason": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "normalization_evidence_ids": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/evidenceId"}
+        }
+      }
+    },
+    "authority_records": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "source_tier",
+          "url",
+          "content_sha256",
+          "available_at",
+          "retrieved_at",
+          "used"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_tier": {
+            "enum": ["official", "trusted_secondary"]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "content_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "available_at": {"$ref": "#/$defs/timezoneAware"},
+          "retrieved_at": {"$ref": "#/$defs/timezoneAware"},
+          "used": {"type": "boolean"}
+        }
+      }
+    },
+    "available_at": {"$ref": "#/$defs/timezoneAware"},
+    "coverage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "publication_status": {
+      "const": "NON_PUBLISHABLE_CANDIDATE"
+    },
+    "rating_disposition": {
+      "const": "NO_RATING_NOT_APPLICABLE"
+    },
+    "generation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "producer_candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "schema_version": {
+      "const": "PeerOutlookEvidence.v1"
+    },
+    "source_version": {
+      "const": "IndustryRoute.v1+official-company-list.v1+OutlookObservation.v1"
+    },
+    "formula_version": {
+      "const": "same-market-official-industry-hybrid-outlook.v1"
+    },
+    "model_version": {
+      "const": "peer-outlook-deterministic-1.0.0"
+    }
+  }
+}
