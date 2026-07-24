@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "BusinessMoatCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuer_id", "peer_ids", "outlook_evidence_ids", "revenue_drivers", "moat_evidence", "moat_judgements",
+    "concentration_risks", "cyclicality", "evidence_family_ids", "metric_lineage",
+    "unavailable_reasons", "coverage", "confidence", "candidate_score",
+    "available_at", "generation_id", "producer_candidate_sha", "status",
+    "rating_disposition", "schema_version", "source_version", "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "nullableScore": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "nullablePct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "ids": {
+      "type": "array", "minItems": 0, "maxItems": 128, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    }
+  },
+  "properties": {
+    "issuer_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "peer_ids": {
+      "type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    },
+    "outlook_evidence_ids": {"$ref": "#/$defs/ids"},
+    "revenue_drivers": {
+      "type": "array", "minItems": 1, "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "share_pct", "evidence_id"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "share_pct": {"$ref": "#/$defs/nullablePct"},
+          "evidence_id": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "moat_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["switching_cost", "network_effect", "cost_advantage", "intangible_assets", "efficient_scale"],
+      "properties": {
+        "switching_cost": {"$ref": "#/$defs/nullableScore"},
+        "network_effect": {"$ref": "#/$defs/nullableScore"},
+        "cost_advantage": {"$ref": "#/$defs/nullableScore"},
+        "intangible_assets": {"$ref": "#/$defs/nullableScore"},
+        "efficient_scale": {"$ref": "#/$defs/nullableScore"}
+      }
+    },
+    "moat_judgements": {
+      "type": "array", "minItems": 5, "maxItems": 5,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["dimension", "support_evidence_ids", "counter_evidence_ids", "context_evidence_ids", "evidence_status", "calibration_status"],
+        "properties": {
+          "dimension": {"enum": ["switching_cost", "network_effect", "cost_advantage", "intangible_assets", "efficient_scale"]},
+          "support_evidence_ids": {"$ref": "#/$defs/ids"},
+          "counter_evidence_ids": {"$ref": "#/$defs/ids"},
+          "context_evidence_ids": {"$ref": "#/$defs/ids"},
+          "evidence_status": {"enum": ["evidence_present", "unknown"]},
+          "calibration_status": {"const": "PENDING_T23"}
+        }
+      }
+    },
+    "concentration_risks": {
+      "type": "object", "additionalProperties": false,
+      "required": ["customer_top1_pct", "supplier_top1_pct", "geography_top1_pct"],
+      "properties": {
+        "customer_top1_pct": {"$ref": "#/$defs/nullablePct"},
+        "supplier_top1_pct": {"$ref": "#/$defs/nullablePct"},
+        "geography_top1_pct": {"$ref": "#/$defs/nullablePct"}
+      }
+    },
+    "cyclicality": {"enum": ["defensive", "moderate", "cyclical", "deep_cyclical"]},
+    "evidence_family_ids": {"$ref": "#/$defs/ids"},
+    "metric_lineage": {
+      "type": "object", "additionalProperties": {"$ref": "#/$defs/ids"}
+    },
+    "unavailable_reasons": {
+      "type": "object", "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "available_at": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"},
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "BusinessMoatCandidate.v1"},
+    "source_version": {"const": "PeerOutlookEvidence.v1+IssuerBusinessEvidence.v1"},
+    "formula_version": {"const": "raw-evidence-no-moat-calibration.v1"},
+    "model_version": {"const": "business-moat-candidate-1.0.0"}
+  }
+}
