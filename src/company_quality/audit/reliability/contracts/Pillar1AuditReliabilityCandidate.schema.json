@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "Pillar1AuditReliabilityCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ordinary_score",
+    "ordinary_weight",
+    "completeness",
+    "timeliness",
+    "consistency",
+    "evidence_family_ids",
+    "hard_gate_excluded_evidence_ids",
+    "coverage",
+    "metric_lineage",
+    "reasons",
+    "available_at",
+    "publication_status",
+    "rating_disposition",
+    "schema_version",
+    "source_version",
+    "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    "id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "ids": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/id"}
+    },
+    "lineageIds": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/id"}
+    }
+  },
+  "properties": {
+    "ordinary_score": {"type": "null"},
+    "ordinary_weight": {"const": 0.1},
+    "completeness": {"$ref": "#/$defs/ratio"},
+    "timeliness": {"$ref": "#/$defs/ratio"},
+    "consistency": {"$ref": "#/$defs/ratio"},
+    "evidence_family_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/id"}
+    },
+    "hard_gate_excluded_evidence_ids": {"$ref": "#/$defs/ids"},
+    "coverage": {"$ref": "#/$defs/ratio"},
+    "metric_lineage": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/lineageIds"},
+      "required": ["completeness", "timeliness", "consistency", "ordinary_score"]
+    },
+    "reasons": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "required": ["ordinary_score", "hard_gate_exclusion"]
+    },
+    "available_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "Pillar1AuditReliabilityCandidate.v1"},
+    "source_version": {
+      "const": "AuditFilingInventory.v1+AuditGateDecision.v1+HighRiskNoteRegister.v1"
+    },
+    "formula_version": {"const": "audit-reliability-diagnostics.v1"},
+    "model_version": {"const": "calibration-pending-t23"}
+  }
+}
