@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "EarningsCapitalEfficiencyCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metrics", "normalised_metrics", "diagnostics", "forensic_diagnostics",
+    "cycle_flags", "evidence_family_ids", "metric_lineage",
+    "unavailable_reasons", "coverage", "candidate_score", "available_at",
+    "publication_status", "rating_disposition", "schema_version",
+    "source_version", "formula_version", "model_version"
+  ],
+  "$defs": {
+    "decimalOrNull": {
+      "type": ["number", "null"],
+      "minimum": -1000000000000000000,
+      "maximum": 1000000000000000000
+    },
+    "zOrNull": {
+      "type": ["number", "null"],
+      "minimum": -10,
+      "maximum": 10
+    }
+  },
+  "properties": {
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roa", "operating_cash_flow", "accrual_ratio", "gross_margin",
+        "asset_turnover", "roic", "free_cash_flow"
+      ],
+      "properties": {
+        "roa": {"$ref": "#/$defs/decimalOrNull"},
+        "operating_cash_flow": {"$ref": "#/$defs/decimalOrNull"},
+        "accrual_ratio": {"$ref": "#/$defs/decimalOrNull"},
+        "gross_margin": {"$ref": "#/$defs/decimalOrNull"},
+        "asset_turnover": {"$ref": "#/$defs/decimalOrNull"},
+        "roic": {"$ref": "#/$defs/decimalOrNull"},
+        "free_cash_flow": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "normalised_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roa_z", "accrual_z", "margin_z", "turnover_z", "roic_z", "fcf_z"],
+      "properties": {
+        "roa_z": {"$ref": "#/$defs/zOrNull"},
+        "accrual_z": {"$ref": "#/$defs/zOrNull"},
+        "margin_z": {"$ref": "#/$defs/zOrNull"},
+        "turnover_z": {"$ref": "#/$defs/zOrNull"},
+        "roic_z": {"$ref": "#/$defs/zOrNull"},
+        "fcf_z": {"$ref": "#/$defs/zOrNull"}
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roe", "operating_margin", "revenue_growth_yoy", "net_income_growth_yoy"],
+      "properties": {
+        "roe": {"$ref": "#/$defs/decimalOrNull"},
+        "operating_margin": {"$ref": "#/$defs/decimalOrNull"},
+        "revenue_growth_yoy": {"$ref": "#/$defs/decimalOrNull"},
+        "net_income_growth_yoy": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "forensic_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["piotroski_f_score", "beneish_m_score", "altman_z_score"],
+      "properties": {
+        "piotroski_f_score": {"$ref": "#/$defs/decimalOrNull"},
+        "beneish_m_score": {"$ref": "#/$defs/decimalOrNull"},
+        "altman_z_score": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "cycle_flags": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["peak_margin", "trough_margin", "commodity_cycle", "construction_lumpiness", "none"]
+      }
+    },
+    "evidence_family_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "metric_lineage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "unavailable_reasons": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "available_at": {"type": "string", "format": "date-time"},
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "EarningsCapitalEfficiencyCandidate.v1"},
+    "source_version": {"const": "CanonicalFinancialFacts.v1"},
+    "formula_version": {"const": "single-quarter-earnings-efficiency.v1"},
+    "model_version": {"const": "unscored-candidate.v1"}
+  }
+}
