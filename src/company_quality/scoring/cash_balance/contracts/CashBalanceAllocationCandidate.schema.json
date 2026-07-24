@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "CashBalanceAllocationCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cash_conversion", "leverage", "liquidity", "dilution", "allocation",
+    "balance_checks", "evidence_family_ids", "note_evidence_ids",
+    "metric_lineage", "unavailable_reasons", "coverage", "candidate_score",
+    "available_at", "publication_status", "rating_disposition",
+    "schema_version", "source_version", "formula_version", "model_version"
+  ],
+  "$defs": {
+    "decimalOrNull": {
+      "type": ["number", "null"],
+      "minimum": -1000000000000000000,
+      "maximum": 1000000000000000000
+    },
+    "closedRecord": {"type": "object", "additionalProperties": false}
+  },
+  "properties": {
+    "cash_conversion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cfo_to_ebit", "fcf_to_net_income", "working_capital_days"],
+      "properties": {
+        "cfo_to_ebit": {"$ref": "#/$defs/decimalOrNull"},
+        "fcf_to_net_income": {"$ref": "#/$defs/decimalOrNull"},
+        "working_capital_days": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "leverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["net_debt_to_ebitda", "debt_to_equity", "interest_coverage"],
+      "properties": {
+        "net_debt_to_ebitda": {"$ref": "#/$defs/decimalOrNull"},
+        "debt_to_equity": {"$ref": "#/$defs/decimalOrNull"},
+        "interest_coverage": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "liquidity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["current_ratio", "quick_ratio", "cash_ratio"],
+      "properties": {
+        "current_ratio": {"$ref": "#/$defs/decimalOrNull"},
+        "quick_ratio": {"$ref": "#/$defs/decimalOrNull"},
+        "cash_ratio": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "dilution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["five_year_share_change_pct", "convertible_overhang_pct"],
+      "properties": {
+        "five_year_share_change_pct": {"$ref": "#/$defs/decimalOrNull"},
+        "convertible_overhang_pct": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "allocation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capex_to_sales", "dividend_payout", "buyback_pct", "acquisition_spend"],
+      "properties": {
+        "capex_to_sales": {"$ref": "#/$defs/decimalOrNull"},
+        "dividend_payout": {"$ref": "#/$defs/decimalOrNull"},
+        "buyback_pct": {"$ref": "#/$defs/decimalOrNull"},
+        "acquisition_spend": {"$ref": "#/$defs/decimalOrNull"}
+      }
+    },
+    "balance_checks": {
+      "type": "object", "additionalProperties": false,
+      "required": ["balance_equation_delta", "balance_equation_pass", "ending_cash_delta", "ending_cash_match"],
+      "properties": {
+        "balance_equation_delta": {"$ref": "#/$defs/decimalOrNull"},
+        "balance_equation_pass": {"type": ["boolean", "null"]},
+        "ending_cash_delta": {"$ref": "#/$defs/decimalOrNull"},
+        "ending_cash_match": {"type": ["boolean", "null"]}
+      }
+    },
+    "evidence_family_ids": {
+      "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "note_evidence_ids": {
+      "type": "array", "maxItems": 64, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "metric_lineage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array", "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "unavailable_reasons": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "available_at": {"type": "string", "format": "date-time"},
+    "publication_status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "CashBalanceAllocationCandidate.v1"},
+    "source_version": {"const": "CanonicalFinancialFacts.v1+HighRiskNoteRegister.v1"},
+    "formula_version": {"const": "cash-balance-allocation.v1"},
+    "model_version": {"const": "unscored-candidate.v1"}
+  }
+}
