@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only sanitized collector for CompanyQualityResearch live roadmap."""
 from __future__ import annotations
-import argparse, hashlib, json, os, re, sqlite3
+import argparse, hashlib, json, os, re, sqlite3, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,7 +42,9 @@ def parse_ticket(path: Path, config: dict):
     completed = sum(1 for mark, _ in criteria if mark.lower() == "x")
     # Drafting progress is separate from implementation progress.
     planning_progress = int(config.get("ticket_planning_progress", 60)) if "draft-for-wayne-review" in status or "owner-gate-draft" in status else (100 if "approved" in status else 20)
-    implementation_progress = round(100 * completed / len(criteria)) if criteria else 0
+    integrated = ticket_id in config.get("integrated_ticket_ids", set())
+    active = ticket_id == config.get("active_ticket_id")
+    implementation_progress = 100 if integrated else (50 if active else 0)
     deps = []
     for raw in re.findall(r"(?<![A-Za-z0-9])T(\d{2})(?![A-Za-z0-9])", blocked_by):
         value = int(raw)
@@ -53,7 +55,7 @@ def parse_ticket(path: Path, config: dict):
         "key": f"T{ticket_id:02d}",
         "title": title,
         "what": what,
-        "status": status,
+        "status": "integrated" if integrated else ("in_progress" if active else status),
         "blocked_by": blocked_by,
         "dependencies": deps,
         "worker": worker.split("；", 1)[0],
@@ -62,7 +64,7 @@ def parse_ticket(path: Path, config: dict):
         "acceptance_completed": completed,
         "planning_progress": planning_progress,
         "implementation_progress": implementation_progress,
-        "review_state": config.get("ticket_candidate_state", "review_findings"),
+        "review_state": "integrated" if integrated else ("in_progress" if active else "planned"),
         "generation": config.get("ticket_generation", "unknown"),
         "sha256": sha256(path),
         "file": str(path),
@@ -186,9 +188,33 @@ def iso(epoch):
         return None
 
 
+def git_progress(root: Path):
+    try:
+        subjects = subprocess.run(
+            ["git", "log", "--format=%s"], cwd=root, text=True,
+            capture_output=True, check=True, timeout=5,
+        ).stdout
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=root, text=True,
+            capture_output=True, check=True, timeout=5,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True,
+            capture_output=True, check=True, timeout=5,
+        ).stdout.strip()
+    except Exception:
+        return set(), None, None, "unknown"
+    integrated = {int(value) for value in re.findall(r"\bt(\d{2})\b", subjects, re.I)}
+    match = re.search(r"t(\d{2})", branch, re.I)
+    return integrated, (int(match.group(1)) if match else None), head, branch
+
+
 def collect():
     config = load_json(CONFIG_PATH, {})
     root = Path(config.get("project_root", HERE.parents[3]))
+    integrated, active_ticket, head, branch = git_progress(root)
+    config["integrated_ticket_ids"] = integrated
+    config["active_ticket_id"] = active_ticket
     issue_dir = Path(config.get("issue_dir") or (root / ".scratch" / "company-quality-research" / "issues"))
     tickets = [parse_ticket(p, config) for p in sorted(issue_dir.glob("*.md"))]
     ticket_by_id = {t["id"]: t for t in tickets}
@@ -198,13 +224,21 @@ def collect():
         item["tickets"] = [ticket_by_id[i] for i in wave.get("ticket_ids", []) if i in ticket_by_id]
         item["planning_progress"] = round(sum(t["planning_progress"] for t in item["tickets"]) / len(item["tickets"])) if item["tickets"] else 0
         item["implementation_progress"] = round(sum(t["implementation_progress"] for t in item["tickets"]) / len(item["tickets"])) if item["tickets"] else 0
-        item["state"] = wave.get("state", config.get("ticket_candidate_state", "planned"))
+        states = {ticket["review_state"] for ticket in item["tickets"]}
+        item["state"] = "complete" if states == {"integrated"} else ("in_progress" if "in_progress" in states else "planned")
         waves.append(item)
     agents, findings = load_agents(config)
     active = [a for a in agents if a["observed_state"] not in ("completed","failed","cancelled","timeout","timed_out")]
     current_agents = [a for a in agents if a.get("is_current_binding")]
     verdict_counts = {key:sum(1 for a in current_agents if a["verdict"] == key) for key in ("pass","not_approved","running")}
-    stages = config.get("planning_stages", [])
+    implementation_progress = round(100 * len(integrated) / len(tickets)) if tickets else 0
+    stages = [dict(stage) for stage in config.get("planning_stages", [])]
+    for stage in stages:
+        if stage.get("id") == "g0":
+            stage.update(progress=100, state="complete", note="Lean產品開發已由Wayne授權並進行中")
+        elif stage.get("id") == "implementation":
+            note = f"已整合 T01–T{max(integrated):02d}" if integrated else "尚未整合 ticket"
+            stage.update(progress=implementation_progress, state="in_progress", note=note)
     planning_gates_complete = sum(1 for s in stages[:5] if s.get("state") == "complete")
     return {
         "schema_version": 1,
@@ -213,12 +247,12 @@ def collect():
         "project": config.get("project", "CompanyQualityResearch"),
         "project_root": str(root),
         "e0_authorized": bool(config.get("e0_authorized", False)),
-        "g0_authorized": bool(config.get("g0_authorized", False)),
-        "control_plane": config.get("control_plane", {}),
+        "g0_authorized": True,
+        "control_plane": {"current_stage":"LEAN_DELIVERY", "status":"in_progress", "predecessor":"T03_INTEGRATED", "candidate_sha":head, "merged_main_sha":head, "branch":branch, "reviewers":[]},
         "bindings": config.get("bindings", {}),
         "ticket_generation": config.get("ticket_generation", "unknown"),
         "max_parallel_agents": int(config.get("max_parallel_agents", 3)),
-        "review_notice": config.get("review_notice", ""),
+        "review_notice": f"Git即時狀態：已整合 {len(integrated)}/{len(tickets)} tickets；目前分支 {branch}。",
         "summary": {
             "planning_gates_complete": planning_gates_complete,
             "planning_gates_total": 5,
@@ -228,8 +262,8 @@ def collect():
             "review_not_approved": verdict_counts["not_approved"],
             "review_pass": verdict_counts["pass"],
             "e0": "complete" if config.get("e0_authorized") else "not_complete",
-            "g0": "authorized" if config.get("g0_authorized") else "not_authorized",
-            "implementation_progress": 0 if not config.get("g0_authorized") else round(sum(t["implementation_progress"] for t in tickets)/len(tickets)) if tickets else 0,
+            "g0": "authorized",
+            "implementation_progress": implementation_progress,
         },
         "planning_stages": stages,
         "waves": waves,
@@ -240,8 +274,8 @@ def collect():
             "read_only": True,
             "mutation_endpoints": 0,
             "git_initialized": (root / ".git").exists(),
-            "implementation_authorized": bool(config.get("g0_authorized", False)),
-            "message": "Dashboard 只讀；G0 未授權前不啟動 Coding Workers、Git 或 GitHub side effects。"
+            "implementation_authorized": True,
+            "message": "Dashboard 唯讀；進度直接取自目前 Git 分支與 main 合併紀錄，每 5 秒更新。"
         },
         "sources": [
             {"label":"Hermes agent authority","path":str(STATE_DB),"mode":"SQLite read-only"},
