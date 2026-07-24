@@ -4,6 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "issuer_id",
     "status",
     "reason",
     "peer_ids",
@@ -60,6 +61,7 @@
     }
   },
   "properties": {
+    "issuer_id": {"type": "string", "minLength": 1, "maxLength": 64},
     "status": {
       "enum": ["available", "blocked"]
     },

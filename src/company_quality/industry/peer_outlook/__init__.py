@@ -111,6 +111,7 @@ class AuthorityRecord:
 
 @dataclass(frozen=True, slots=True)
 class PeerOutlookEvidence:
+    issuer_id: str
     status: Literal["available", "blocked"]
     reason: str | None
     peer_ids: tuple[str, ...]
@@ -451,6 +452,7 @@ def build_peer_outlook_evidence(
         bull=tuple(item.evidence_id for item in scenarios["bull"]),
     )
     return PeerOutlookEvidence(
+        issuer_id=route.issuer_id,
         status="available",
         reason=None,
         peer_ids=peer_ids,
