@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "IndustryRoute.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status", "reason", "issuer_id", "sector_code", "industry_code",
+    "business_model_tags", "cyclicality", "peer_rule_id", "route_version",
+    "evidence_ids", "route_coverage", "decision_time", "authority_url",
+    "authority_sha256", "available_at", "retrieved_at", "rating_disposition",
+    "schema_version", "source_version", "formula_version", "model_version"
+  ],
+  "properties": {
+    "status": {"enum": ["routed", "unsupported_scope", "blocked"]},
+    "reason": {"type": ["string", "null"], "minLength": 1, "maxLength": 512},
+    "issuer_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "sector_code": {"type": "string", "minLength": 1, "maxLength": 32},
+    "industry_code": {"type": "string", "minLength": 1, "maxLength": 32},
+    "business_model_tags": {
+      "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 64}
+    },
+    "cyclicality": {"enum": ["defensive", "moderate", "cyclical", "deep_cyclical"]},
+    "peer_rule_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "route_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "evidence_ids": {
+      "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "route_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "decision_time": {"type": "string", "format": "date-time"},
+    "authority_url": {"type": "string", "format": "uri"},
+    "authority_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "available_at": {"type": "string", "format": "date-time"},
+    "retrieved_at": {"type": "string", "format": "date-time"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "IndustryRoute.v1"},
+    "source_version": {"const": "official-company-list-industry.v1"},
+    "formula_version": {"const": "medium-v1-route-policy.v1"},
+    "model_version": {"const": "industry-route-1.0.0"}
+  }
+}
