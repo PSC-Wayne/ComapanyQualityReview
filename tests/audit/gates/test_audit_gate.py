@@ -82,6 +82,7 @@ def test_unmodified_complete_evidence_is_clear() -> None:
     assert result.no_rating_reason is None
     assert result.coverage == Decimal("1")
     assert result.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+    assert result.hard_gate_evidence_ids == ()
 
 
 def test_missing_pdf_is_coverage_gap_not_formal_opinion_or_block() -> None:
@@ -131,6 +132,7 @@ def test_going_concern_has_fixed_cap_star_cap_and_floor() -> None:
     assert result.cap_value == 40
     assert result.upside_star_cap == 2
     assert result.floor_value == 4
+    assert result.hard_gate_evidence_ids == FORMAL_EVIDENCE
 
 
 def test_combined_formal_flags_keep_the_strictest_values() -> None:
@@ -158,6 +160,7 @@ def test_qualified_severity_is_policy_bound() -> None:
     assert ordinary.cap_value == 60
     assert severe.cap_value == 45
     assert severe.cap_value <= ordinary.cap_value
+    assert ordinary.hard_gate_evidence_ids == inventory("qualified").evidence_ids
 
 
 def test_unreliable_statements_produce_no_rating() -> None:
@@ -187,6 +190,7 @@ def test_first_occurrence_matters_are_negative_evidence_not_automatic_caps() -> 
     assert "first_occurrence_key_audit_matter_negative_evidence" in result.reasons
     assert "first_occurrence_emphasis_matter_negative_evidence" in result.reasons
     assert "auditor_change_negative_evidence" in result.reasons
+    assert result.hard_gate_evidence_ids == ()
 
 
 def test_authority_conflict_blocks() -> None:
@@ -229,7 +233,8 @@ def test_json_schema_declares_contract_fields() -> None:
         "confirmed_fraud", "key_audit_matter_first_occurrence",
         "emphasis_matter_first_occurrence", "auditor_change",
         "cap_value", "upside_star_cap", "floor_value",
-        "reasons", "evidence_ids", "available_at", "coverage",
+        "reasons", "evidence_ids", "hard_gate_evidence_ids",
+        "available_at", "coverage",
         "no_rating_reason",
     )).issubset(schema["required"])
     assert schema["additionalProperties"] is False
