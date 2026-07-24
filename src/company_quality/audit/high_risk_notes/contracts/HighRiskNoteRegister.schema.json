@@ -8,6 +8,7 @@
     "categories_covered",
     "missing_categories",
     "coverage",
+    "available_at",
     "rating_disposition",
     "schema_version",
     "source_version",
@@ -115,6 +116,7 @@
       "items": {"$ref": "#/$defs/category"}
     },
     "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "available_at": {"type": "string", "format": "date-time"},
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
     "schema_version": {"const": "HighRiskNoteRegister.v1"},
     "source_version": {
