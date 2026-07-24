@@ -5,6 +5,7 @@
   "additionalProperties": false,
   "required": [
     "issuer_id",
+    "cyclicality",
     "status",
     "reason",
     "peer_ids",
@@ -62,6 +63,7 @@
   },
   "properties": {
     "issuer_id": {"type": "string", "minLength": 1, "maxLength": 64},
+    "cyclicality": {"enum": ["defensive", "moderate", "cyclical", "deep_cyclical"]},
     "status": {
       "enum": ["available", "blocked"]
     },

@@ -112,6 +112,7 @@ class AuthorityRecord:
 @dataclass(frozen=True, slots=True)
 class PeerOutlookEvidence:
     issuer_id: str
+    cyclicality: Literal["defensive", "moderate", "cyclical", "deep_cyclical"]
     status: Literal["available", "blocked"]
     reason: str | None
     peer_ids: tuple[str, ...]
@@ -453,6 +454,7 @@ def build_peer_outlook_evidence(
     )
     return PeerOutlookEvidence(
         issuer_id=route.issuer_id,
+        cyclicality=route.cyclicality,
         status="available",
         reason=None,
         peer_ids=peer_ids,
