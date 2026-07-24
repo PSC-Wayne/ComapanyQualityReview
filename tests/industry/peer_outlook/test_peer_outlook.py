@@ -261,6 +261,7 @@ def test_producer_schema_mismatch_blocks() -> None:
 def test_result_has_required_candidate_envelope_and_validates_closed_schema() -> None:
     result = build()
     assert result.issuer_id == "22099131"
+    assert result.cyclicality == "moderate"
     assert result.status == "available"
     assert result.reason is None
     assert Decimal("0") < result.confidence <= Decimal("1")
