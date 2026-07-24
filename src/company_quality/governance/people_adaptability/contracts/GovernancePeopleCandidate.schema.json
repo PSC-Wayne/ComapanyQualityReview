@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "GovernancePeopleCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "governance_signals", "key_people", "succession", "alignment_signals",
+    "adaptability", "commitment_delivery_ledger", "excluded_claims",
+    "evidence_family_ids", "metric_lineage", "unavailable_reasons", "coverage",
+    "confidence", "candidate_score", "available_at", "generation_id",
+    "producer_candidate_sha", "status", "rating_disposition", "schema_version",
+    "source_version", "formula_version", "model_version"
+  ],
+  "$defs": {
+    "pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "ids": {
+      "type": "array", "minItems": 0, "maxItems": 128, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    }
+  },
+  "properties": {
+    "governance_signals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["board_independence_pct", "pledged_share_pct", "related_party_ratio", "regulatory_events_5y"],
+      "properties": {
+        "board_independence_pct": {"$ref": "#/$defs/pct"},
+        "pledged_share_pct": {"$ref": "#/$defs/pct"},
+        "related_party_ratio": {"$ref": "#/$defs/pct"},
+        "regulatory_events_5y": {"type": ["integer", "null"], "minimum": 0, "maximum": 65535}
+      }
+    },
+    "key_people": {
+      "type": "array", "minItems": 0, "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["role", "tenure_years", "evidence_id"],
+        "properties": {
+          "role": {"enum": ["chair", "ceo", "cfo", "other_key"]},
+          "tenure_years": {"$ref": "#/$defs/pct"},
+          "evidence_id": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "succession": {
+      "type": "object", "additionalProperties": false,
+      "required": ["plan_disclosed", "key_person_dependency", "evidence_id"],
+      "properties": {
+        "plan_disclosed": {"type": ["boolean", "null"]},
+        "key_person_dependency": {"enum": ["low", "medium", "high", "unknown"]},
+        "evidence_id": {"type": ["string", "null"], "minLength": 1, "maxLength": 128}
+      }
+    },
+    "alignment_signals": {
+      "type": "array", "minItems": 0, "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["statement", "evidence_id"],
+        "properties": {
+          "statement": {"type": "string", "minLength": 1, "maxLength": 512},
+          "evidence_id": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "adaptability": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rd_to_sales", "capability_investments", "evidence_ids"],
+      "properties": {
+        "rd_to_sales": {"type": ["number", "null"], "minimum": -1e18, "maximum": 1e18},
+        "capability_investments": {
+          "type": "array", "minItems": 0, "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 256}
+        },
+        "evidence_ids": {"$ref": "#/$defs/ids"}
+      }
+    },
+    "commitment_delivery_ledger": {
+      "type": "array", "minItems": 0, "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["commitment_id", "commitment", "commitment_evidence_id", "deliveries", "delivery_evidence_ids"],
+        "properties": {
+          "commitment_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "commitment": {"type": "string", "minLength": 1, "maxLength": 512},
+          "commitment_evidence_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "deliveries": {
+            "type": "array", "minItems": 0, "maxItems": 64,
+            "items": {"type": "string", "minLength": 1, "maxLength": 512}
+          },
+          "delivery_evidence_ids": {"$ref": "#/$defs/ids"}
+        }
+      }
+    },
+    "excluded_claims": {
+      "type": "array", "minItems": 0, "maxItems": 128,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["evidence_id", "reason"],
+        "properties": {
+          "evidence_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 512}
+        }
+      }
+    },
+    "evidence_family_ids": {"$ref": "#/$defs/ids"},
+    "metric_lineage": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ids"}},
+    "unavailable_reasons": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "candidate_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "available_at": {"type": ["string", "null"], "format": "date-time"},
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "producer_candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "status": {"const": "NON_PUBLISHABLE_CANDIDATE"},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "GovernancePeopleCandidate.v1"},
+    "source_version": {"const": "AdmittedFactSet.v1+CanonicalFinancialFacts.v1"},
+    "formula_version": {"const": "governance-people-raw-candidate.v1"},
+    "model_version": {"const": "governance-people-candidate-1.0.0"}
+  }
+}
