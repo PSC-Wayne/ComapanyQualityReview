@@ -60,6 +60,7 @@ class AuditGateDecision:
     floor_value: int | None
     reasons: tuple[str, ...]
     evidence_ids: tuple[str, ...]
+    hard_gate_evidence_ids: tuple[str, ...]
     available_at: str
     coverage: Decimal
     no_rating_reason: NoRatingReason | None
@@ -222,6 +223,21 @@ def evaluate_audit_gate(
     if not reasons:
         reasons.append("no_audit_hard_gate_triggered")
 
+    hard_gate_evidence: list[str] = []
+    if inventory.opinion_type in {"qualified", "adverse", "disclaimer"}:
+        hard_gate_evidence.extend(inventory.evidence_ids)
+    if any(
+        (
+            going_concern is True,
+            restatement is True,
+            confirmed_fraud is True,
+            statements_reliable is False,
+        )
+    ):
+        hard_gate_evidence.extend(additional_evidence_ids)
+    if authority_conflict:
+        hard_gate_evidence.extend(evidence_ids)
+
     return AuditGateDecision(
         gate_state=gate_state,
         opinion_type=inventory.opinion_type,
@@ -236,6 +252,7 @@ def evaluate_audit_gate(
         floor_value=downside_floor,
         reasons=tuple(dict.fromkeys(reasons)),
         evidence_ids=evidence_ids,
+        hard_gate_evidence_ids=tuple(dict.fromkeys(hard_gate_evidence)),
         available_at=inventory.available_at,
         coverage=inventory.coverage,
         no_rating_reason=no_rating_reason,
