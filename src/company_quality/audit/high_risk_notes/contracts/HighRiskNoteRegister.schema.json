@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "HighRiskNoteRegister.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "categories_covered",
+    "missing_categories",
+    "coverage",
+    "rating_disposition",
+    "schema_version",
+    "source_version",
+    "formula_version",
+    "model_version"
+  ],
+  "$defs": {
+    "category": {
+      "enum": [
+        "related_parties",
+        "guarantees",
+        "litigation",
+        "impairments",
+        "receivables",
+        "inventory",
+        "contract_assets",
+        "goodwill",
+        "debt_maturities"
+      ]
+    },
+    "coordinate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x0", "y0", "x1", "y1"],
+      "properties": {
+        "x0": {"type": "number", "minimum": 0, "maximum": 1},
+        "y0": {"type": "number", "minimum": 0, "maximum": 1},
+        "x1": {"type": "number", "minimum": 0, "maximum": 1},
+        "y1": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category", "state", "reason", "amount", "unit", "period",
+        "evidence_id", "page", "coordinate", "materiality"
+      ],
+      "properties": {
+        "category": {"$ref": "#/$defs/category"},
+        "state": {"enum": ["present", "missing", "not_applicable"]},
+        "reason": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "amount": {
+          "type": ["number", "null"],
+          "minimum": -1000000000000000000,
+          "maximum": 1000000000000000000
+        },
+        "unit": {"type": ["string", "null"], "minLength": 1, "maxLength": 32},
+        "period": {"type": "string", "minLength": 1, "maxLength": 32},
+        "evidence_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "page": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "coordinate": {
+          "oneOf": [{"$ref": "#/$defs/coordinate"}, {"type": "null"}]
+        },
+        "materiality": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  },
+  "properties": {
+    "items": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "items": false,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "related_parties"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "guarantees"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "litigation"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "impairments"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "receivables"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "inventory"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "contract_assets"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "goodwill"}}}]},
+        {"allOf": [{"$ref": "#/$defs/item"}, {"properties": {"category": {"const": "debt_maturities"}}}]}
+      ]
+    },
+    "categories_covered": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 9,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/category"}
+    },
+    "missing_categories": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 9,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/category"}
+    },
+    "coverage": {"type": "number", "minimum": 0, "maximum": 1},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "HighRiskNoteRegister.v1"},
+    "source_version": {
+      "const": "CanonicalFinancialFacts.v1+AuditFilingInventory.v1"
+    },
+    "formula_version": {"const": "covered-categories-over-nine.v1"},
+    "model_version": {"const": "no-rating-model.v1"}
+  }
+}
