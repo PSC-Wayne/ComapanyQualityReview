@@ -13,6 +13,11 @@ from company_quality.lab.finlab_materializer import (
 )
 
 
+def test_invalid_foreign_placeholder_is_not_a_legal_identity() -> None:
+    assert materializer._ubn("00000000") == ""
+    assert materializer._ubn("11913502") == "11913502"
+
+
 def test_mopsov_filing_identity_binds_stock_code_to_legal_name(monkeypatch):
     body = (
         '<ix:nonNumeric name="tifrs-notes:CompanyID">2456</ix:nonNumeric>'
@@ -141,6 +146,13 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
                 "businessNo": "28653781",
                 "listingDate": "110/11/15",
             }],
+            "listing_date_evidence": [{
+                "security_code": "1258",
+                "listed_on": "100/12/12",
+                "source_url": "https://doc.twse.com.tw/server-java/t57sb01?co_id=1258&year=110",
+                "source_page": 11,
+                "source_excerpt": "2011年12月12日於臺灣櫃檯買賣中心正式掛牌",
+            }],
             "gcis_identities": [],
             "twse_delisted": {
                 "fields": ["終止上市日期", "公司名稱", "上市編號"],
@@ -172,6 +184,8 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
     assert otc["identity_status"] == "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
     assert otc["security_lifecycle_id"] == "otc:1258:delisted:110-12-15"
     assert not bool(otc["legal_identity_resolved"])
+    assert otc["listed_on"] == "100/12/12"
+    assert otc["listing_date_link_source"].endswith("#page=11")
     identity_report = report["official_identity"]
     assert isinstance(identity_report, dict)
     assert identity_report["security_membership_resolved_count"] == 2

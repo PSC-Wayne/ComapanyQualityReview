@@ -71,6 +71,7 @@ def build(
     *,
     market: Literal["TWSE", "TPEx"] = "TWSE",
     min_days=365,
+    eligibility_failures=None,
 ):
     return build_adverse_control_cohort(
         members,
@@ -82,6 +83,7 @@ def build(
         producer_shas={"T03": sha("a"), "T04": sha("b"), "T06": sha("c")},
         generation_id="r9-generation",
         producer_candidate_sha=sha("d"),
+        eligibility_failures=eligibility_failures,
     )
 
 
@@ -142,6 +144,18 @@ def test_unresolved_delisting_blocks_only_affected_membership() -> None:
     assert result.censoring_rules.suspension_policy == (
         "right_censor_until_official_resume_or_delisting"
     )
+
+
+def test_pre_admission_failures_remain_in_coverage_denominator() -> None:
+    result = build(
+        [member("issuer-active")],
+        eligibility_failures={"security:TWSE:9999": "unresolved_legal_identity"},
+    )
+    assert result.issuer_ids == ("issuer-active",)
+    assert result.failure_reasons == {
+        "security:TWSE:9999": "unresolved_legal_identity"
+    }
+    assert result.cohort_coverage == Decimal("0.5")
 
 
 def test_single_market_identity_and_exact_producer_contract_fail_closed() -> None:

@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v2",
-  "generated_at": "2026-07-25T16:05:35.485574+00:00",
+  "generated_at": "2026-07-25T17:46:26.213741+00:00",
   "authorization_scope": "real T20-T22 pipeline; NON_PUBLISHABLE report only; no T23, no freeze, no rating",
   "execution_status": "BLOCKED_INPUT_DATA",
   "publishable": false,
@@ -13,14 +13,15 @@
     "price_ready_count": 2022,
     "price_ready_coverage": 1.0,
     "security_membership_coverage": 1.0,
-    "legal_identity_coverage": 0.9920870425321464,
-    "legal_identity_gap_count": 16,
+    "legal_identity_coverage": 0.990108803165183,
+    "legal_identity_gap_count": 20,
     "legal_identity_gap_status_counts": {
       "UNRESOLVED_FOREIGN_LEGAL_IDENTITY": 12,
-      "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY": 4
+      "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY": 4,
+      "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY": 4
     },
     "delisted_security_count": 45,
-    "delisted_listing_date_gap_count": 41
+    "delisted_listing_date_gap_count": 37
   },
   "stage_results": {
     "T20": {
@@ -111,6 +112,26 @@
           "security_code": "6514",
           "market": "otc",
           "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+        },
+        {
+          "security_code": "9105",
+          "market": "sii",
+          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+        },
+        {
+          "security_code": "9110",
+          "market": "sii",
+          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+        },
+        {
+          "security_code": "9103",
+          "market": "sii",
+          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+        },
+        {
+          "security_code": "9136",
+          "market": "sii",
+          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         }
       ],
       "affected_listing_date_gaps": [
@@ -191,10 +212,6 @@
           "market": "sii"
         },
         {
-          "security_code": "5820",
-          "market": "otc"
-        },
-        {
           "security_code": "3642",
           "market": "otc"
         },
@@ -204,10 +221,6 @@
         },
         {
           "security_code": "6247",
-          "market": "otc"
-        },
-        {
-          "security_code": "6594",
           "market": "otc"
         },
         {
@@ -263,15 +276,7 @@
           "market": "otc"
         },
         {
-          "security_code": "8420",
-          "market": "otc"
-        },
-        {
           "security_code": "2888",
-          "market": "sii"
-        },
-        {
-          "security_code": "2809",
           "market": "sii"
         },
         {

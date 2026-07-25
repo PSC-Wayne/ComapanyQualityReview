@@ -81,7 +81,7 @@ def _fetch_gcis_exact_identity(
         for row in payload:
             if not isinstance(row, dict) or str(row.get("Company_Name", "")).strip() != name:
                 continue
-            ubn = str(row.get("Business_Accounting_NO", "")).strip()
+            ubn = _ubn(row.get("Business_Accounting_NO"))
             if ubn:
                 exact[ubn] = row
     if len(exact) != 1:
@@ -123,6 +123,15 @@ def _is_foreign_issuer(finlab_name: str, official_name: str) -> bool:
     return any(marker in combined for marker in ("-KY", "KY", "-DR", "F-", "開曼"))
 
 
+def _ubn(value: object) -> str:
+    candidate = str(value or "").strip()
+    return (
+        candidate
+        if re.fullmatch(r"[0-9]{8}", candidate) and candidate != "00000000"
+        else ""
+    )
+
+
 def _official_identity(
     universe: pd.DataFrame,
     payloads: Mapping[str, object],
@@ -134,6 +143,7 @@ def _official_identity(
     twse_public = payloads.get("twse_public")
     mops_profiles = payloads.get("mops_profiles")
     gcis_identities = payloads.get("gcis_identities")
+    listing_date_evidence = payloads.get("listing_date_evidence", [])
     if not isinstance(twse, list) or not isinstance(tpex, list) or not isinstance(
         twse_public, list
     ):
@@ -148,6 +158,8 @@ def _official_identity(
         raise ValueError("official MOPS company-profile payload drifted")
     if not isinstance(gcis_identities, list):
         raise ValueError("official GCIS company registry payload drifted")
+    if not isinstance(listing_date_evidence, list):
+        raise ValueError("official annual-report listing-date payload drifted")
 
     current: dict[tuple[str, str], dict[str, str]] = {}
     current_by_code: dict[str, dict[str, str]] = {}
@@ -157,7 +169,7 @@ def _official_identity(
         code = str(row.get("公司代號", "")).strip()
         authority = {
             "official_name": str(row.get("公司名稱", "")).strip(),
-            "unified_business_number": str(row.get("營利事業統一編號", "")).strip(),
+            "unified_business_number": _ubn(row.get("營利事業統一編號")),
             "listed_on": str(row.get("上市日期", "")).strip(),
             "official_market": "sii",
         }
@@ -169,7 +181,7 @@ def _official_identity(
         code = str(row.get("SecuritiesCompanyCode", "")).strip()
         authority = {
             "official_name": str(row.get("CompanyName", "")).strip(),
-            "unified_business_number": str(row.get("UnifiedBusinessNo.", "")).strip(),
+            "unified_business_number": _ubn(row.get("UnifiedBusinessNo.")),
             "listed_on": str(row.get("DateOfListing", "")).strip(),
             "official_market": "otc",
         }
@@ -183,7 +195,7 @@ def _official_identity(
         code = str(row.get("公司代號", "")).strip()
         public_by_code[code] = {
             "official_name": str(row.get("公司名稱", "")).strip(),
-            "unified_business_number": str(row.get("營利事業統一編號", "")).strip(),
+            "unified_business_number": _ubn(row.get("營利事業統一編號")),
             "listed_on": str(row.get("上市日期", "")).strip(),
         }
 
@@ -210,7 +222,7 @@ def _official_identity(
         if not isinstance(row, dict):
             raise ValueError("official GCIS company registry row drifted")
         code = str(row.get("_security_code", "")).strip()
-        ubn = str(row.get("Business_Accounting_NO", "")).strip()
+        ubn = _ubn(row.get("Business_Accounting_NO"))
         if not code or not ubn:
             raise ValueError("official GCIS company registry identity missing")
         gcis_by_code[code] = {
@@ -220,6 +232,28 @@ def _official_identity(
             "identity_link_source": str(
                 row.get("_identity_link_source", "") or ""
             ),
+        }
+
+    annual_listing_by_code: dict[str, dict[str, str]] = {}
+    for row in listing_date_evidence:
+        if not isinstance(row, dict):
+            raise ValueError("official annual-report listing-date row drifted")
+        code = str(row.get("security_code", "")).strip()
+        listed_on = str(row.get("listed_on", "")).strip()
+        source_url = str(row.get("source_url", "")).strip()
+        source_page = str(row.get("source_page", "")).strip()
+        source_excerpt = str(row.get("source_excerpt", "")).strip()
+        if (
+            not re.fullmatch(r"[0-9]{4}", code)
+            or not listed_on
+            or not source_url.startswith("https://doc.twse.com.tw/")
+            or not source_page
+            or not source_excerpt
+        ):
+            raise ValueError("official annual-report listing-date evidence missing")
+        annual_listing_by_code[code] = {
+            "listed_on": listed_on,
+            "listing_date_link_source": f"{source_url}#page={source_page}",
         }
 
     fields = twse_delisted.get("fields")
@@ -262,7 +296,11 @@ def _official_identity(
         market = str(row.market)
         authority = current.get((market, code))
         if authority is not None:
-            status = "CURRENT_OFFICIAL_IDENTITY"
+            status = (
+                "CURRENT_OFFICIAL_IDENTITY"
+                if authority["unified_business_number"]
+                else "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+            )
             lifecycle_id = f"{market}:{code}:{authority['listed_on']}"
             record = {
                 **authority,
@@ -274,7 +312,11 @@ def _official_identity(
             }
         elif code in current_by_code:
             authority = current_by_code[code]
-            status = "CURRENT_OFFICIAL_IDENTITY_MARKET_MIGRATED"
+            status = (
+                "CURRENT_OFFICIAL_IDENTITY_MARKET_MIGRATED"
+                if authority["unified_business_number"]
+                else "CURRENT_MIGRATED_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
+            )
             lifecycle_id = f"{market}:{code}:migrated:{authority['official_market']}"
             record = {
                 **authority,
@@ -300,7 +342,14 @@ def _official_identity(
             lifecycle_id = f"{market}:{code}:delisted:{authority['delisted_on']}"
             record = {
                 **authority,
-                "listed_on": mops_by_code.get(code, {}).get("listed_on") or None,
+                "listed_on": (
+                    mops_by_code.get(code, {}).get("listed_on")
+                    or annual_listing_by_code.get(code, {}).get("listed_on")
+                    or None
+                ),
+                "listing_date_link_source": annual_listing_by_code.get(code, {}).get(
+                    "listing_date_link_source"
+                ),
                 "public_on": public["listed_on"] if public else None,
                 "official_market": market,
                 "unified_business_number": (
