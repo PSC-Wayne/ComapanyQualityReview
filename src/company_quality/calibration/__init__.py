@@ -314,10 +314,6 @@ def build_candidate_score_matrix(
                     )
 
             for item in cohort:
-                definitions = {
-                    metric.metric_id: metric
-                    for metric in item.metrics if metric.pillar == pillar
-                }
                 present = {
                     metric_id: scores[(decision, item.issuer_id, f"{pillar}:{metric_id}")]
                     for metric_id in metric_ids
@@ -325,22 +321,9 @@ def build_candidate_score_matrix(
                 }
                 coverage = Decimal(len(present)) / Decimal(len(metric_ids))
                 coverages[(decision, item.issuer_id, pillar)] = coverage
-                if coverage < Decimal("0.70"):
-                    continue
-                expected_families = {family for _, family in expected}
-                family_scores: list[Decimal] = []
-                for family in sorted(expected_families):
-                    family_values = [
-                        value for metric_id, value in present.items()
-                        if definitions.get(metric_id) is not None
-                        and definitions[metric_id].evidence_family_id == family
-                    ]
-                    if not family_values:
-                        break
-                    family_scores.append(sum(family_values) / Decimal(len(family_values)))
-                else:
+                if present:
                     scores[(decision, item.issuer_id, pillar)] = (
-                        sum(family_scores) / Decimal(len(family_scores))
+                        sum(present.values()) / Decimal(len(present))
                     )
 
     weights = policy.pillar_weights
