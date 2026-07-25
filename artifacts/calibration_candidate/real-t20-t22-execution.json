@@ -1,309 +1,68 @@
 {
-  "schema_version": "RealPipelineExecutionReport.v2",
-  "generated_at": "2026-07-25T17:46:26.213741+00:00",
-  "authorization_scope": "real T20-T22 pipeline; NON_PUBLISHABLE report only; no T23, no freeze, no rating",
-  "execution_status": "BLOCKED_INPUT_DATA",
+  "schema_version": "RealPipelineExecutionReport.v3",
+  "generated_at": "2026-07-25T18:43:01.026838+00:00",
+  "authorization_scope": "real T03-T22 execution; no T23, no freeze, no rating",
+  "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
   "t23_started": false,
   "freeze_created": false,
   "rating_created": false,
-  "real_data_inventory": {
-    "security_count": 2022,
-    "price_ready_count": 2022,
-    "price_ready_coverage": 1.0,
-    "security_membership_coverage": 1.0,
-    "legal_identity_coverage": 0.990108803165183,
-    "legal_identity_gap_count": 20,
-    "legal_identity_gap_status_counts": {
-      "UNRESOLVED_FOREIGN_LEGAL_IDENTITY": 12,
-      "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY": 4,
-      "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY": 4
-    },
-    "delisted_security_count": 45,
-    "delisted_listing_date_gap_count": 37
+  "scorer_semantics": {
+    "within_pillar": "equal_weight_available_metrics",
+    "directions": "explicit_high_good_or_low_good",
+    "missing_values": "not_imputed; available weights renormalized within pillar",
+    "cross_pillar": "all six pillars require at least one available metric"
   },
   "stage_results": {
+    "T03_T06": {
+      "status": "EXECUTED_WITH_MEMBERSHIP_LEVEL_EXCLUSIONS",
+      "membership_level_failure_count": 41
+    },
+    "T09_T14": {
+      "status": "EXECUTED_WITH_NULL_AUTHORITY_GAPS",
+      "observation_count": 5305,
+      "available_metric_counts": {
+        "audit_reliability": 5305,
+        "earnings_capital_efficiency": 15909,
+        "cash_balance_allocation": 5305,
+        "business_moat": 3038,
+        "governance": 5302,
+        "people_adaptability": 0
+      }
+    },
+    "T16_T19": {
+      "status": "BLOCKED_INCOMPLETE_CANDIDATE_CONTRACT",
+      "fully_covered_six_pillar_count": 0,
+      "total_observation_count": 5305
+    },
     "T20": {
-      "status": "BLOCKED_INCOMPLETE_LEGAL_IDENTITY",
-      "output": null,
-      "blockers": [
-        "Immutable official legal identity is unresolved for affected delisted securities.",
-        "Official exchange listing dates are unavailable for affected delisted securities.",
-        "A complete governed adverse/non-adverse classification of official delisting reasons is not materialized."
-      ],
-      "affected_legal_identity_gaps": [
-        {
-          "security_code": "2928",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "1724",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "6172",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "4803",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "8427",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "9188",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "1507",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "4141",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "2936",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "3642",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "8480",
-          "market": "sii",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "1258",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "5281",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "6404",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "8418",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "6514",
-          "market": "otc",
-          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "9105",
-          "market": "sii",
-          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "9110",
-          "market": "sii",
-          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "9103",
-          "market": "sii",
-          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        },
-        {
-          "security_code": "9136",
-          "market": "sii",
-          "identity_status": "CURRENT_OFFICIAL_LIFECYCLE_UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
-        }
-      ],
-      "affected_listing_date_gaps": [
-        {
-          "security_code": "4152",
-          "market": "otc"
-        },
-        {
-          "security_code": "2928",
-          "market": "otc"
-        },
-        {
-          "security_code": "1724",
-          "market": "sii"
-        },
-        {
-          "security_code": "6172",
-          "market": "sii"
-        },
-        {
-          "security_code": "3144",
-          "market": "otc"
-        },
-        {
-          "security_code": "4803",
-          "market": "otc"
-        },
-        {
-          "security_code": "2456",
-          "market": "sii"
-        },
-        {
-          "security_code": "8427",
-          "market": "sii"
-        },
-        {
-          "security_code": "9188",
-          "market": "sii"
-        },
-        {
-          "security_code": "2841",
-          "market": "sii"
-        },
-        {
-          "security_code": "1507",
-          "market": "sii"
-        },
-        {
-          "security_code": "8406",
-          "market": "otc"
-        },
-        {
-          "security_code": "4141",
-          "market": "sii"
-        },
-        {
-          "security_code": "4429",
-          "market": "otc"
-        },
-        {
-          "security_code": "2936",
-          "market": "sii"
-        },
-        {
-          "security_code": "5102",
-          "market": "otc"
-        },
-        {
-          "security_code": "6251",
-          "market": "sii"
-        },
-        {
-          "security_code": "6289",
-          "market": "sii"
-        },
-        {
-          "security_code": "3383",
-          "market": "sii"
-        },
-        {
-          "security_code": "3642",
-          "market": "otc"
-        },
-        {
-          "security_code": "8480",
-          "market": "sii"
-        },
-        {
-          "security_code": "6247",
-          "market": "otc"
-        },
-        {
-          "security_code": "3536",
-          "market": "sii"
-        },
-        {
-          "security_code": "1258",
-          "market": "otc"
-        },
-        {
-          "security_code": "3089",
-          "market": "otc"
-        },
-        {
-          "security_code": "5281",
-          "market": "otc"
-        },
-        {
-          "security_code": "4944",
-          "market": "otc"
-        },
-        {
-          "security_code": "6404",
-          "market": "otc"
-        },
-        {
-          "security_code": "3682",
-          "market": "sii"
-        },
-        {
-          "security_code": "8418",
-          "market": "otc"
-        },
-        {
-          "security_code": "4712",
-          "market": "otc"
-        },
-        {
-          "security_code": "2358",
-          "market": "sii"
-        },
-        {
-          "security_code": "5383",
-          "market": "otc"
-        },
-        {
-          "security_code": "1701",
-          "market": "sii"
-        },
-        {
-          "security_code": "6514",
-          "market": "otc"
-        },
-        {
-          "security_code": "2888",
-          "market": "sii"
-        },
-        {
-          "security_code": "3454",
-          "market": "sii"
-        }
-      ]
+      "status": "EXECUTED_NON_PUBLISHABLE",
+      "TWSE_member_count": 1082,
+      "TPEx_member_count": 894
     },
     "T21": {
-      "status": "BLOCKED_UPSTREAM_T20",
-      "output": null,
-      "price_input_status": "READY",
-      "blockers": [
-        "No admitted real T20 cohort exists.",
-        "FinLab adjusted close is materialized, but no same-generation governed T21 label inputs exist for the admitted cohort."
-      ]
+      "status": "EXECUTED_NON_PUBLISHABLE",
+      "label_count": 5305,
+      "fully_observed_count": 5302,
+      "adverse_fully_observed_count": 567,
+      "coverage": 0.9994344957587182
     },
     "T22": {
-      "status": "BLOCKED_UPSTREAM_T21_AND_FEATURES",
-      "output": null,
-      "calibration_validation_report": null,
-      "candidate_observation_count": 0,
-      "blockers": [
-        "No real T21 OutcomeLabelSet observations exist.",
-        "No same-generation real T09/T10/T13/T14/T16/T17/T18/T19 candidate observations exist."
-      ]
+      "status": "BLOCKED_INPUT_CONTRACT",
+      "calibration_executed": false,
+      "publishable": false,
+      "failure_reasons": {
+        "candidate_matrix": "no_fully_covered_six_pillar_candidate_rows",
+        "people_adaptability": "no_authoritative_PIT_management_delivery_or_succession_evidence",
+        "downside_constructs": "governed_PIT_permanent_loss_and_material_event_constructs_unavailable"
+      }
     }
   },
-  "execution_disposition": "STOP_BEFORE_T23"
+  "failure_reasons": {
+    "candidate_matrix": "no_fully_covered_six_pillar_candidate_rows",
+    "people_adaptability": "no_authoritative_PIT_management_delivery_or_succession_evidence",
+    "downside_constructs": "governed_PIT_permanent_loss_and_material_event_constructs_unavailable"
+  },
+  "next_authorized_stage": "NONE"
 }
