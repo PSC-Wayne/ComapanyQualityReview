@@ -137,6 +137,7 @@ def _official_identity(
             record = {
                 **authority,
                 "delisted_on": None,
+                "public_on": None,
                 "legal_identity_resolved": bool(
                     authority["unified_business_number"]
                 ),
@@ -148,6 +149,7 @@ def _official_identity(
             record = {
                 **authority,
                 "delisted_on": None,
+                "public_on": None,
                 "legal_identity_resolved": bool(
                     authority["unified_business_number"]
                 ),
@@ -163,7 +165,8 @@ def _official_identity(
             lifecycle_id = f"{market}:{code}:delisted:{authority['delisted_on']}"
             record = {
                 **authority,
-                "listed_on": legal["listed_on"] if legal else None,
+                "listed_on": None,
+                "public_on": legal["listed_on"] if legal else None,
                 "official_market": market,
                 "unified_business_number": (
                     legal["unified_business_number"] if legal else None
@@ -180,6 +183,7 @@ def _official_identity(
                 "unified_business_number": None,
                 "listed_on": None,
                 "delisted_on": None,
+                "public_on": None,
                 "official_market": None,
                 "legal_identity_resolved": False,
             }

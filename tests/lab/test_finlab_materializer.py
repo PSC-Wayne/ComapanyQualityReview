@@ -130,6 +130,8 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
     assert twse["security_lifecycle_id"] == "sii:6806:delisted:115/06/23"
     assert bool(twse["legal_identity_resolved"])
     assert twse["unified_business_number"] == "28653781"
+    assert pd.isna(twse["listed_on"])
+    assert twse["public_on"] == "20200930"
     assert otc["identity_status"] == "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
     assert otc["security_lifecycle_id"] == "otc:1258:delisted:110-12-15"
     assert not bool(otc["legal_identity_resolved"])
