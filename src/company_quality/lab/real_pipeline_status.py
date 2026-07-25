@@ -74,6 +74,10 @@ def build_real_pipeline_status(
             ),
             "legal_identity_coverage": identity_report.get("legal_identity_coverage"),
             "legal_identity_gap_count": len(legal_gaps),
+            "legal_identity_gap_status_counts": {
+                str(key): int(value)
+                for key, value in legal_gaps["identity_status"].value_counts().items()
+            },
             "delisted_security_count": len(delisted),
             "delisted_listing_date_gap_count": len(listing_date_gaps),
         },

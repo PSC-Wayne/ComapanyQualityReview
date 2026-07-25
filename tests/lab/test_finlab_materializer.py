@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import company_quality.lab.finlab_materializer as materializer
 from company_quality.lab.finlab_materializer import (
     ADJUSTED_PRICE_DATASET,
     PRICE_DATASET,
@@ -10,6 +11,33 @@ from company_quality.lab.finlab_materializer import (
     VOLUME_DATASET,
     materialize_finlab,
 )
+
+
+def test_mopsov_filing_identity_binds_stock_code_to_legal_name(monkeypatch):
+    body = (
+        '<ix:nonNumeric name="tifrs-notes:CompanyID">2456</ix:nonNumeric>'
+        '<ix:nonNumeric name="tifrs-notes:CompanyChineseName">'
+        '奇力新電子股份有限公司</ix:nonNumeric>'
+    ).encode("big5")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return body
+
+    monkeypatch.setattr(materializer, "urlopen", lambda *_args, **_kwargs: Response())
+    result = materializer._fetch_mopsov_filing_identity(
+        "2456", range(2020, 2019, -1)
+    )
+    assert result is not None
+    name, source = result
+    assert name == "奇力新電子股份有限公司"
+    assert "CO_ID=2456" in source
 
 
 def test_finlab_materializer_filters_company_stocks_and_normalizes_wealth(
@@ -56,6 +84,8 @@ def test_finlab_materializer_filters_company_stocks_and_normalizes_wealth(
                 "DateOfListing": "20150925",
             }],
             "twse_public": [],
+            "mops_profiles": [],
+            "gcis_identities": [],
             "twse_delisted": {
                 "fields": ["終止上市日期", "公司名稱", "上市編號"],
                 "data": [],
@@ -105,6 +135,13 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
                 "營利事業統一編號": "28653781",
                 "上市日期": "20200930",
             }],
+            "mops_profiles": [{
+                "stockId": "6806",
+                "companyName": "森崴能源股份有限公司",
+                "businessNo": "28653781",
+                "listingDate": "110/11/15",
+            }],
+            "gcis_identities": [],
             "twse_delisted": {
                 "fields": ["終止上市日期", "公司名稱", "上市編號"],
                 "data": [["115/06/23", "森崴能源", "6806"]],
@@ -130,9 +167,9 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
     assert twse["security_lifecycle_id"] == "sii:6806:delisted:115/06/23"
     assert bool(twse["legal_identity_resolved"])
     assert twse["unified_business_number"] == "28653781"
-    assert pd.isna(twse["listed_on"])
+    assert twse["listed_on"] == "110/11/15"
     assert twse["public_on"] == "20200930"
-    assert otc["identity_status"] == "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+    assert otc["identity_status"] == "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
     assert otc["security_lifecycle_id"] == "otc:1258:delisted:110-12-15"
     assert not bool(otc["legal_identity_resolved"])
     identity_report = report["official_identity"]

@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v2",
-  "generated_at": "2026-07-25T14:39:03.943512+00:00",
+  "generated_at": "2026-07-25T16:05:35.485574+00:00",
   "authorization_scope": "real T20-T22 pipeline; NON_PUBLISHABLE report only; no T23, no freeze, no rating",
   "execution_status": "BLOCKED_INPUT_DATA",
   "publishable": false,
@@ -13,10 +13,14 @@
     "price_ready_count": 2022,
     "price_ready_coverage": 1.0,
     "security_membership_coverage": 1.0,
-    "legal_identity_coverage": 0.9807121661721068,
-    "legal_identity_gap_count": 39,
+    "legal_identity_coverage": 0.9920870425321464,
+    "legal_identity_gap_count": 16,
+    "legal_identity_gap_status_counts": {
+      "UNRESOLVED_FOREIGN_LEGAL_IDENTITY": 12,
+      "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY": 4
+    },
     "delisted_security_count": 45,
-    "delisted_listing_date_gap_count": 45
+    "delisted_listing_date_gap_count": 41
   },
   "stage_results": {
     "T20": {
@@ -29,199 +33,84 @@
       ],
       "affected_legal_identity_gaps": [
         {
-          "security_code": "4152",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
           "security_code": "2928",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "1724",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
         },
         {
           "security_code": "6172",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3144",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
         },
         {
           "security_code": "4803",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "2456",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "8427",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "9188",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "2841",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "1507",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "8406",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
         },
         {
           "security_code": "4141",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "4429",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "2936",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "5102",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "6251",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "6289",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3383",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "5820",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "3642",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_DOMESTIC_LEGAL_IDENTITY"
         },
         {
           "security_code": "8480",
           "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "6247",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "6594",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3536",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "1258",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3089",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "5281",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "4944",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "6404",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3682",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "8418",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "2358",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "5383",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "1701",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         },
         {
           "security_code": "6514",
           "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "8420",
-          "market": "otc",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "2888",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
-        },
-        {
-          "security_code": "3454",
-          "market": "sii",
-          "identity_status": "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+          "identity_status": "UNRESOLVED_FOREIGN_LEGAL_IDENTITY"
         }
       ],
       "affected_listing_date_gaps": [
@@ -248,10 +137,6 @@
         {
           "security_code": "4803",
           "market": "otc"
-        },
-        {
-          "security_code": "2823",
-          "market": "sii"
         },
         {
           "security_code": "2456",
@@ -362,10 +247,6 @@
           "market": "otc"
         },
         {
-          "security_code": "2443",
-          "market": "sii"
-        },
-        {
           "security_code": "2358",
           "market": "sii"
         },
@@ -390,19 +271,11 @@
           "market": "sii"
         },
         {
-          "security_code": "6288",
-          "market": "sii"
-        },
-        {
           "security_code": "2809",
           "market": "sii"
         },
         {
           "security_code": "3454",
-          "market": "sii"
-        },
-        {
-          "security_code": "6806",
           "market": "sii"
         }
       ]
