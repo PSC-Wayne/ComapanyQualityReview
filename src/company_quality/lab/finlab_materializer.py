@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 from typing import Callable, Mapping
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import pandas as pd
@@ -18,9 +19,11 @@ VOLUME_DATASET = "price:成交股數"
 SECURITY_CATEGORIES_DATASET = "security_categories"
 TWSE_CURRENT_IDENTITY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_CURRENT_IDENTITY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
+TWSE_PUBLIC_IDENTITY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_P"
 TWSE_DELISTED_URL = (
     "https://www.twse.com.tw/rwd/zh/company/suspendListing?response=json"
 )
+TPEX_DELISTED_URL = "https://www.tpex.org.tw/www/zh-tw/company/deListed"
 
 DataGetter = Callable[[str], pd.DataFrame]
 
@@ -38,44 +41,90 @@ def _official_identity(
     twse = payloads.get("twse_current")
     tpex = payloads.get("tpex_current")
     twse_delisted = payloads.get("twse_delisted")
-    if not isinstance(twse, list) or not isinstance(tpex, list):
+    tpex_delisted = payloads.get("tpex_delisted")
+    twse_public = payloads.get("twse_public")
+    if not isinstance(twse, list) or not isinstance(tpex, list) or not isinstance(
+        twse_public, list
+    ):
         raise ValueError("official current identity payload drifted")
     if not isinstance(twse_delisted, dict) or not isinstance(
         twse_delisted.get("data"), list
     ):
         raise ValueError("official TWSE delisted payload drifted")
+    if not isinstance(tpex_delisted, list):
+        raise ValueError("official TPEx delisted payload drifted")
 
-    current: dict[tuple[str, str], dict[str, object]] = {}
+    current: dict[tuple[str, str], dict[str, str]] = {}
+    current_by_code: dict[str, dict[str, str]] = {}
     for row in twse:
         if not isinstance(row, dict):
             raise ValueError("official TWSE identity row drifted")
         code = str(row.get("公司代號", "")).strip()
-        current[("sii", code)] = {
+        authority = {
             "official_name": str(row.get("公司名稱", "")).strip(),
             "unified_business_number": str(row.get("營利事業統一編號", "")).strip(),
             "listed_on": str(row.get("上市日期", "")).strip(),
+            "official_market": "sii",
         }
+        current[("sii", code)] = authority
+        current_by_code[code] = authority
     for row in tpex:
         if not isinstance(row, dict):
             raise ValueError("official TPEx identity row drifted")
         code = str(row.get("SecuritiesCompanyCode", "")).strip()
-        current[("otc", code)] = {
+        authority = {
             "official_name": str(row.get("CompanyName", "")).strip(),
             "unified_business_number": str(row.get("UnifiedBusinessNo.", "")).strip(),
             "listed_on": str(row.get("DateOfListing", "")).strip(),
+            "official_market": "otc",
+        }
+        current[("otc", code)] = authority
+        current_by_code[code] = authority
+
+    public_by_code: dict[str, dict[str, str]] = {}
+    for row in twse_public:
+        if not isinstance(row, dict):
+            raise ValueError("official public-company identity row drifted")
+        code = str(row.get("公司代號", "")).strip()
+        public_by_code[code] = {
+            "official_name": str(row.get("公司名稱", "")).strip(),
+            "unified_business_number": str(row.get("營利事業統一編號", "")).strip(),
+            "listed_on": str(row.get("上市日期", "")).strip(),
         }
 
     fields = twse_delisted.get("fields")
     if fields != ["終止上市日期", "公司名稱", "上市編號"]:
         raise ValueError("official TWSE delisted fields drifted")
-    delisted: dict[str, dict[str, str]] = {}
+    delisted: dict[tuple[str, str], dict[str, str]] = {}
     for row in twse_delisted["data"]:
         if not isinstance(row, list) or len(row) != 3:
             raise ValueError("official TWSE delisted row drifted")
-        delisted[str(row[2]).strip()] = {
+        delisted[("sii", str(row[2]).strip())] = {
             "delisted_on": str(row[0]).strip(),
             "official_name": str(row[1]).strip(),
         }
+
+    for payload in tpex_delisted:
+        if not isinstance(payload, dict):
+            raise ValueError("official TPEx delisted payload drifted")
+        tables = payload.get("tables")
+        if not isinstance(tables, list) or len(tables) != 1:
+            raise ValueError("official TPEx delisted tables drifted")
+        table = tables[0]
+        if not isinstance(table, dict) or table.get("fields") != [
+            "股票代號", "公司名稱", "終止上櫃日期", "終止上櫃原因", "公司資料網址"
+        ]:
+            raise ValueError("official TPEx delisted fields drifted")
+        rows = table.get("data")
+        if not isinstance(rows, list):
+            raise ValueError("official TPEx delisted rows drifted")
+        for row in rows:
+            if not isinstance(row, list) or len(row) != 5:
+                raise ValueError("official TPEx delisted row drifted")
+            delisted[("otc", str(row[0]).strip())] = {
+                "official_name": str(row[1]).strip(),
+                "delisted_on": str(row[2]).strip(),
+            }
 
     records: list[dict[str, object]] = []
     for row in universe.itertuples(index=False):
@@ -92,15 +141,36 @@ def _official_identity(
                     authority["unified_business_number"]
                 ),
             }
-        elif market == "sii" and code in delisted:
-            authority = delisted[code]
-            status = "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+        elif code in current_by_code:
+            authority = current_by_code[code]
+            status = "CURRENT_OFFICIAL_IDENTITY_MARKET_MIGRATED"
+            lifecycle_id = f"{market}:{code}:migrated:{authority['official_market']}"
+            record = {
+                **authority,
+                "delisted_on": None,
+                "legal_identity_resolved": bool(
+                    authority["unified_business_number"]
+                ),
+            }
+        elif (market, code) in delisted:
+            authority = delisted[(market, code)]
+            legal = public_by_code.get(code)
+            status = (
+                "OFFICIAL_DELISTED_LEGAL_IDENTITY"
+                if legal and legal["unified_business_number"]
+                else "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+            )
             lifecycle_id = f"{market}:{code}:delisted:{authority['delisted_on']}"
             record = {
                 **authority,
-                "listed_on": None,
-                "unified_business_number": None,
-                "legal_identity_resolved": False,
+                "listed_on": legal["listed_on"] if legal else None,
+                "official_market": market,
+                "unified_business_number": (
+                    legal["unified_business_number"] if legal else None
+                ),
+                "legal_identity_resolved": bool(
+                    legal and legal["unified_business_number"]
+                ),
             }
         else:
             status = "UNRESOLVED_OFFICIAL_IDENTITY"
@@ -110,6 +180,7 @@ def _official_identity(
                 "unified_business_number": None,
                 "listed_on": None,
                 "delisted_on": None,
+                "official_market": None,
                 "legal_identity_resolved": False,
             }
         records.append({
@@ -235,8 +306,9 @@ def materialize_finlab(
             "sources": {
                 "TWSE_current": TWSE_CURRENT_IDENTITY_URL,
                 "TPEx_current": TPEX_CURRENT_IDENTITY_URL,
+                "TWSE_public_companies": TWSE_PUBLIC_IDENTITY_URL,
                 "TWSE_delisted": TWSE_DELISTED_URL,
-                "TPEx_delisted": "not_materialized",
+                "TPEx_delisted": TPEX_DELISTED_URL,
             },
             "security_membership_resolved_count": membership_resolved,
             "security_membership_unresolved_count": len(identity) - membership_resolved,
@@ -246,8 +318,13 @@ def materialize_finlab(
             "legal_identity_coverage": legal_identity_resolved / len(identity),
             "unresolved": unresolved_identity,
             "t20_status": (
-                "READY" if membership_resolved == len(identity)
-                else "BLOCKED_INCOMPLETE_HISTORICAL_IDENTITY"
+                "BLOCKED_INCOMPLETE_HISTORICAL_IDENTITY"
+                if membership_resolved != len(identity)
+                else (
+                    "BLOCKED_INCOMPLETE_LEGAL_IDENTITY"
+                    if legal_identity_resolved != len(identity)
+                    else "READY"
+                )
             ),
         },
         "materialized_at": datetime.now(timezone.utc).isoformat(),
@@ -266,6 +343,15 @@ def main() -> int:
     args = parser.parse_args()
     from finlab import data
 
+    tpex_delisted = [
+        _fetch_json(
+            TPEX_DELISTED_URL + "?" + urlencode({
+                "date": str(year), "reason": "-1", "code": ""
+            })
+        )
+        for year in range(args.start.year, args.end.year + 1)
+    ]
+
     report = materialize_finlab(
         data_get=data.get,
         start=args.start,
@@ -274,7 +360,9 @@ def main() -> int:
         official_identity_payloads={
             "twse_current": _fetch_json(TWSE_CURRENT_IDENTITY_URL),
             "tpex_current": _fetch_json(TPEX_CURRENT_IDENTITY_URL),
+            "twse_public": _fetch_json(TWSE_PUBLIC_IDENTITY_URL),
             "twse_delisted": _fetch_json(TWSE_DELISTED_URL),
+            "tpex_delisted": tpex_delisted,
         },
     )
     print(json.dumps({

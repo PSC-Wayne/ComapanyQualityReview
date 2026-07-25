@@ -55,10 +55,12 @@ def test_finlab_materializer_filters_company_stocks_and_normalizes_wealth(
                 "UnifiedBusinessNo.": "28113286",
                 "DateOfListing": "20150925",
             }],
+            "twse_public": [],
             "twse_delisted": {
                 "fields": ["終止上市日期", "公司名稱", "上市編號"],
                 "data": [],
             },
+            "tpex_delisted": [],
         },
     )
 
@@ -97,22 +99,42 @@ def test_finlab_materializer_keeps_delisted_lifecycle_separate_from_legal_identi
         official_identity_payloads={
             "twse_current": [],
             "tpex_current": [],
+            "twse_public": [{
+                "公司代號": "6806",
+                "公司名稱": "森崴能源股份有限公司",
+                "營利事業統一編號": "28653781",
+                "上市日期": "20200930",
+            }],
             "twse_delisted": {
                 "fields": ["終止上市日期", "公司名稱", "上市編號"],
                 "data": [["115/06/23", "森崴能源", "6806"]],
             },
+            "tpex_delisted": [{
+                "tables": [{
+                    "fields": [
+                        "股票代號", "公司名稱", "終止上櫃日期",
+                        "終止上櫃原因", "公司資料網址",
+                    ],
+                    "data": [[
+                        "1258", "其祥生物科技控股股份有限公司", "110-12-15",
+                        "官方終止上櫃原因", "https://mops.twse.com.tw/",
+                    ]],
+                }],
+            }],
         },
     )
     identity = pd.read_parquet(tmp_path / "official_identity.parquet")
     twse = identity.loc[identity["security_code"] == "6806"].iloc[0]
     otc = identity.loc[identity["security_code"] == "1258"].iloc[0]
-    assert twse["identity_status"] == "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+    assert twse["identity_status"] == "OFFICIAL_DELISTED_LEGAL_IDENTITY"
     assert twse["security_lifecycle_id"] == "sii:6806:delisted:115/06/23"
-    assert not bool(twse["legal_identity_resolved"])
-    assert otc["identity_status"] == "UNRESOLVED_OFFICIAL_IDENTITY"
+    assert bool(twse["legal_identity_resolved"])
+    assert twse["unified_business_number"] == "28653781"
+    assert otc["identity_status"] == "OFFICIAL_DELISTED_SECURITY_LIFECYCLE"
+    assert otc["security_lifecycle_id"] == "otc:1258:delisted:110-12-15"
+    assert not bool(otc["legal_identity_resolved"])
     identity_report = report["official_identity"]
     assert isinstance(identity_report, dict)
-    assert identity_report["security_membership_resolved_count"] == 1
-    assert identity_report["t20_status"] == (
-        "BLOCKED_INCOMPLETE_HISTORICAL_IDENTITY"
-    )
+    assert identity_report["security_membership_resolved_count"] == 2
+    assert identity_report["legal_identity_gap_count"] == 1
+    assert identity_report["t20_status"] == "BLOCKED_INCOMPLETE_LEGAL_IDENTITY"
