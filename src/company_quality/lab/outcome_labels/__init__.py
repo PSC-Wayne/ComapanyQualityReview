@@ -69,6 +69,9 @@ class PITWealthInput:
     governed_events: tuple[GovernedOutcomeEvent, ...]
     complete_through: str
     evidence_ids: tuple[str, ...]
+    price_basis: Literal[
+        "unadjusted_close_with_actions", "pre_adjusted_total_return"
+    ] = "unadjusted_close_with_actions"
     schema_version: Literal["PITWealthInput.v1"] = "PITWealthInput.v1"
 
 
@@ -129,9 +132,10 @@ class OutcomeLabelSet:
     source_version: Literal["AdverseControlCohort.v1+PITWealthInput.v1"] = (
         "AdverseControlCohort.v1+PITWealthInput.v1"
     )
-    formula_version: Literal["unadjusted-close-action-cash-total-return.v1"] = (
-        "unadjusted-close-action-cash-total-return.v1"
-    )
+    formula_version: Literal[
+        "unadjusted-close-action-cash-total-return.v1",
+        "pre-adjusted-total-return-series.v1",
+    ] = "unadjusted-close-action-cash-total-return.v1"
     model_version: Literal["deterministic-outcome-labels-no-calibration.v1"] = (
         "deterministic-outcome-labels-no-calibration.v1"
     )
@@ -234,6 +238,13 @@ def _validate_input(
         raise OutcomeLabelError("BLOCKED_CONTRACT: T20 schema mismatch")
     if wealth_input.schema_version != "PITWealthInput.v1":
         raise OutcomeLabelError("BLOCKED_CONTRACT: wealth schema mismatch")
+    if wealth_input.price_basis == "pre_adjusted_total_return":
+        if wealth_input.corporate_actions:
+            raise OutcomeLabelError(
+                "pre-adjusted total-return input forbids additional corporate actions"
+            )
+    elif wealth_input.price_basis != "unadjusted_close_with_actions":
+        raise OutcomeLabelError("unsupported wealth price basis")
     if issuer_id not in cohort.issuer_ids or wealth_input.issuer_id != issuer_id:
         raise OutcomeLabelError("issuer is not admitted by T20 cohort")
     if not 1 <= len(issuer_id) <= 64:
@@ -489,6 +500,11 @@ def build_outcome_label_set(
         available_at=max(available).isoformat(),
         generation_id=generation_id,
         producer_candidate_sha=producer_candidate_sha,
+        formula_version=(
+            "pre-adjusted-total-return-series.v1"
+            if wealth_input.price_basis == "pre_adjusted_total_return"
+            else "unadjusted-close-action-cash-total-return.v1"
+        ),
     )
 
 

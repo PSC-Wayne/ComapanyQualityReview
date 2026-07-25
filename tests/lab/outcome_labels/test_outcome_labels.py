@@ -2,6 +2,7 @@ import json
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -63,6 +64,9 @@ def wealth_input(
     missing=(),
     events=(),
     complete="2024-01-01",
+    price_basis: Literal[
+        "unadjusted_close_with_actions", "pre_adjusted_total_return"
+    ] = "unadjusted_close_with_actions",
 ):
     return PITWealthInput(
         issuer_id="issuer-1",
@@ -74,6 +78,7 @@ def wealth_input(
         governed_events=tuple(events),
         complete_through=complete,
         evidence_ids=("wealth-input",),
+        price_basis=price_basis,
     )
 
 
@@ -148,6 +153,29 @@ def test_drawdown_over_50_and_governed_event_return_to_authority() -> None:
     assert episode.maximum_drawdown_pct == Decimal("-60.000000")
     assert episode.recovery_date is None
     assert "authority:default" in result.adjustment_evidence_ids
+
+
+def test_pre_adjusted_total_return_is_not_adjusted_twice() -> None:
+    result = build(wealth_input([
+        close("2020-12-31", "100"),
+        close("2021-06-01", "40"),
+        close("2022-01-01", "40"),
+        close("2023-01-01", "40"),
+        close("2024-01-01", "40"),
+    ], price_basis="pre_adjusted_total_return"))
+    assert result.adverse_labels == ("drawdown_over_50",)
+    assert result.formula_version == "pre-adjusted-total-return-series.v1"
+
+    action = CorporateAction(
+        effective_on="2021-03-01", share_multiplier=Decimal("2"),
+        cash_per_pre_action_share=Decimal("0"), terminal_cash=False,
+        available_at="2021-03-01T18:00:00+08:00", evidence_ids=("split",),
+    )
+    with pytest.raises(OutcomeLabelError, match="forbids additional corporate actions"):
+        build(wealth_input(
+            [close("2020-12-31", "100")], actions=[action],
+            price_basis="pre_adjusted_total_return",
+        ))
 
 
 def test_terminal_cash_makes_outcome_observed_without_synthetic_close() -> None:
