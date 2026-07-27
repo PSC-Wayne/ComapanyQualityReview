@@ -119,6 +119,7 @@ class ThresholdCandidates:
     downside_faces: tuple[Decimal, Decimal, Decimal, Decimal]
     bomb_materiality: Decimal
     upside_status: Literal["evaluated", "blocked_missing_T17"] = "evaluated"
+    quality_status: Literal["evaluated", "diagnostic_only_blocked_T14"] = "evaluated"
 
 
 @dataclass(frozen=True, slots=True)
