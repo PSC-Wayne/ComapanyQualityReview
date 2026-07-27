@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/AIAdjustedCompanyResearchSnapshot.v1.schema.json",
+  "title": "AIAdjustedCompanyResearchSnapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "generation_id", "checked_at", "ai_status", "core_snapshot", "quality",
+    "stars", "downside_faces", "verified_evidence", "writes_core_model",
+    "writes_labels", "writes_validation_metrics", "schema_version"
+  ],
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id", "generation_id", "source_name", "source_url", "source_kind",
+        "independence_key", "published_at", "checked_at", "supported_reason", "validity"
+      ],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "generation_id": {"type": "string", "minLength": 1},
+        "source_name": {"type": "string", "minLength": 1},
+        "source_url": {"type": "string", "format": "uri"},
+        "source_kind": {"enum": ["official", "reliable"]},
+        "independence_key": {"type": "string", "minLength": 1},
+        "published_at": {"type": "string", "format": "date-time"},
+        "checked_at": {"type": "string", "format": "date-time"},
+        "supported_reason": {"type": "string", "minLength": 1},
+        "validity": {"enum": ["confirmed_current", "unavailable", "contradicted"]}
+      }
+    },
+    "adjustment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension", "core_value", "core_color", "raw_delta", "delta_color",
+        "effect_direction", "adjusted_value", "evidence_ids", "sourced_reason", "status"
+      ],
+      "properties": {
+        "dimension": {"enum": ["quality", "stars", "downside_faces"]},
+        "core_value": {"type": ["number", "null"]},
+        "core_color": {"const": "yellow"},
+        "raw_delta": {"type": "number"},
+        "delta_color": {"enum": ["yellow", "green", "red"]},
+        "effect_direction": {"enum": ["neutral", "favorable", "adverse"]},
+        "adjusted_value": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "evidence_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "sourced_reason": {"type": "string", "minLength": 1},
+        "status": {"enum": ["AI_adjusted", "AI_no_adjustment", "AI_unavailable"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"dimension": {"const": "quality"}}},
+          "then": {
+            "properties": {
+              "core_value": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              "adjusted_value": {"type": ["number", "null"], "minimum": 0, "maximum": 100}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"dimension": {"enum": ["stars", "downside_faces"]}}},
+          "then": {
+            "properties": {
+              "core_value": {"type": ["number", "null"], "minimum": 0, "maximum": 5},
+              "adjusted_value": {"type": ["number", "null"], "minimum": 0, "maximum": 5}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "generation_id": {"type": "string", "minLength": 1},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "ai_status": {"enum": ["AI_adjusted", "AI_no_adjustment", "AI_unavailable"]},
+    "core_snapshot": {"type": "object"},
+    "quality": {"$ref": "#/$defs/adjustment"},
+    "stars": {"$ref": "#/$defs/adjustment"},
+    "downside_faces": {"$ref": "#/$defs/adjustment"},
+    "verified_evidence": {
+      "type": "array", "uniqueItems": true,
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "writes_core_model": {"const": false},
+    "writes_labels": {"const": false},
+    "writes_validation_metrics": {"const": false},
+    "schema_version": {"const": "AIAdjustedCompanyResearchSnapshot.v1"}
+  }
+}
