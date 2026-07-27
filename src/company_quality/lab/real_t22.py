@@ -452,7 +452,9 @@ def execute_real_t22_calibration(
         "stress": "authoritative_stress_period_artifact_unavailable",
     })
     thresholds = replace(
-        report.threshold_candidates, upside_status="blocked_missing_T17"
+        report.threshold_candidates,
+        upside_status="blocked_missing_T17",
+        quality_status="diagnostic_only_blocked_T14",
     )
     return replace(
         report,
@@ -573,7 +575,8 @@ def main() -> int:
                 json.dumps(diagnostic_auc, default=float)
             ),
             "section_status": {
-                "quality_downside_calibration": "evaluated",
+                "quality_calibration": "diagnostic_only_blocked_T14",
+                "downside_calibration": "diagnostic_only_blocked_T18",
                 "upside_stars": "blocked_missing_T17",
             },
             "failure_reasons": report.failure_reasons,

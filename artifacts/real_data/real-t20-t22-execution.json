@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T02:18:42.831827+00:00",
+  "generated_at": "2026-07-27T02:27:11.147370+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -64,7 +64,8 @@
         "downside_composite": 0.5749413001337811
       },
       "section_status": {
-        "quality_downside_calibration": "evaluated",
+        "quality_calibration": "diagnostic_only_blocked_T14",
+        "downside_calibration": "diagnostic_only_blocked_T18",
         "upside_stars": "blocked_missing_T17"
       },
       "failure_reasons": {
