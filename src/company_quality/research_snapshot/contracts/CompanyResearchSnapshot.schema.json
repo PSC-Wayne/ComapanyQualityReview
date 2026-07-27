@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "CompanyResearchSnapshot.v1",
+  "title": "CompanyResearchSnapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuer_id", "security_code", "market", "generation_id", "generated_at",
+    "status", "ai_status", "input_source_versions", "quality", "upside",
+    "downside", "rating_disposition", "schema_version"
+  ],
+  "$defs": {
+    "status": {
+      "enum": ["formal", "research_only", "stale_reference", "data_insufficient", "industry_sample_insufficient"]
+    },
+    "probability": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    "score100": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "rating5": {"type": ["number", "null"], "minimum": 0, "maximum": 5},
+    "coreMetadata": {
+      "type": "object",
+      "required": ["generation_id", "status", "model_version", "data_as_of"],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "status": {"$ref": "#/$defs/status"},
+        "model_version": {"type": "string", "minLength": 1},
+        "data_as_of": {"type": "string", "format": "date"}
+      }
+    }
+  },
+  "properties": {
+    "issuer_id": {"type": "string", "minLength": 1},
+    "security_code": {"type": ["string", "null"], "minLength": 1},
+    "market": {"enum": ["TWSE", "TPEx", null]},
+    "generation_id": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "status": {"$ref": "#/$defs/status"},
+    "ai_status": {"const": "AI_unavailable"},
+    "input_source_versions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "minLength": 1}
+    },
+    "quality": {
+      "allOf": [
+        {"$ref": "#/$defs/coreMetadata"},
+        {
+          "additionalProperties": false,
+          "required": ["generation_id", "status", "score", "confidence", "model_version", "data_as_of"],
+          "properties": {
+            "generation_id": true, "status": true, "model_version": true, "data_as_of": true,
+            "score": {"$ref": "#/$defs/score100"},
+            "confidence": {"$ref": "#/$defs/probability"}
+          }
+        }
+      ]
+    },
+    "upside": {
+      "allOf": [
+        {"$ref": "#/$defs/coreMetadata"},
+        {
+          "additionalProperties": false,
+          "required": [
+            "generation_id", "status", "positive_return_probability",
+            "official_benchmark_outperform_probability",
+            "secondary_market_median_outperform_probability", "p10_return",
+            "p50_return", "p90_return", "p10_price", "p50_price", "p90_price",
+            "stars", "confidence", "model_version", "data_as_of"
+          ],
+          "properties": {
+            "generation_id": true, "status": true, "model_version": true, "data_as_of": true,
+            "positive_return_probability": {"$ref": "#/$defs/probability"},
+            "official_benchmark_outperform_probability": {"$ref": "#/$defs/probability"},
+            "secondary_market_median_outperform_probability": {"$ref": "#/$defs/probability"},
+            "p10_return": {"type": ["number", "null"]},
+            "p50_return": {"type": ["number", "null"]},
+            "p90_return": {"type": ["number", "null"]},
+            "p10_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+            "p50_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+            "p90_price": {"type": ["number", "null"], "exclusiveMinimum": 0},
+            "stars": {"$ref": "#/$defs/rating5"},
+            "confidence": {"$ref": "#/$defs/probability"}
+          }
+        }
+      ]
+    },
+    "downside": {
+      "allOf": [
+        {"$ref": "#/$defs/coreMetadata"},
+        {
+          "additionalProperties": false,
+          "required": ["generation_id", "status", "risk_score", "faces", "confidence", "model_version", "data_as_of"],
+          "properties": {
+            "generation_id": true, "status": true, "model_version": true, "data_as_of": true,
+            "risk_score": {"$ref": "#/$defs/score100"},
+            "faces": {"$ref": "#/$defs/rating5"},
+            "confidence": {"$ref": "#/$defs/probability"}
+          }
+        }
+      ]
+    },
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "schema_version": {"const": "CompanyResearchSnapshot.v1"}
+  }
+}
