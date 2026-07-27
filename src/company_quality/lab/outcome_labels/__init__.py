@@ -92,6 +92,48 @@ class WealthPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class OfficialTotalReturnPoint:
+    effective_on: str
+    value: Decimal
+    available_at: str
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialMarketTotalReturnInput:
+    market: Literal["TWSE", "TPEx"]
+    series_ref: str
+    points: tuple[OfficialTotalReturnPoint, ...]
+    complete_through: str
+    evidence_ids: tuple[str, ...]
+    schema_version: Literal["OfficialMarketTotalReturnInput.v1"] = (
+        "OfficialMarketTotalReturnInput.v1"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TwelveMonthReturnLabel:
+    generation_id: str
+    market: Literal["TWSE", "TPEx"] | None
+    decision_date: str
+    result_end_date: str
+    actual_total_return: Decimal | None
+    official_benchmark_return: Decimal | None
+    official_excess_return: Decimal | None
+    same_market_median_return: Decimal | None
+    positive_return: bool | None
+    outperformed_official_market: bool | None
+    company_total_return_source_ref: str
+    official_benchmark_source_ref: str | None
+    same_market_median_source_ref: str | None
+    status: Literal["complete", "blocked_missing_authority"]
+    evidence_ids: tuple[str, ...]
+    schema_version: Literal["TwelveMonthReturnLabel.v1"] = (
+        "TwelveMonthReturnLabel.v1"
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class HorizonOutcome:
     horizon_months: Literal[12, 24, 36]
     drawdown_episodes: tuple[DrawdownEpisode, ...]
@@ -113,6 +155,7 @@ class OutcomeLabelSet:
     drawdown_episodes: tuple[DrawdownEpisode, ...]
     adverse_labels: tuple[AdverseLabel, ...]
     horizon_months: Literal[12]
+    twelve_month_return: TwelveMonthReturnLabel
     censoring_state: Literal[
         "fully_observed", "right_censored", "blocked_missing_authority"
     ]
@@ -129,9 +172,9 @@ class OutcomeLabelSet:
         "NO_RATING_NOT_APPLICABLE"
     )
     schema_version: Literal["OutcomeLabelSet.v1"] = "OutcomeLabelSet.v1"
-    source_version: Literal["AdverseControlCohort.v1+PITWealthInput.v1"] = (
-        "AdverseControlCohort.v1+PITWealthInput.v1"
-    )
+    source_version: Literal[
+        "AdverseControlCohort.v1+PITWealthInput.v1+OfficialMarketTotalReturnInput.v1"
+    ] = "AdverseControlCohort.v1+PITWealthInput.v1+OfficialMarketTotalReturnInput.v1"
     formula_version: Literal[
         "unadjusted-close-action-cash-total-return.v1",
         "pre-adjusted-total-return-series.v1",
@@ -441,6 +484,127 @@ def _horizon(
     return outcome, tuple(dict.fromkeys(evidence)), available, wealth_points
 
 
+def _twelve_month_return_label(
+    *,
+    decision_date: date,
+    generation_id: str,
+    cohort_asof: datetime,
+    headline: HorizonOutcome,
+    adjusted_wealth_series: tuple[WealthPoint, ...],
+    wealth_series_ref: str,
+    market: Literal["TWSE", "TPEx"] | None,
+    official: OfficialMarketTotalReturnInput | None,
+    same_market_median_return: Decimal | None,
+    same_market_median_source_ref: str | None,
+    company_evidence_ids: tuple[str, ...],
+) -> tuple[TwelveMonthReturnLabel, list[datetime]]:
+    end = add_calendar_months_clamped(decision_date, 12)
+
+    def blocked(
+        official_ref: str | None = None,
+        evidence_ids: tuple[str, ...] = company_evidence_ids,
+    ) -> TwelveMonthReturnLabel:
+        return TwelveMonthReturnLabel(
+            generation_id=generation_id,
+            market=market,
+            decision_date=decision_date.isoformat(),
+            result_end_date=end.isoformat(),
+            actual_total_return=None,
+            official_benchmark_return=None,
+            official_excess_return=None,
+            same_market_median_return=None,
+            positive_return=None,
+            outperformed_official_market=None,
+            company_total_return_source_ref=wealth_series_ref,
+            official_benchmark_source_ref=official_ref,
+            same_market_median_source_ref=None,
+            status="blocked_missing_authority",
+            evidence_ids=evidence_ids,
+        )
+
+    if same_market_median_return is not None and not same_market_median_source_ref:
+        raise OutcomeLabelError("same-market median source required")
+    if market is None or official is None or headline.censoring_state != "fully_observed":
+        return blocked(None if official is None else official.series_ref), []
+    if official.schema_version != "OfficialMarketTotalReturnInput.v1":
+        raise OutcomeLabelError("BLOCKED_CONTRACT: official benchmark schema mismatch")
+    if official.market != market:
+        raise OutcomeLabelError("official benchmark market mismatch")
+    if not official.series_ref or not official.evidence_ids:
+        raise OutcomeLabelError("official benchmark source/evidence required")
+    if _day(official.complete_through, "official benchmark complete_through") < end:
+        return blocked(official.series_ref), []
+
+    official_points: dict[date, OfficialTotalReturnPoint] = {}
+    official_available: list[datetime] = []
+    official_evidence = list(official.evidence_ids)
+    for point in official.points:
+        day = _day(point.effective_on, "official benchmark effective_on")
+        if day > end:
+            continue
+        if day in official_points:
+            raise OutcomeLabelError("duplicate official benchmark point")
+        if point.value <= 0 or not point.evidence_ids:
+            raise OutcomeLabelError("invalid official benchmark point")
+        available_at = _instant(point.available_at, "official benchmark available_at")
+        if available_at > cohort_asof:
+            raise OutcomeLabelError("official benchmark breaches cohort PIT boundary")
+        official_points[day] = point
+        official_available.append(available_at)
+        official_evidence.extend(point.evidence_ids)
+
+    company_points = {
+        _day(point.effective_on, "company wealth effective_on"): point.adjusted_wealth_index
+        for point in adjusted_wealth_series
+    }
+    company_start_days = [day for day in company_points if day <= decision_date]
+    company_end_days = [day for day in company_points if day <= end]
+    official_start_days = [day for day in official_points if day <= decision_date]
+    official_end_days = [day for day in official_points if day <= end]
+    if not all((company_start_days, company_end_days, official_start_days, official_end_days)):
+        evidence = tuple(dict.fromkeys([*company_evidence_ids, *official_evidence]))
+        return blocked(official.series_ref, evidence), official_available
+
+    company_start = company_points[max(company_start_days)]
+    company_end = company_points[max(company_end_days)]
+    official_start = official_points[max(official_start_days)].value
+    official_end = official_points[max(official_end_days)].value
+    actual = (company_end / company_start - Decimal("1")).quantize(
+        _Q, rounding=ROUND_HALF_UP
+    )
+    benchmark = (official_end / official_start - Decimal("1")).quantize(
+        _Q, rounding=ROUND_HALF_UP
+    )
+    excess = (actual - benchmark).quantize(_Q, rounding=ROUND_HALF_UP)
+    median = (
+        same_market_median_return.quantize(_Q, rounding=ROUND_HALF_UP)
+        if same_market_median_return is not None
+        else None
+    )
+    evidence = tuple(dict.fromkeys([
+        *company_evidence_ids,
+        *official_evidence,
+        *(() if same_market_median_source_ref is None else (same_market_median_source_ref,)),
+    ]))
+    return TwelveMonthReturnLabel(
+        generation_id=generation_id,
+        market=market,
+        decision_date=decision_date.isoformat(),
+        result_end_date=end.isoformat(),
+        actual_total_return=actual,
+        official_benchmark_return=benchmark,
+        official_excess_return=excess,
+        same_market_median_return=median,
+        positive_return=actual > 0,
+        outperformed_official_market=excess > 0,
+        company_total_return_source_ref=wealth_series_ref,
+        official_benchmark_source_ref=official.series_ref,
+        same_market_median_source_ref=same_market_median_source_ref,
+        status="complete",
+        evidence_ids=evidence,
+    ), official_available
+
+
 def build_outcome_label_set(
     cohort: AdverseControlCohort,
     wealth_input: PITWealthInput,
@@ -451,6 +615,10 @@ def build_outcome_label_set(
     producer_shas: Mapping[str, str],
     generation_id: str,
     producer_candidate_sha: str,
+    market: Literal["TWSE", "TPEx"] | None = None,
+    official_market_total_return: OfficialMarketTotalReturnInput | None = None,
+    same_market_median_return: Decimal | None = None,
+    same_market_median_source_ref: str | None = None,
 ) -> OutcomeLabelSet:
     if not _SEMVER.fullmatch(base_label_version):
         raise OutcomeLabelError("base label version must be semver")
@@ -482,6 +650,20 @@ def build_outcome_label_set(
     adjustment_evidence_ids = tuple(dict.fromkeys(evidence))
     if len(adjustment_evidence_ids) > 10000:
         raise OutcomeLabelError("adjustment evidence exceeds contract")
+    twelve_month_return, benchmark_available = _twelve_month_return_label(
+        decision_date=decision_date,
+        generation_id=generation_id,
+        cohort_asof=cohort_asof,
+        headline=headline,
+        adjusted_wealth_series=adjusted_wealth_series,
+        wealth_series_ref=wealth_input.wealth_series_ref,
+        market=market,
+        official=official_market_total_return,
+        same_market_median_return=same_market_median_return,
+        same_market_median_source_ref=same_market_median_source_ref,
+        company_evidence_ids=adjustment_evidence_ids,
+    )
+    available.extend(benchmark_available)
     return OutcomeLabelSet(
         issuer_id=issuer_id,
         decision_time=decision_time,
@@ -490,6 +672,7 @@ def build_outcome_label_set(
         drawdown_episodes=headline.drawdown_episodes,
         adverse_labels=headline.adverse_labels,
         horizon_months=12,
+        twelve_month_return=twelve_month_return,
         censoring_state=headline.censoring_state,
         label_version=headline.label_version,
         label_coverage=headline.label_coverage,
@@ -509,7 +692,8 @@ def build_outcome_label_set(
 
 
 __all__ = [
-    "CorporateAction", "DailyClose", "GovernedOutcomeEvent", "OutcomeLabelError",
-    "OutcomeLabelSet", "PITWealthInput", "SuspensionInterval",
-    "add_calendar_months_clamped", "build_outcome_label_set",
+    "CorporateAction", "DailyClose", "GovernedOutcomeEvent",
+    "OfficialMarketTotalReturnInput", "OfficialTotalReturnPoint",
+    "OutcomeLabelError", "OutcomeLabelSet", "PITWealthInput", "SuspensionInterval",
+    "TwelveMonthReturnLabel", "add_calendar_months_clamped", "build_outcome_label_set",
 ]
