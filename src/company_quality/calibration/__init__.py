@@ -51,7 +51,7 @@ class CandidateObservation:
     issuer_id: str
     decision_date: str
     metrics: tuple[AdmittedMetric, ...]
-    upside_decimal: Decimal
+    upside_decimal: Decimal | None
     downside_constructs: tuple[Decimal, Decimal, Decimal]
     bomb_materiality: Decimal
     adverse_outcome: bool
@@ -72,7 +72,7 @@ class CandidateScoreRow:
     pillar_coverages: dict[str, Decimal]
     quality_score: Decimal
     raw_adverse_risk: Decimal
-    upside_decimal: Decimal
+    upside_decimal: Decimal | None
     downside_composite: Decimal
     bomb_materiality: Decimal
     adverse_outcome: bool

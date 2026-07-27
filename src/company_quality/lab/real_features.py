@@ -63,7 +63,11 @@ def _metric(
     }
 
 
-def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object]]:
+def build_real_features(
+    finlab_db: Path,
+    labels: pd.DataFrame,
+    rd_ratio_path: Path | None = None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
     disclosure_raw = pd.read_feather(
         finlab_db / "etl#financial_statements_disclosure_dates.feather"
     ).set_index("date")
@@ -83,6 +87,10 @@ def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataF
     for name, path in feature_names.items():
         frame = pd.read_feather(path).set_index("date")
         features[name] = frame.loc[:, ~frame.columns.duplicated(keep="last")]
+    rd_ratio = None
+    if rd_ratio_path is not None:
+        frame = pd.read_feather(rd_ratio_path).set_index("date")
+        rd_ratio = frame.loc[:, ~frame.columns.duplicated(keep="last")]
     revenue = _load_wide(finlab_db / "monthly_revenue#當月營收.pickle")
     pledge = _load_wide(
         finlab_db / "internal_equity_pledge#董監設質股數占比.feather"
@@ -165,6 +173,24 @@ def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataF
                 f"finlab:fundamental_features:{metric_id}:{code}" if value is not None else None,
             ))
 
+        rd_value = None
+        rd_available = None
+        if rd_ratio is not None and code in rd_ratio and not admitted.empty:
+            valid_periods = [period for period in admitted.index if period in rd_ratio.index]
+            for period in reversed(valid_periods):
+                raw = rd_ratio.loc[period, code]
+                if isinstance(raw, pd.Series):
+                    raw = raw.dropna().iloc[-1] if raw.notna().any() else np.nan
+                if pd.notna(raw):
+                    rd_value = float(raw)
+                    rd_available = pd.Timestamp(disclosure.at[period])
+                    break
+        output.append(_metric(
+            base, "people_adaptability", "research_development_ratio", "high_good",
+            rd_value, "adaptability:rd", rd_available,
+            f"finlab:fundamental_features:研究發展費用率:{code}" if rd_value is not None else None,
+        ))
+
         company_dividends = dividends.loc[
             (dividends["stock_id"].astype(str) == code)
             & dividends["available_date"].notna()
@@ -224,6 +250,10 @@ def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataF
         for pillar in PILLARS
     }
     observation_count = int(labels[["issuer_id", "decision_date"]].drop_duplicates().shape[0])
+    blockers = {
+        "people_adaptability_management": "no authoritative PIT management delivery or succession evidence",
+        "T16_T19": "formal candidate observations require governed downside constructs",
+    }
     report = {
         "schema_version": "RealPITFeatureInputs.v1",
         "status": "EXECUTED_WITH_NULL_AUTHORITY_GAPS",
@@ -231,10 +261,7 @@ def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataF
         "observation_count": observation_count,
         "metric_row_count": len(frame),
         "available_metric_counts": available_counts,
-        "blockers": {
-            "people_adaptability": "no authoritative PIT management delivery or succession evidence",
-            "T16_T19": "formal candidate observations require all six pillars and governed downside constructs",
-        },
+        "blockers": blockers,
         "source_root": str(finlab_db),
         "source_files": [
             "etl#financial_statements_disclosure_dates.feather",
@@ -243,6 +270,7 @@ def build_real_features(finlab_db: Path, labels: pd.DataFrame) -> tuple[pd.DataF
             "monthly_revenue#當月營收.pickle",
             "board_dividend_announcement.feather",
             "internal_equity_pledge#董監設質股數占比.feather",
+            *(str(rd_ratio_path) for _ in range(1) if rd_ratio_path is not None),
         ],
     }
     return frame, report
@@ -254,9 +282,10 @@ def main() -> int:
     parser.add_argument("--labels", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--rd-ratio", type=Path)
     args = parser.parse_args()
     frame, report = build_real_features(
-        args.finlab_db, pd.read_parquet(args.labels)
+        args.finlab_db, pd.read_parquet(args.labels), args.rd_ratio
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.report.parent.mkdir(parents=True, exist_ok=True)

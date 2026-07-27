@@ -1,0 +1,77 @@
+{
+  "schema_version": "RealPipelineExecutionReport.v4",
+  "generated_at": "2026-07-27T01:39:36.019946+00:00",
+  "execution_status": "NON_PUBLISHABLE",
+  "publishable": false,
+  "rating_disposition": "NO_RATING_NOT_APPLICABLE",
+  "t23_started": false,
+  "freeze_created": false,
+  "rating_created": false,
+  "stage_results": {
+    "T20": {
+      "status": "EXECUTED_UPSTREAM",
+      "labelled_issuer_counts": {
+        "TPEx": 816,
+        "TWSE": 1007
+      },
+      "note": "counts here are issuers represented in T21 labels, not full T20 cohort membership"
+    },
+    "T21": {
+      "status": "EXECUTED",
+      "label_count": 5305,
+      "fully_observed_count": 5302,
+      "adverse_fully_observed_count": 567,
+      "coverage": 0.9994344957587182
+    },
+    "T09_T14": {
+      "status": "EXECUTED_WITH_AUTHORITY_GAPS",
+      "metric_row_count": 47745,
+      "observation_count": 5305
+    },
+    "T18": {
+      "schema_version": "RealPITDownsideConstructInputs.v1",
+      "status": "EXECUTED_NON_PUBLISHABLE_LINEAGE_BOUND",
+      "publishable": false,
+      "formal_T18_status": "BLOCKED_MISSING_RISK_STRESS_AND_BOMB_CONTRACTS",
+      "observation_count": 5305,
+      "complete_construct_count": 5230,
+      "complete_construct_coverage": 0.9858623939679547,
+      "regulatory_source_start": "2019-01-07T00:00:00+08:00",
+      "regulatory_complete_window_count": 5305,
+      "construct_lineage": {
+        "maximum_drawdown_vulnerability": "FinLab pre-adjusted total-return close; trailing 252 sessions; minimum 120",
+        "permanent_capital_loss_vulnerability": "same-date percentile ranks of PIT-admitted debt ratio, current ratio and free cash flow; at least two inputs",
+        "material_adverse_event_vulnerability": "prior-three-year information-violation penalty amount; zero admitted only when source window is complete"
+      },
+      "missing_contracts": [
+        "T18 causal risk register",
+        "T18 bear/base/bull stress pack",
+        "authoritative current-relevance Bomb event admission"
+      ]
+    },
+    "T22": {
+      "status": "CALIBRATION_EXECUTED_BLOCKED",
+      "candidate_score_row_count": 3023,
+      "champion_verdict": "blocked",
+      "metrics": {
+        "auc": 0.5954355523731989,
+        "brier": 0.2535067669709313,
+        "calibration_error": 0.24929707101465295,
+        "precision_at_top": 0.2912621359223301
+      },
+      "same_holdout_diagnostic_auc": {
+        "quality_adverse_risk": 0.597347321607868,
+        "downside_composite": 0.5758947157039932
+      },
+      "failure_reasons": {
+        "coverage": "validation_coverage_below_0.85",
+        "policy": "candidate_policy_incomplete",
+        "stress": "authoritative_stress_period_artifact_unavailable",
+        "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
+        "T17": "same_generation_explicit_assumption_valuation_observations_unavailable",
+        "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
+      }
+    }
+  },
+  "execution_disposition": "STOP_BEFORE_T23"
+}
