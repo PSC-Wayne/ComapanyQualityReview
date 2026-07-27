@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T02:47:23.297915+00:00",
+  "generated_at": "2026-07-27T03:18:38.524071+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -111,7 +111,6 @@
         "bomb_status": "blocked_missing_authority"
       },
       "failure_reasons": {
-        "policy": "candidate_policy_incomplete",
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable"
       }
     }

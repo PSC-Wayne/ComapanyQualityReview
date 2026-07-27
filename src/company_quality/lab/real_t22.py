@@ -9,7 +9,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, cast
 
 import numpy as np
 import pandas as pd
@@ -26,12 +26,15 @@ from company_quality.policies.candidate import (
     AntiDoubleCountPolicy,
     BombPolicy,
     CandidatePolicyBundle,
+    Component,
     DownsideBucketPolicy,
     DownsideComponentWeights,
+    EvidenceFamilyOwnership,
     PillarWeights,
     QualityBand,
     QualityPolicy,
     UpsideBucketPolicy,
+    evidence_family_policy_sha256,
 )
 
 
@@ -267,12 +270,67 @@ def build_pit_downside_constructs(
     return frame, report
 
 
-def _evaluation_policy(generation_id: str, source_sha: str) -> CandidatePolicyBundle:
+def _family_component(family: str) -> Component:
+    if family.startswith("family:"):
+        component = family.removeprefix("family:")
+        if component in PILLARS:
+            return cast(Component, component)
+    if family.startswith("audit:"):
+        return "audit_reliability"
+    if family in {"earnings_outcomes", "capital_efficiency"}:
+        return "earnings_capital_efficiency"
+    if family in {
+        "cash_conversion", "balance_sheet", "capital_allocation", "high_risk_notes"
+    }:
+        return "cash_balance_allocation"
+    if family.startswith("business:") or family == "industry:peer_outlook":
+        return "business_moat"
+    if family.startswith("governance:"):
+        return "governance"
+    if family.startswith(("people:", "adaptability:", "management:")):
+        return "people_adaptability"
+    if family in {
+        "maximum_drawdown_vulnerability",
+        "permanent_capital_loss_vulnerability",
+        "material_adverse_event_vulnerability",
+    }:
+        return cast(Component, family)
+    raise ValueError(f"no policy owner for evidence family {family}")
+
+
+def _evaluation_policy(
+    generation_id: str,
+    source_sha: str,
+    evidence_family_ids=(),
+    generation_source_shas: Mapping[str, str] | None = None,
+    available_at: str | None = None,
+) -> CandidatePolicyBundle:
+    families = sorted(set(evidence_family_ids) | {
+        "maximum_drawdown_vulnerability",
+        "permanent_capital_loss_vulnerability",
+        "material_adverse_event_vulnerability",
+    })
+    ownership = tuple(
+        EvidenceFamilyOwnership(
+            evidence_family_id=family,
+            primary_component=_family_component(family),
+            excluded_from=(),
+            disposition="single_owner",
+            policy_rule_id=f"T19.owner.{family}"[:128],
+            evidence_ids=(f"policy:T19:single-owner:{family}"[:128],),
+        )
+        for family in families
+    )
+    source_shas = dict(generation_source_shas or {
+        "real_features": source_sha,
+        "real_downside_constructs": source_sha,
+        "policy_definition": source_sha,
+    })
     return CandidatePolicyBundle(
         pillar_weights=PillarWeights(),
         quality_policy=QualityPolicy(
             "winsor_rank", Decimal("0.05"), Decimal("0.95"),
-            "PeerOutlookEvidence.peer_ids+issuer_id", 5,
+            "RealPITFeatureMatrix.decision_date+metric_id", 5,
             "average_percentile_rank", "NULL_BLOCKED_NO_FALLBACK",
             (
                 QualityBand(Decimal("0"), Decimal("50"), "weak"),
@@ -303,7 +361,7 @@ def _evaluation_policy(generation_id: str, source_sha: str) -> CandidatePolicyBu
         anti_double_count_policy=AntiDoubleCountPolicy(
             "1.0.0",
             "AnalysisSnapshot.sections.candidate_policy.anti_double_count_policy.evidence_family_ownership",
-            "RFC8785_JCS", sha256(b"[]").hexdigest(), (),
+            "RFC8785_JCS", evidence_family_policy_sha256(ownership), ownership,
         ),
         bomb_policy=BombPolicy(
             (
@@ -315,20 +373,14 @@ def _evaluation_policy(generation_id: str, source_sha: str) -> CandidatePolicyBu
         challenger_ids=("financial-downside-equal-weight",),
         policy_version="1.0.0",
         publishable=False,
-        policy_coverage=Decimal("0"),
-        failure_reasons={
-            "T19": "same_generation_real_candidate_policy_artifact_unavailable"
-        },
-        input_producer_shas={
-            ticket: source_sha
-            for ticket in (
-                "T07", "T09", "T10", "T11", "T12", "T13", "T14",
-                "T16", "T17", "T18",
-            )
-        },
-        available_at=datetime.now(timezone.utc).isoformat(),
+        policy_coverage=Decimal("1"),
+        failure_reasons={},
+        input_producer_shas=source_shas,
+        available_at=available_at or datetime.now(timezone.utc).isoformat(),
         generation_id=generation_id,
         producer_candidate_sha=source_sha,
+        source_version="RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1",
+        policy_scope="generation_metric_family_union",
     )
 
 
@@ -426,12 +478,22 @@ def execute_real_t22_calibration(
     *,
     input_producer_shas: Mapping[str, str | None],
     producer_candidate_sha: str,
+    policy: CandidatePolicyBundle | None = None,
 ):
     generations = set(labels["generation_id"].astype(str))
     if len(generations) != 1:
         raise ValueError("labels must have one generation")
     generation = next(iter(generations))
-    policy = _evaluation_policy(generation, producer_candidate_sha)
+    policy = policy or _evaluation_policy(
+        generation,
+        producer_candidate_sha,
+        features["evidence_family_id"].dropna().astype(str),
+        {
+            "real_features": str(input_producer_shas["T09"]),
+            "real_downside_constructs": str(input_producer_shas["T18"]),
+            "policy_definition": producer_candidate_sha,
+        },
+    )
     observations = _observations(labels, features, constructs)
     rows = build_candidate_score_matrix(
         observations, policy, input_producer_shas=input_producer_shas
@@ -551,6 +613,7 @@ def main() -> int:
     parser.add_argument("--regulatory-source-start", required=True)
     parser.add_argument("--construct-rows", required=True, type=Path)
     parser.add_argument("--construct-report", required=True, type=Path)
+    parser.add_argument("--policy-output", required=True, type=Path)
     parser.add_argument("--calibration-output", required=True, type=Path)
     parser.add_argument("--execution-output", required=True, type=Path)
     args = parser.parse_args()
@@ -574,23 +637,40 @@ def main() -> int:
     )
     source_sha = _file_sha(Path(__file__))
     feature_sha = _file_sha(args.features)
+    construct_sha = _file_sha(args.construct_rows)
+    generation_id = str(labels["generation_id"].iloc[0])
+    policy = _evaluation_policy(
+        generation_id,
+        source_sha,
+        features["evidence_family_id"].dropna().astype(str),
+        {
+            "real_features": feature_sha,
+            "real_downside_constructs": construct_sha,
+            "policy_definition": source_sha,
+        },
+        _aware(max(features["metric_available_at"].dropna().astype(str))).isoformat(),
+    )
+    policy_payload = json.loads(json.dumps(asdict(policy), default=float))
+    args.policy_output.write_text(
+        json.dumps(policy_payload, ensure_ascii=False, indent=2) + "\n"
+    )
     input_shas = {
         "T09": feature_sha, "T10": feature_sha, "T13": feature_sha,
         "T14": feature_sha, "T16": feature_sha,
         "T17": None,
-        "T18": _file_sha(args.construct_rows),
-        "T19": source_sha,
+        "T18": construct_sha,
+        "T19": _file_sha(args.policy_output),
         "T21": _file_sha(args.labels),
     }
     report, rows = execute_real_t22_calibration(
         labels, features, constructs,
         input_producer_shas=input_shas,
         producer_candidate_sha=source_sha,
+        policy=policy,
     )
-    generation_id = str(labels["generation_id"].iloc[0])
     downside_report, downside_validation = evaluate_downside_construct_calibration(
         rows,
-        _evaluation_policy(generation_id, source_sha),
+        policy,
         total_candidate_count=int(
             labels[["issuer_id", "decision_date"]].drop_duplicates().shape[0]
         ),

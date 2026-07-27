@@ -3,7 +3,7 @@
   "$id": "CandidatePolicyBundle.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pillar_weights", "quality_policy", "upside_bucket_policy", "downside_bucket_policy", "anti_double_count_policy", "bomb_policy", "champion_id", "challenger_ids", "policy_version", "publishable", "policy_coverage", "failure_reasons", "input_producer_shas", "available_at", "generation_id", "producer_candidate_sha", "rating_disposition", "schema_version", "source_version", "formula_version", "model_version"],
+  "required": ["pillar_weights", "quality_policy", "upside_bucket_policy", "downside_bucket_policy", "anti_double_count_policy", "bomb_policy", "champion_id", "challenger_ids", "policy_version", "publishable", "policy_coverage", "failure_reasons", "input_producer_shas", "available_at", "generation_id", "producer_candidate_sha", "rating_disposition", "schema_version", "source_version", "formula_version", "model_version", "policy_scope"],
   "$defs": {
     "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "semver": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
@@ -36,6 +36,25 @@
       ]
     }
   },
+  "allOf": [
+    {
+      "if": {"properties": {"policy_scope": {"const": "generation_metric_family_union"}}, "required": ["policy_scope"]},
+      "then": {
+        "properties": {
+          "input_producer_shas": {"required": ["real_features", "real_downside_constructs", "policy_definition"]},
+          "source_version": {"const": "RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1"},
+          "quality_policy": {"properties": {"winsor_lower_quantile": {"const": 0.05}, "winsor_upper_quantile": {"const": 0.95}, "cohort_locator": {"const": "RealPITFeatureMatrix.decision_date+metric_id"}}}
+        }
+      },
+      "else": {
+        "properties": {
+          "input_producer_shas": {"required": ["T07", "T09", "T10", "T12", "T13", "T14", "T16", "T17", "T18"]},
+          "source_version": {"const": "AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1"},
+          "quality_policy": {"properties": {"winsor_lower_quantile": {"const": 0.025}, "winsor_upper_quantile": {"const": 0.975}, "cohort_locator": {"const": "PeerOutlookEvidence.peer_ids+issuer_id"}}}
+        }
+      }
+    }
+  ],
   "properties": {
     "pillar_weights": {
       "type": "object", "additionalProperties": false,
@@ -46,21 +65,22 @@
       "type": "object", "additionalProperties": false,
       "required": ["normalisation", "winsor_lower_quantile", "winsor_upper_quantile", "cohort_locator", "minimum_cohort_size", "tie_method", "insufficient_cohort_disposition", "bands"],
       "properties": {
-        "normalisation": {"const": "winsor_rank"}, "winsor_lower_quantile": {"const": 0.025}, "winsor_upper_quantile": {"const": 0.975},
-        "cohort_locator": {"const": "PeerOutlookEvidence.peer_ids+issuer_id"}, "minimum_cohort_size": {"const": 5}, "tie_method": {"const": "average_percentile_rank"}, "insufficient_cohort_disposition": {"const": "NULL_BLOCKED_NO_FALLBACK"},
+        "normalisation": {"const": "winsor_rank"}, "winsor_lower_quantile": {"enum": [0.025, 0.05]}, "winsor_upper_quantile": {"enum": [0.95, 0.975]},
+        "cohort_locator": {"enum": ["PeerOutlookEvidence.peer_ids+issuer_id", "RealPITFeatureMatrix.decision_date+metric_id"]}, "minimum_cohort_size": {"const": 5}, "tie_method": {"const": "average_percentile_rank"}, "insufficient_cohort_disposition": {"const": "NULL_BLOCKED_NO_FALLBACK"},
         "bands": {"type": "array", "minItems": 2, "maxItems": 10, "items": {"type": "object", "additionalProperties": false, "required": ["lower", "upper", "label"], "properties": {"lower": {"type": "number", "minimum": 0, "maximum": 100}, "upper": {"type": "number", "minimum": 0, "maximum": 100}, "label": {"type": "string", "minLength": 1, "maxLength": 32}}}}
       }
     },
     "upside_bucket_policy": {"type": "object", "additionalProperties": false, "required": ["horizon_months", "sensitivity_horizons_months", "return_unit", "thresholds", "audit_gate_contract"], "properties": {"horizon_months": {"const": 12}, "sensitivity_horizons_months": {"const": [24, 36]}, "return_unit": {"const": "decimal_return"}, "thresholds": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": -1, "maximum": 10}}, "audit_gate_contract": {"const": "AuditGateDecision.v1"}}},
-    "downside_bucket_policy": {"type": "object", "additionalProperties": false, "required": ["horizon_months", "component_weights", "composite_thresholds", "construct_names"], "properties": {"horizon_months": {"const": 12}, "component_weights": {"type": "object", "additionalProperties": false, "required": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability", "sum"], "properties": {"maximum_drawdown_vulnerability": {"const": 0.30}, "permanent_capital_loss_vulnerability": {"const": 0.40}, "material_adverse_event_vulnerability": {"const": 0.30}, "sum": {"const": 1}}}, "composite_thresholds": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 100}}, "construct_names": {"const": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability"]}}},
+    "downside_bucket_policy": {"type": "object", "additionalProperties": false, "required": ["horizon_months", "component_weights", "composite_thresholds", "construct_names"], "properties": {"horizon_months": {"const": 12}, "component_weights": {"type": "object", "additionalProperties": false, "required": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability", "sum"], "properties": {"maximum_drawdown_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.40}, "permanent_capital_loss_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.40}, "material_adverse_event_vulnerability": {"type": "number", "minimum": 0.25, "maximum": 0.40}, "sum": {"const": 1}}}, "composite_thresholds": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 100}}, "construct_names": {"const": ["maximum_drawdown_vulnerability", "permanent_capital_loss_vulnerability", "material_adverse_event_vulnerability"]}}},
     "anti_double_count_policy": {"type": "object", "additionalProperties": false, "required": ["version", "evidence_family_policy_locator", "evidence_family_policy_canonicalization", "evidence_family_policy_sha256", "evidence_family_ownership"], "properties": {"version": {"const": "1.0.0"}, "evidence_family_policy_locator": {"const": "AnalysisSnapshot.sections.candidate_policy.anti_double_count_policy.evidence_family_ownership"}, "evidence_family_policy_canonicalization": {"const": "RFC8785_JCS"}, "evidence_family_policy_sha256": {"$ref": "#/$defs/sha"}, "evidence_family_ownership": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/ownership"}}}},
     "bomb_policy": {"type": "object", "additionalProperties": false, "required": ["allowed_event_types", "requires_authoritative", "requires_material", "requires_current_relevance"], "properties": {"allowed_event_types": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"enum": ["formal_adverse_opinion", "formal_disclaimer", "confirmed_fraud", "default", "insolvency", "major_regulatory_action", "other_governed"]}}, "requires_authoritative": {"const": true}, "requires_material": {"const": true}, "requires_current_relevance": {"const": true}}},
     "champion_id": {"$ref": "#/$defs/id"}, "challenger_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 0, "maxLength": 4096}}, "policy_version": {"$ref": "#/$defs/semver"}, "publishable": {"const": false}, "policy_coverage": {"type": "number", "minimum": 0, "maximum": 1},
     "failure_reasons": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 512}},
-    "input_producer_shas": {"type": "object", "additionalProperties": false, "required": ["T07", "T09", "T10", "T12", "T13", "T14", "T16", "T17", "T18"], "properties": {"T07": {"$ref": "#/$defs/sha"}, "T09": {"$ref": "#/$defs/sha"}, "T10": {"$ref": "#/$defs/sha"}, "T12": {"$ref": "#/$defs/sha"}, "T13": {"$ref": "#/$defs/sha"}, "T14": {"$ref": "#/$defs/sha"}, "T16": {"$ref": "#/$defs/sha"}, "T17": {"$ref": "#/$defs/sha"}, "T18": {"$ref": "#/$defs/sha"}}},
+    "input_producer_shas": {"oneOf": [{"type": "object", "additionalProperties": false, "required": ["T07", "T09", "T10", "T12", "T13", "T14", "T16", "T17", "T18"], "properties": {"T07": {"$ref": "#/$defs/sha"}, "T09": {"$ref": "#/$defs/sha"}, "T10": {"$ref": "#/$defs/sha"}, "T12": {"$ref": "#/$defs/sha"}, "T13": {"$ref": "#/$defs/sha"}, "T14": {"$ref": "#/$defs/sha"}, "T16": {"$ref": "#/$defs/sha"}, "T17": {"$ref": "#/$defs/sha"}, "T18": {"$ref": "#/$defs/sha"}}}, {"type": "object", "additionalProperties": false, "required": ["real_features", "real_downside_constructs", "policy_definition"], "properties": {"real_features": {"$ref": "#/$defs/sha"}, "real_downside_constructs": {"$ref": "#/$defs/sha"}, "policy_definition": {"$ref": "#/$defs/sha"}}}]},
     "available_at": {"type": "string", "format": "date-time", "pattern": "(?:Z|[+-][0-9]{2}:[0-9]{2})$"}, "generation_id": {"$ref": "#/$defs/id"}, "producer_candidate_sha": {"$ref": "#/$defs/sha"},
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"}, "schema_version": {"const": "CandidatePolicyBundle.v1"},
-    "source_version": {"const": "AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1"},
-    "formula_version": {"const": "candidate-policy-owned-families-jcs.v1"}, "model_version": {"const": "winsor-rank-peer-cohort-v1"}
+    "source_version": {"enum": ["AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1", "RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1"]},
+    "formula_version": {"const": "candidate-policy-owned-families-jcs.v1"}, "model_version": {"const": "winsor-rank-peer-cohort-v1"},
+    "policy_scope": {"enum": ["issuer_snapshot", "generation_metric_family_union"]}
   }
 }

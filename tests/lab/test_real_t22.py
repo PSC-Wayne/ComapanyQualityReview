@@ -158,10 +158,33 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
     labels, features, constructs = _calibration_inputs()
     input_shas: dict[str, str | None] = _sha_inputs()
     input_shas["T17"] = None
+    policy = _evaluation_policy(
+        "real-generation",
+        "a" * 64,
+        features["evidence_family_id"],
+        {
+            "real_features": "1" * 64,
+            "real_downside_constructs": "2" * 64,
+            "policy_definition": "a" * 64,
+        },
+        "2023-06-30T00:00:00+00:00",
+    )
+    assert policy.policy_scope == "generation_metric_family_union"
+    assert policy.policy_coverage == Decimal("1")
+    assert policy.failure_reasons == {}
+    families = {
+        row.evidence_family_id
+        for row in policy.anti_double_count_policy.evidence_family_ownership
+    }
+    assert set(features["evidence_family_id"]) <= families
+    assert len(families) == len(
+        policy.anti_double_count_policy.evidence_family_ownership
+    )
     report, rows = execute_real_t22_calibration(
         labels, features, constructs,
         input_producer_shas=input_shas,
         producer_candidate_sha="a" * 64,
+        policy=policy,
     )
     assert rows
     assert all(row.upside_decimal is None for row in rows)
@@ -179,7 +202,7 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
 
     downside_report, validation = evaluate_downside_construct_calibration(
         rows,
-        _evaluation_policy("real-generation", "a" * 64),
+        policy,
         total_candidate_count=len(labels),
         input_producer_shas=input_shas,
         generation_id="real-generation",

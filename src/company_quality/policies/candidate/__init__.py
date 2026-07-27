@@ -62,7 +62,10 @@ class QualityPolicy:
     normalisation: Literal["winsor_rank"]
     winsor_lower_quantile: Decimal
     winsor_upper_quantile: Decimal
-    cohort_locator: Literal["PeerOutlookEvidence.peer_ids+issuer_id"]
+    cohort_locator: Literal[
+        "PeerOutlookEvidence.peer_ids+issuer_id",
+        "RealPITFeatureMatrix.decision_date+metric_id",
+    ]
     minimum_cohort_size: Literal[5]
     tie_method: Literal["average_percentile_rank"]
     insufficient_cohort_disposition: Literal["NULL_BLOCKED_NO_FALLBACK"]
@@ -154,7 +157,8 @@ class CandidatePolicyBundle:
     )
     schema_version: Literal["CandidatePolicyBundle.v1"] = "CandidatePolicyBundle.v1"
     source_version: Literal[
-        "AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1"
+        "AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1",
+        "RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1",
     ] = "AuditGateDecision.v1+EarningsCapitalEfficiencyCandidate.v1+CashBalanceAllocationCandidate.v1+PeerOutlookEvidence.v1+BusinessMoatCandidate.v1+GovernancePeopleCandidate.v1+Pillar1AuditReliabilityCandidate.v1+ValuationUpsideDiagnostic.v1+DownsideStressDiagnostic.v1"
     formula_version: Literal["candidate-policy-owned-families-jcs.v1"] = (
         "candidate-policy-owned-families-jcs.v1"
@@ -162,6 +166,9 @@ class CandidatePolicyBundle:
     model_version: Literal["winsor-rank-peer-cohort-v1"] = (
         "winsor-rank-peer-cohort-v1"
     )
+    policy_scope: Literal[
+        "issuer_snapshot", "generation_metric_family_union"
+    ] = "issuer_snapshot"
 
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")

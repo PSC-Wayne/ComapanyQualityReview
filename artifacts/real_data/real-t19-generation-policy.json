@@ -1,0 +1,241 @@
+{
+  "pillar_weights": {
+    "audit_reliability": 0.1,
+    "earnings_capital_efficiency": 0.25,
+    "cash_balance_allocation": 0.25,
+    "business_moat": 0.25,
+    "governance": 0.05,
+    "people_adaptability": 0.1,
+    "sum": 1.0
+  },
+  "quality_policy": {
+    "normalisation": "winsor_rank",
+    "winsor_lower_quantile": 0.05,
+    "winsor_upper_quantile": 0.95,
+    "cohort_locator": "RealPITFeatureMatrix.decision_date+metric_id",
+    "minimum_cohort_size": 5,
+    "tie_method": "average_percentile_rank",
+    "insufficient_cohort_disposition": "NULL_BLOCKED_NO_FALLBACK",
+    "bands": [
+      {
+        "lower": 0.0,
+        "upper": 50.0,
+        "label": "weak"
+      },
+      {
+        "lower": 50.0,
+        "upper": 60.0,
+        "label": "below_average"
+      },
+      {
+        "lower": 60.0,
+        "upper": 70.0,
+        "label": "average"
+      },
+      {
+        "lower": 70.0,
+        "upper": 80.0,
+        "label": "good"
+      },
+      {
+        "lower": 80.0,
+        "upper": 90.0,
+        "label": "strong"
+      },
+      {
+        "lower": 90.0,
+        "upper": 100.0,
+        "label": "exceptional"
+      }
+    ]
+  },
+  "upside_bucket_policy": {
+    "horizon_months": 12,
+    "sensitivity_horizons_months": [
+      24,
+      36
+    ],
+    "return_unit": "decimal_return",
+    "thresholds": [
+      0.0,
+      0.1,
+      0.2,
+      0.3
+    ],
+    "audit_gate_contract": "AuditGateDecision.v1"
+  },
+  "downside_bucket_policy": {
+    "horizon_months": 12,
+    "component_weights": {
+      "maximum_drawdown_vulnerability": 0.4,
+      "permanent_capital_loss_vulnerability": 0.35,
+      "material_adverse_event_vulnerability": 0.25,
+      "sum": 1.0
+    },
+    "composite_thresholds": [
+      20.0,
+      40.0,
+      60.0,
+      80.0
+    ],
+    "construct_names": [
+      "maximum_drawdown_vulnerability",
+      "permanent_capital_loss_vulnerability",
+      "material_adverse_event_vulnerability"
+    ]
+  },
+  "anti_double_count_policy": {
+    "version": "1.0.0",
+    "evidence_family_policy_locator": "AnalysisSnapshot.sections.candidate_policy.anti_double_count_policy.evidence_family_ownership",
+    "evidence_family_policy_canonicalization": "RFC8785_JCS",
+    "evidence_family_policy_sha256": "81eab2a5e73b8c479f48e4f4f9c4a5a927a5058d640dc42eca0b7c1474a37cb8",
+    "evidence_family_ownership": [
+      {
+        "evidence_family_id": "adaptability:rd",
+        "primary_component": "people_adaptability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.adaptability:rd",
+        "evidence_ids": [
+          "policy:T19:single-owner:adaptability:rd"
+        ]
+      },
+      {
+        "evidence_family_id": "audit:timeliness",
+        "primary_component": "audit_reliability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.audit:timeliness",
+        "evidence_ids": [
+          "policy:T19:single-owner:audit:timeliness"
+        ]
+      },
+      {
+        "evidence_family_id": "business:revenue_stability",
+        "primary_component": "business_moat",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.business:revenue_stability",
+        "evidence_ids": [
+          "policy:T19:single-owner:business:revenue_stability"
+        ]
+      },
+      {
+        "evidence_family_id": "capital_allocation",
+        "primary_component": "cash_balance_allocation",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.capital_allocation",
+        "evidence_ids": [
+          "policy:T19:single-owner:capital_allocation"
+        ]
+      },
+      {
+        "evidence_family_id": "capital_efficiency",
+        "primary_component": "earnings_capital_efficiency",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.capital_efficiency",
+        "evidence_ids": [
+          "policy:T19:single-owner:capital_efficiency"
+        ]
+      },
+      {
+        "evidence_family_id": "earnings_outcomes",
+        "primary_component": "earnings_capital_efficiency",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.earnings_outcomes",
+        "evidence_ids": [
+          "policy:T19:single-owner:earnings_outcomes"
+        ]
+      },
+      {
+        "evidence_family_id": "governance:pledged_shares",
+        "primary_component": "governance",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.governance:pledged_shares",
+        "evidence_ids": [
+          "policy:T19:single-owner:governance:pledged_shares"
+        ]
+      },
+      {
+        "evidence_family_id": "material_adverse_event_vulnerability",
+        "primary_component": "material_adverse_event_vulnerability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.material_adverse_event_vulnerability",
+        "evidence_ids": [
+          "policy:T19:single-owner:material_adverse_event_vulnerability"
+        ]
+      },
+      {
+        "evidence_family_id": "maximum_drawdown_vulnerability",
+        "primary_component": "maximum_drawdown_vulnerability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.maximum_drawdown_vulnerability",
+        "evidence_ids": [
+          "policy:T19:single-owner:maximum_drawdown_vulnerability"
+        ]
+      },
+      {
+        "evidence_family_id": "people:management_delivery",
+        "primary_component": "people_adaptability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.people:management_delivery",
+        "evidence_ids": [
+          "policy:T19:single-owner:people:management_delivery"
+        ]
+      },
+      {
+        "evidence_family_id": "permanent_capital_loss_vulnerability",
+        "primary_component": "permanent_capital_loss_vulnerability",
+        "excluded_from": [],
+        "disposition": "single_owner",
+        "policy_rule_id": "T19.owner.permanent_capital_loss_vulnerability",
+        "evidence_ids": [
+          "policy:T19:single-owner:permanent_capital_loss_vulnerability"
+        ]
+      }
+    ]
+  },
+  "bomb_policy": {
+    "allowed_event_types": [
+      "formal_adverse_opinion",
+      "formal_disclaimer",
+      "confirmed_fraud",
+      "default",
+      "insolvency",
+      "major_regulatory_action",
+      "other_governed"
+    ],
+    "requires_authoritative": true,
+    "requires_material": true,
+    "requires_current_relevance": true
+  },
+  "champion_id": "real-t22-evaluation-candidate",
+  "challenger_ids": [
+    "financial-downside-equal-weight"
+  ],
+  "policy_version": "1.0.0",
+  "publishable": false,
+  "policy_coverage": 1.0,
+  "failure_reasons": {},
+  "input_producer_shas": {
+    "real_features": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
+    "real_downside_constructs": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
+    "policy_definition": "f5755918fea79c53757c31ce3ded4734e0963a2f4d005ac12ba2e125742e6820"
+  },
+  "available_at": "2024-06-26T00:00:00+08:00",
+  "generation_id": "real-t20-2026-07-25",
+  "producer_candidate_sha": "f5755918fea79c53757c31ce3ded4734e0963a2f4d005ac12ba2e125742e6820",
+  "rating_disposition": "NO_RATING_NOT_APPLICABLE",
+  "schema_version": "CandidatePolicyBundle.v1",
+  "source_version": "RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1",
+  "formula_version": "candidate-policy-owned-families-jcs.v1",
+  "model_version": "winsor-rank-peer-cohort-v1",
+  "policy_scope": "generation_metric_family_union"
+}
