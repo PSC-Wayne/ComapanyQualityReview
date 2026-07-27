@@ -144,6 +144,7 @@ class StabilityChecks:
     calibration_monotonic: bool
     stress_auc: Decimal | None
     stress_period_count: int
+    stress_status: Literal["evaluated", "blocked_missing_authority"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,7 +502,12 @@ def _metrics(
             Decimal(fp) / Decimal(positives_called) if positives_called else None,
             Decimal(sum(lead_days)) / Decimal(len(lead_days)) if lead_days else None,
         ),
-        StabilityChecks(monotonic, stress_auc, len(stress_indices)),
+        StabilityChecks(
+            monotonic,
+            stress_auc,
+            len(stress_indices),
+            "evaluated" if stress_indices else "blocked_missing_authority",
+        ),
     )
 
 

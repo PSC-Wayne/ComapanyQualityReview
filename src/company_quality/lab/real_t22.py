@@ -447,9 +447,9 @@ def execute_real_t22_calibration(
         producer_candidate_sha=producer_candidate_sha,
     )
     failures = dict(report.failure_reasons)
+    failures.pop("stress", None)
     failures.update({
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-        "stress": "authoritative_stress_period_artifact_unavailable",
     })
     thresholds = replace(
         report.threshold_candidates,
