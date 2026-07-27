@@ -36,7 +36,10 @@ def _column(frame: pd.DataFrame, code: str) -> pd.Series:
     ]
     if not candidates:
         return pd.Series(dtype=float)
-    return pd.to_numeric(frame[candidates[-1]], errors="coerce").dropna()
+    values = frame.loc[:, candidates].apply(pd.to_numeric, errors="coerce")
+    if (values.nunique(axis=1, dropna=True) > 1).any():
+        raise ValueError(f"conflicting alias values for security {code}")
+    return values.bfill(axis=1).iloc[:, 0].dropna()
 
 
 def _last(series: pd.Series, decision: pd.Timestamp) -> tuple[float | None, pd.Timestamp | None]:
