@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T01:57:12.096143+00:00",
+  "generated_at": "2026-07-27T02:18:42.831827+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -63,11 +63,14 @@
         "quality_adverse_risk": 0.613492095994758,
         "downside_composite": 0.5749413001337811
       },
+      "section_status": {
+        "quality_downside_calibration": "evaluated",
+        "upside_stars": "blocked_missing_T17"
+      },
       "failure_reasons": {
         "policy": "candidate_policy_incomplete",
         "stress": "authoritative_stress_period_artifact_unavailable",
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-        "T17": "same_generation_explicit_assumption_valuation_observations_unavailable",
         "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
       }
     }
