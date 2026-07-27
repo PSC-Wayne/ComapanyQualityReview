@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/UpsidePotentialValidationReport.v1.schema.json",
+  "title": "UpsidePotentialValidationReport.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_version", "model_version", "formula_version",
+    "status", "publishable", "rating_disposition", "prediction_target",
+    "benchmark", "feature_ids", "excluded_feature_families",
+    "temporal_windows", "label_observation_count", "model_observation_count",
+    "holdout_observation_count", "metrics", "input_artifact_shas",
+    "generation_id", "producer_candidate_sha"
+  ],
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0},
+    "nullableNumber": {"type": ["number", "null"]}
+  },
+  "properties": {
+    "schema_version": {"const": "UpsidePotentialValidationReport.v1"},
+    "source_version": {"const": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+pre_adjusted_total_return"},
+    "model_version": {"const": "train_only_ridge_residual_distribution.v1"},
+    "formula_version": {"const": "12m-adjusted-return-same-market-median-benchmark.v1"},
+    "status": {"const": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE"},
+    "publishable": {"const": false},
+    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
+    "prediction_target": {"const": "12m_adjusted_total_return"},
+    "benchmark": {"const": "same_market_decision_date_median_return"},
+    "feature_ids": {
+      "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "excluded_feature_families": {
+      "const": ["management_delivery", "management_continuity", "succession_planning", "technical", "chip"]
+    },
+    "temporal_windows": {
+      "type": "array", "minItems": 1, "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["train_start", "train_end", "holdout_start", "holdout_end", "train_observation_count", "holdout_observation_count"],
+        "properties": {
+          "train_start": {"type": "string", "format": "date"},
+          "train_end": {"type": "string", "format": "date"},
+          "holdout_start": {"type": "string", "format": "date"},
+          "holdout_end": {"type": "string", "format": "date"},
+          "train_observation_count": {"$ref": "#/$defs/count"},
+          "holdout_observation_count": {"$ref": "#/$defs/count"}
+        }
+      }
+    },
+    "label_observation_count": {"$ref": "#/$defs/count"},
+    "model_observation_count": {"$ref": "#/$defs/count"},
+    "holdout_observation_count": {"$ref": "#/$defs/count"},
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mean_absolute_error", "spearman_rank_correlation", "positive_direction_accuracy", "outperform_auc", "p10_p90_interval_coverage", "naive_median_mean_absolute_error", "naive_positive_direction_accuracy"],
+      "properties": {
+        "mean_absolute_error": {"type": "number", "minimum": 0},
+        "spearman_rank_correlation": {"$ref": "#/$defs/nullableNumber"},
+        "positive_direction_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "outperform_auc": {"$ref": "#/$defs/nullableNumber"},
+        "p10_p90_interval_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "naive_median_mean_absolute_error": {"type": "number", "minimum": 0},
+        "naive_positive_direction_accuracy": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "input_artifact_shas": {
+      "type": "object", "additionalProperties": false,
+      "required": ["T21_labels", "real_features", "adjusted_total_return"],
+      "properties": {
+        "T21_labels": {"$ref": "#/$defs/sha"},
+        "real_features": {"$ref": "#/$defs/sha"},
+        "adjusted_total_return": {"$ref": "#/$defs/sha"}
+      }
+    },
+    "generation_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "producer_candidate_sha": {"$ref": "#/$defs/sha"}
+  }
+}

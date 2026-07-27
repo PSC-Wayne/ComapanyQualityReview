@@ -1,0 +1,57 @@
+{
+  "schema_version": "UpsidePotentialValidationReport.v1",
+  "source_version": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+pre_adjusted_total_return",
+  "model_version": "train_only_ridge_residual_distribution.v1",
+  "formula_version": "12m-adjusted-return-same-market-median-benchmark.v1",
+  "status": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE",
+  "publishable": false,
+  "rating_disposition": "NO_RATING_NOT_APPLICABLE",
+  "prediction_target": "12m_adjusted_total_return",
+  "benchmark": "same_market_decision_date_median_return",
+  "feature_ids": [
+    "director_supervisor_pledge_ratio",
+    "gross_margin",
+    "on_time_filing_ratio_8q",
+    "operating_margin",
+    "positive_cash_dividend_year_ratio_3y",
+    "research_development_ratio",
+    "revenue_yoy_volatility_24m",
+    "roe_after_tax"
+  ],
+  "excluded_feature_families": [
+    "management_delivery",
+    "management_continuity",
+    "succession_planning",
+    "technical",
+    "chip"
+  ],
+  "temporal_windows": [
+    {
+      "train_start": "2022-06-30",
+      "train_end": "2022-06-30",
+      "holdout_start": "2024-06-30",
+      "holdout_end": "2024-06-30",
+      "train_observation_count": 1722,
+      "holdout_observation_count": 1820
+    }
+  ],
+  "label_observation_count": 5302,
+  "model_observation_count": 5302,
+  "holdout_observation_count": 1820,
+  "metrics": {
+    "mean_absolute_error": 0.3721591598349738,
+    "spearman_rank_correlation": 0.19519557251139502,
+    "positive_direction_accuracy": 0.2423076923076923,
+    "outperform_auc": 0.599939741504337,
+    "p10_p90_interval_coverage": 0.37252747252747254,
+    "naive_median_mean_absolute_error": 0.3738084265468349,
+    "naive_positive_direction_accuracy": 0.2379120879120879
+  },
+  "input_artifact_shas": {
+    "T21_labels": "57573b7ab5e27afaf6e5f88d34d4f9fbcb90a48e63f0f218de7a9d491aa4b492",
+    "adjusted_total_return": "67d18b0f8d0840da6843dbd52fdba261fd0d4e19846331d29b6580ca17c50f1f",
+    "real_features": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2"
+  },
+  "generation_id": "real-t20-2026-07-25",
+  "producer_candidate_sha": "37890579c0d367e7fd32b5f721e88769125efb51a90c81ad78c0b2d3f14cf093"
+}
