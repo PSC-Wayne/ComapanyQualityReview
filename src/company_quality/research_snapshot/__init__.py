@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Literal, Mapping, Sequence, cast
 
+from company_quality.industry.model_route import IndustryModelRoute
 from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
 
 
@@ -107,6 +108,7 @@ class CompanyResearchSnapshot:
     upside: UpsideCoreResult
     downside: DownsideCoreResult
     twelve_month_return: TwelveMonthReturnLabel | None
+    industry_route: IndustryModelRoute | None = None
     official_events: list[OfficialMaterialEvent] = field(default_factory=list)
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
         "NO_RATING_NOT_APPLICABLE"
@@ -149,6 +151,7 @@ def build_company_research_snapshot(
     upside: UpsideCoreResult,
     downside: DownsideCoreResult,
     twelve_month_return: TwelveMonthReturnLabel | None = None,
+    industry_route: IndustryModelRoute | None = None,
     official_events: Sequence[OfficialMaterialEvent] = (),
 ) -> CompanyResearchSnapshot:
     """Bind independent existing results without recomputing or merging their values."""
@@ -172,6 +175,51 @@ def build_company_research_snapshot(
     if not issuer_id:
         raise CompanyResearchSnapshotError("issuer_id required")
     generated = _instant(generated_at, "generated_at")
+    if industry_route is not None:
+        if (
+            industry_route.generation_id != generation_id
+            or industry_route.issuer_id != issuer_id
+            or industry_route.security_code != security_code
+            or industry_route.market != market
+        ):
+            raise CompanyResearchSnapshotError(
+                "industry route must bind snapshot identity, market and generation"
+            )
+        route_day = _day(industry_route.decision_date, "industry route decision_date")
+        if route_day > generated.date():
+            raise CompanyResearchSnapshotError(
+                "industry route decision cannot follow snapshot generation"
+            )
+        if industry_route.all_market_fallback_model_id is not None:
+            raise CompanyResearchSnapshotError("all-market industry fallback is forbidden")
+        if not industry_route.stars_eligible and upside.stars is not None:
+            raise CompanyResearchSnapshotError(
+                "ineligible industry route cannot carry upside stars"
+            )
+        if industry_route.status == "industry_sample_insufficient":
+            if upside.status != "industry_sample_insufficient" or upside.stars is not None:
+                raise CompanyResearchSnapshotError(
+                    "sample-insufficient industry must suppress upside stars"
+                )
+        if industry_route.status == "classification_unverified":
+            if upside.status != "data_insufficient" or upside.stars is not None:
+                raise CompanyResearchSnapshotError(
+                    "unverified industry classification must suppress upside result"
+                )
+        if industry_route.status in {
+            "eligible",
+            "industry_sample_insufficient",
+            "financial_separate_model",
+        } and (
+            not industry_route.industry_code
+            or not industry_route.classification_version
+            or not industry_route.classification_authority_url
+            or not industry_route.classification_evidence_id
+            or not industry_route.candidate_model_id
+        ):
+            raise CompanyResearchSnapshotError(
+                "verified industry route requires classification evidence"
+            )
     eligible_event_types = {
         "trading_suspension",
         "altered_trading",
@@ -282,6 +330,7 @@ def build_company_research_snapshot(
         upside=upside,
         downside=downside,
         twelve_month_return=twelve_month_return,
+        industry_route=industry_route,
         official_events=sorted(admitted_events, key=lambda item: item.available_at),
     )
 
