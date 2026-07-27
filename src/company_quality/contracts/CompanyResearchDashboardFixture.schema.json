@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/CompanyResearchDashboardFixture.v1.schema.json",
+  "title": "CompanyResearchDashboardFixture.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "company_name", "snapshot", "positive_factors", "negative_factors",
+    "missing_values", "confidence_reduction_reasons", "schema_version"
+  ],
+  "$defs": {
+    "upstreamItems": {
+      "type": "array", "maxItems": 3,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "properties": {
+    "company_name": {"type": "string", "minLength": 1},
+    "snapshot": {"type": "object"},
+    "positive_factors": {"$ref": "#/$defs/upstreamItems"},
+    "negative_factors": {"$ref": "#/$defs/upstreamItems"},
+    "missing_values": {"$ref": "#/$defs/upstreamItems"},
+    "confidence_reduction_reasons": {"$ref": "#/$defs/upstreamItems"},
+    "schema_version": {"const": "CompanyResearchDashboardFixture.v1"}
+  }
+}
