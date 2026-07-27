@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T02:27:11.147370+00:00",
+  "generated_at": "2026-07-27T02:35:50.977846+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -65,14 +65,55 @@
       },
       "section_status": {
         "quality_calibration": "diagnostic_only_blocked_T14",
-        "downside_calibration": "diagnostic_only_blocked_T18",
-        "upside_stars": "blocked_missing_T17"
+        "downside_calibration": "evaluated_fail",
+        "upside_stars": "blocked_missing_T17",
+        "risk_register": "blocked_missing_T18_authority",
+        "stress_pack": "blocked_missing_T18_authority",
+        "bomb": "blocked_missing_T18_authority"
+      },
+      "downside_construct_validation": {
+        "status": "evaluated",
+        "verdict": "fail",
+        "metrics": {
+          "auc": 0.5611688138696104,
+          "brier": 0.26246981201244945,
+          "calibration_error": 0.2579708642589523,
+          "precision_at_top": 0.3063583815028902
+        },
+        "calibration_curves": [
+          {
+            "bucket": "00-10%",
+            "predicted": 0.010181774324242292,
+            "observed": 0.26833527357392317,
+            "count": 1718
+          },
+          {
+            "bucket": "20-30%",
+            "predicted": 0.25,
+            "observed": 0.42857142857142855,
+            "count": 7
+          },
+          {
+            "bucket": "50-60%",
+            "predicted": 0.5,
+            "observed": 0.0,
+            "count": 1
+          }
+        ],
+        "failure_reasons": {
+          "auc": "auc_below_0.65",
+          "brier": "brier_not_better_than_prevalence_baseline",
+          "calibration": "calibration_error_above_0.10",
+          "top_decile": "precision_at_top_below_2x_prevalence",
+          "monotonicity": "calibration_not_monotonic"
+        },
+        "stress_pack_status": "blocked_missing_authority",
+        "bomb_status": "blocked_missing_authority"
       },
       "failure_reasons": {
         "policy": "candidate_policy_incomplete",
         "stress": "authoritative_stress_period_artifact_unavailable",
-        "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-        "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
+        "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable"
       }
     }
   },
