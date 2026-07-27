@@ -14,6 +14,10 @@ from typing import Literal, Mapping, cast
 import pandas as pd
 
 from company_quality.lab.cohort import AdverseControlCohort
+from company_quality.lab.official_benchmarks import (
+    TPEX_TOTAL_RETURN_URL,
+    TWSE_TOTAL_RETURN_URL,
+)
 from company_quality.lab.outcome_labels import (
     DailyClose,
     OfficialMarketTotalReturnInput,
@@ -46,11 +50,7 @@ def _official_benchmark(
     market: Literal["TWSE", "TPEx"],
     series: pd.Series,
 ) -> OfficialMarketTotalReturnInput:
-    source_ref = (
-        "https://openapi.twse.com.tw/v1/indicesReport/MFI94U"
-        if market == "TWSE"
-        else "https://www.tpex.org.tw/openapi/v1/tpex_reward_index"
-    )
+    source_ref = TWSE_TOTAL_RETURN_URL if market == "TWSE" else TPEX_TOTAL_RETURN_URL
     cleaned = series.dropna().sort_index()
     if cleaned.empty:
         raise ValueError(f"{market} official total-return index is empty")
