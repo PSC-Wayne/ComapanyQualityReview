@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Literal, Mapping, cast
+from typing import Literal, Mapping, Sequence, cast
 
 from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
 
@@ -63,6 +63,37 @@ class DownsideCoreResult:
 
 
 @dataclass(frozen=True, slots=True)
+class OfficialMaterialEvent:
+    generation_id: str
+    issuer_id: str
+    security_code: str
+    market: Literal["TWSE", "TPEx"]
+    event_id: str
+    event_type: Literal[
+        "material_announcement",
+        "trading_suspension",
+        "altered_trading",
+        "delisting",
+        "regulatory_violation",
+        "filing_violation",
+        "financial_restatement",
+    ]
+    title: str
+    effective_date: str
+    available_at: str
+    official_reason: str
+    source_authority: Literal["TWSE", "TPEx"]
+    source_url: str
+    evidence_id: str
+    confirmation_status: Literal["confirmed", "unconfirmed_research"]
+    downside_candidate_status: Literal[
+        "eligible_for_validation",
+        "display_only",
+        "unconfirmed_research",
+    ]
+
+
+@dataclass(frozen=True, slots=True)
 class CompanyResearchSnapshot:
     issuer_id: str
     security_code: str | None
@@ -76,6 +107,7 @@ class CompanyResearchSnapshot:
     upside: UpsideCoreResult
     downside: DownsideCoreResult
     twelve_month_return: TwelveMonthReturnLabel | None
+    official_events: list[OfficialMaterialEvent] = field(default_factory=list)
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
         "NO_RATING_NOT_APPLICABLE"
     )
@@ -117,6 +149,7 @@ def build_company_research_snapshot(
     upside: UpsideCoreResult,
     downside: DownsideCoreResult,
     twelve_month_return: TwelveMonthReturnLabel | None = None,
+    official_events: Sequence[OfficialMaterialEvent] = (),
 ) -> CompanyResearchSnapshot:
     """Bind independent existing results without recomputing or merging their values."""
     generations = {
@@ -138,7 +171,54 @@ def build_company_research_snapshot(
         )
     if not issuer_id:
         raise CompanyResearchSnapshotError("issuer_id required")
-    _instant(generated_at, "generated_at")
+    generated = _instant(generated_at, "generated_at")
+    eligible_event_types = {
+        "trading_suspension",
+        "altered_trading",
+        "delisting",
+        "regulatory_violation",
+        "filing_violation",
+        "financial_restatement",
+    }
+    admitted_events: list[OfficialMaterialEvent] = []
+    for event in official_events:
+        if (
+            event.generation_id != generation_id
+            or event.issuer_id != issuer_id
+            or event.security_code != security_code
+            or event.market != market
+        ):
+            raise CompanyResearchSnapshotError(
+                "official event must bind snapshot identity, market and generation"
+            )
+        available = _instant(event.available_at, "official event available_at")
+        _day(event.effective_date, "official event effective_date")
+        if available > generated:
+            raise CompanyResearchSnapshotError(
+                "official event was not available when snapshot was generated"
+            )
+        if (
+            not event.event_id
+            or not event.title
+            or not event.official_reason
+            or not event.evidence_id
+            or not event.source_url.startswith("https://")
+            or event.source_authority != event.market
+        ):
+            raise CompanyResearchSnapshotError("official event authority fields required")
+        if event.confirmation_status == "unconfirmed_research":
+            if event.downside_candidate_status != "unconfirmed_research":
+                raise CompanyResearchSnapshotError(
+                    "unconfirmed event cannot enter a core candidate"
+                )
+        elif event.downside_candidate_status == "eligible_for_validation":
+            if event.event_type not in eligible_event_types:
+                raise CompanyResearchSnapshotError(
+                    "generic announcement cannot enter downside validation"
+                )
+        elif event.downside_candidate_status != "display_only":
+            raise CompanyResearchSnapshotError("invalid confirmed event disposition")
+        admitted_events.append(event)
     for name, result in (
         ("quality", quality),
         ("upside", upside),
@@ -202,6 +282,7 @@ def build_company_research_snapshot(
         upside=upside,
         downside=downside,
         twelve_month_return=twelve_month_return,
+        official_events=sorted(admitted_events, key=lambda item: item.available_at),
     )
 
 
@@ -209,6 +290,7 @@ __all__ = [
     "CompanyResearchSnapshot",
     "CompanyResearchSnapshotError",
     "DownsideCoreResult",
+    "OfficialMaterialEvent",
     "QualityCoreResult",
     "UpsideCoreResult",
     "build_company_research_snapshot",
