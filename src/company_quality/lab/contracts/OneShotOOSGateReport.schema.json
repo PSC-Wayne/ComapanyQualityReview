@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/OneShotOOSGateReport.v1.schema.json",
+  "title": "OneShotOOSGateReport.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evaluation_key", "generation_id", "champion_candidate_id",
+    "final_oos_start", "final_oos_end", "overall", "markets",
+    "eligible_industries", "missing_markets", "gate_passed",
+    "publication_candidate_eligible", "publishable", "formal_stars_emitted",
+    "release_authorized", "t23_authorized", "status", "schema_version"
+  ],
+  "$defs": {
+    "checks": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "minimum_observations", "rank_correlation_at_least_0_10",
+        "official_outperform_auc_at_least_0_62",
+        "mae_improvement_at_least_5_percent",
+        "direction_accuracy_gain_at_least_0_05",
+        "p10_p90_coverage_between_0_75_and_0_85",
+        "beats_no_company_data_baseline",
+        "beats_same_data_normalized_linear",
+        "industry_train_sample_at_least_500"
+      ],
+      "properties": {
+        "minimum_observations": {"type": "boolean"},
+        "rank_correlation_at_least_0_10": {"type": "boolean"},
+        "official_outperform_auc_at_least_0_62": {"type": "boolean"},
+        "mae_improvement_at_least_5_percent": {"type": "boolean"},
+        "direction_accuracy_gain_at_least_0_05": {"type": "boolean"},
+        "p10_p90_coverage_between_0_75_and_0_85": {"type": "boolean"},
+        "beats_no_company_data_baseline": {"type": "boolean"},
+        "beats_same_data_normalized_linear": {"type": "boolean"},
+        "industry_train_sample_at_least_500": {"type": "boolean"}
+      }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "scope", "observation_count", "spearman_rank_correlation",
+        "official_outperform_auc", "champion_mean_absolute_error",
+        "naive_mean_absolute_error", "normalized_linear_mean_absolute_error",
+        "mae_improvement_vs_naive", "champion_direction_accuracy",
+        "naive_direction_accuracy", "direction_accuracy_gain",
+        "p10_p90_interval_coverage", "checks", "passed"
+      ],
+      "properties": {
+        "scope": {"type": "string", "minLength": 1},
+        "observation_count": {"type": "integer", "minimum": 0},
+        "spearman_rank_correlation": {"type": ["number", "null"]},
+        "official_outperform_auc": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "champion_mean_absolute_error": {"type": "number", "minimum": 0},
+        "naive_mean_absolute_error": {"type": "number", "minimum": 0},
+        "normalized_linear_mean_absolute_error": {"type": "number", "minimum": 0},
+        "mae_improvement_vs_naive": {"type": ["number", "null"]},
+        "champion_direction_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "naive_direction_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "direction_accuracy_gain": {"type": "number", "minimum": -1, "maximum": 1},
+        "p10_p90_interval_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "checks": {"$ref": "#/$defs/checks"},
+        "passed": {"type": "boolean"}
+      }
+    },
+    "overall": {
+      "oneOf": [
+        {"$ref": "#/$defs/metrics"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["scope", "observation_count", "checks", "passed"],
+          "properties": {
+            "scope": {"const": "overall"},
+            "observation_count": {"const": 0},
+            "checks": {"type": "object", "maxProperties": 0},
+            "passed": {"const": false}
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "evaluation_key": {"type": "string", "minLength": 1},
+    "generation_id": {"type": "string", "minLength": 1},
+    "champion_candidate_id": {"type": "string", "minLength": 1},
+    "final_oos_start": {"type": "string", "format": "date"},
+    "final_oos_end": {"type": "string", "format": "date"},
+    "overall": {"$ref": "#/$defs/overall"},
+    "markets": {"type": "array", "items": {"$ref": "#/$defs/metrics"}},
+    "eligible_industries": {"type": "array", "items": {"$ref": "#/$defs/metrics"}},
+    "missing_markets": {
+      "type": "array", "uniqueItems": true,
+      "items": {"enum": ["TWSE", "TPEx"]}
+    },
+    "gate_passed": {"type": "boolean"},
+    "publication_candidate_eligible": {"type": "boolean"},
+    "publishable": {"const": false},
+    "formal_stars_emitted": {"const": false},
+    "release_authorized": {"const": false},
+    "t23_authorized": {"const": false},
+    "status": {"const": "research_only"},
+    "schema_version": {"const": "OneShotOOSGateReport.v1"}
+  }
+}
