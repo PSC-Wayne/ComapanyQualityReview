@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/PreOOSReadinessReport.v1.schema.json",
+  "title": "PreOOSReadinessReport.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "generation_id", "final_oos_start", "label_years", "markets",
+    "candidate_ids", "label_row_count", "candidate_row_count", "blockers",
+    "ready_for_pre_oos_freeze", "final_oos_rows_read",
+    "final_oos_record_written", "schema_version"
+  ],
+  "properties": {
+    "generation_id": {"type": ["string", "null"]},
+    "final_oos_start": {"type": "string", "format": "date"},
+    "label_years": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1900}
+    },
+    "markets": {
+      "type": "array", "uniqueItems": true,
+      "items": {"enum": ["TWSE", "TPEx"]}
+    },
+    "candidate_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "label_row_count": {"type": "integer", "minimum": 0},
+    "candidate_row_count": {"type": "integer", "minimum": 0},
+    "blockers": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "ready_for_pre_oos_freeze": {"type": "boolean"},
+    "final_oos_rows_read": {"const": false},
+    "final_oos_record_written": {"const": false},
+    "schema_version": {"const": "PreOOSReadinessReport.v1"}
+  }
+}
