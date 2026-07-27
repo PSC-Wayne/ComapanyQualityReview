@@ -88,7 +88,7 @@
     "version": "1.0.0",
     "evidence_family_policy_locator": "AnalysisSnapshot.sections.candidate_policy.anti_double_count_policy.evidence_family_ownership",
     "evidence_family_policy_canonicalization": "RFC8785_JCS",
-    "evidence_family_policy_sha256": "81eab2a5e73b8c479f48e4f4f9c4a5a927a5058d640dc42eca0b7c1474a37cb8",
+    "evidence_family_policy_sha256": "c2ca88971053246a5e4590dafafedf6b9a5ccb5fdb4c6496941b56651d8d1d30",
     "evidence_family_ownership": [
       {
         "evidence_family_id": "adaptability:rd",
@@ -181,16 +181,6 @@
         ]
       },
       {
-        "evidence_family_id": "people:management_delivery",
-        "primary_component": "people_adaptability",
-        "excluded_from": [],
-        "disposition": "single_owner",
-        "policy_rule_id": "T19.owner.people:management_delivery",
-        "evidence_ids": [
-          "policy:T19:single-owner:people:management_delivery"
-        ]
-      },
-      {
         "evidence_family_id": "permanent_capital_loss_vulnerability",
         "primary_component": "permanent_capital_loss_vulnerability",
         "excluded_from": [],
@@ -227,11 +217,11 @@
   "input_producer_shas": {
     "real_features": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "real_downside_constructs": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
-    "policy_definition": "f5755918fea79c53757c31ce3ded4734e0963a2f4d005ac12ba2e125742e6820"
+    "policy_definition": "01ee0ecd9aa0f470128dd8a68516fe45b568a20783ace11c282178241bea9ce6"
   },
   "available_at": "2024-06-26T00:00:00+08:00",
   "generation_id": "real-t20-2026-07-25",
-  "producer_candidate_sha": "f5755918fea79c53757c31ce3ded4734e0963a2f4d005ac12ba2e125742e6820",
+  "producer_candidate_sha": "01ee0ecd9aa0f470128dd8a68516fe45b568a20783ace11c282178241bea9ce6",
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
   "schema_version": "CandidatePolicyBundle.v1",
   "source_version": "RealPITFeatureMatrix.v1+RealPITDownsideConstructInputs.v1",

@@ -47,6 +47,8 @@ PILLARS = (
     "people_adaptability",
 )
 _TAIPEI = "Asia/Taipei"
+EXCLUDED_SCORING_METRIC_IDS = frozenset({"management_delivery_ratio"})
+EXCLUDED_SCORING_FAMILY_IDS = frozenset({"people:management_delivery"})
 
 
 def _wide(path: Path) -> pd.DataFrame:
@@ -384,6 +386,17 @@ def _evaluation_policy(
     )
 
 
+def _scoring_family_ids(features: pd.DataFrame) -> tuple[str, ...]:
+    included = features.loc[
+        ~features["metric_id"].astype(str).isin(tuple(EXCLUDED_SCORING_METRIC_IDS))
+        & ~features["evidence_family_id"].astype(str).isin(
+            tuple(EXCLUDED_SCORING_FAMILY_IDS)
+        ),
+        "evidence_family_id",
+    ]
+    return tuple(sorted(set(included.dropna().astype(str))))
+
+
 def _decimal(value: object) -> Decimal:
     return Decimal(str(value))
 
@@ -428,6 +441,11 @@ def _observations(
         metrics: list[AdmittedMetric] = []
         available: list[pd.Timestamp] = []
         for row in group.itertuples(index=False):
+            if (
+                str(getattr(row, "metric_id")) in EXCLUDED_SCORING_METRIC_IDS
+                or str(getattr(row, "evidence_family_id")) in EXCLUDED_SCORING_FAMILY_IDS
+            ):
+                continue
             if pd.isna(row.metric_value) or not row.evidence_id or not row.metric_available_at:
                 continue
             timestamp = _aware(row.metric_available_at)
@@ -471,6 +489,38 @@ def _observations(
     return tuple(result)
 
 
+def _nonstress_performance_failures(rows, report) -> dict[str, str]:
+    holdout_dates = {
+        row.decision_date
+        for row in rows
+        if any(
+            window.start <= row.decision_date <= window.end
+            for window in report.holdout_windows
+        )
+    }
+    holdout = [row for row in rows if row.decision_date in holdout_dates]
+    prevalence = Decimal(sum(row.adverse_outcome for row in holdout)) / Decimal(
+        len(holdout)
+    )
+    naive_brier = prevalence * (Decimal("1") - prevalence)
+    metrics = report.metrics
+    failures: dict[str, str] = {}
+    if metrics.auc is None or metrics.auc < Decimal("0.65"):
+        failures["auc"] = "auc_below_0.65"
+    if metrics.brier is None or metrics.brier >= naive_brier:
+        failures["brier"] = "brier_not_better_than_prevalence_baseline"
+    if metrics.calibration_error is None or metrics.calibration_error > Decimal("0.10"):
+        failures["calibration"] = "calibration_error_above_0.10"
+    if (
+        metrics.precision_at_top is None
+        or metrics.precision_at_top < prevalence * Decimal("2")
+    ):
+        failures["top_decile"] = "precision_at_top_below_2x_prevalence"
+    if not report.stability_checks.calibration_monotonic:
+        failures["monotonicity"] = "calibration_not_monotonic"
+    return failures
+
+
 def execute_real_t22_calibration(
     labels: pd.DataFrame,
     features: pd.DataFrame,
@@ -487,7 +537,7 @@ def execute_real_t22_calibration(
     policy = policy or _evaluation_policy(
         generation,
         producer_candidate_sha,
-        features["evidence_family_id"].dropna().astype(str),
+        _scoring_family_ids(features),
         {
             "real_features": str(input_producer_shas["T09"]),
             "real_downside_constructs": str(input_producer_shas["T18"]),
@@ -510,17 +560,15 @@ def execute_real_t22_calibration(
     )
     failures = dict(report.failure_reasons)
     failures.pop("stress", None)
-    failures.update({
-        "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-    })
+    quality_failures = _nonstress_performance_failures(rows, report)
     thresholds = replace(
         report.threshold_candidates,
         upside_status="blocked_missing_T17",
-        quality_status="diagnostic_only_blocked_T14",
+        quality_status="evaluated",
     )
     return replace(
         report,
-        champion_verdict="blocked",
+        champion_verdict="fail" if quality_failures else "pass",
         failure_reasons=failures,
         threshold_candidates=thresholds,
     ), rows
@@ -642,7 +690,7 @@ def main() -> int:
     policy = _evaluation_policy(
         generation_id,
         source_sha,
-        features["evidence_family_id"].dropna().astype(str),
+        _scoring_family_ids(features),
         {
             "real_features": feature_sha,
             "real_downside_constructs": construct_sha,
@@ -700,6 +748,16 @@ def main() -> int:
             verdict=comparison,
         ),),
     )
+    quality_validation = {
+        "status": "evaluated",
+        "verdict": report.champion_verdict,
+        "failure_reasons": _nonstress_performance_failures(rows, report),
+        "excluded_criteria": [
+            "management_delivery",
+            "management_continuity",
+            "succession_planning",
+        ],
+    }
     calibration_payload = json.loads(json.dumps(asdict(report), default=float))
     args.calibration_output.write_text(
         json.dumps(calibration_payload, ensure_ascii=False, indent=2) + "\n"
@@ -738,7 +796,7 @@ def main() -> int:
             "coverage": float(labels["fully_observed"].mean()),
         },
         "T09_T14": {
-            "status": "EXECUTED_WITH_AUTHORITY_GAPS",
+            "status": "EXECUTED_WITH_OWNER_EXCLUDED_MANAGEMENT_CRITERIA",
             "metric_row_count": int(len(features)),
             "observation_count": int(
                 features[["issuer_id", "decision_date"]].drop_duplicates().shape[0]
@@ -746,7 +804,7 @@ def main() -> int:
         },
         "T18": construct_report,
         "T22": {
-            "status": "CALIBRATION_EXECUTED_BLOCKED",
+            "status": "CALIBRATION_EXECUTED_NON_PUBLISHABLE",
             "candidate_score_row_count": len(rows),
             "champion_verdict": report.champion_verdict,
             "metrics": calibration_payload["metrics"],
@@ -754,7 +812,7 @@ def main() -> int:
                 json.dumps(diagnostic_auc, default=float)
             ),
             "section_status": {
-                "quality_calibration": "diagnostic_only_blocked_T14",
+                "quality_calibration": f"evaluated_{report.champion_verdict}",
                 "downside_calibration": (
                     f"evaluated_{downside_validation['verdict']}"
                 ),
@@ -763,6 +821,7 @@ def main() -> int:
                 "stress_pack": "blocked_missing_T18_authority",
                 "bomb": "blocked_missing_T18_authority",
             },
+            "quality_validation": quality_validation,
             "downside_construct_validation": downside_validation,
             "failure_reasons": report.failure_reasons,
         },

@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T03:18:38.524071+00:00",
+  "generated_at": "2026-07-27T03:37:30.899721+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -24,7 +24,7 @@
       "coverage": 0.9994344957587182
     },
     "T09_T14": {
-      "status": "EXECUTED_WITH_AUTHORITY_GAPS",
+      "status": "EXECUTED_WITH_OWNER_EXCLUDED_MANAGEMENT_CRITERIA",
       "metric_row_count": 47745,
       "observation_count": 5305
     },
@@ -50,9 +50,9 @@
       ]
     },
     "T22": {
-      "status": "CALIBRATION_EXECUTED_BLOCKED",
+      "status": "CALIBRATION_EXECUTED_NON_PUBLISHABLE",
       "candidate_score_row_count": 5134,
-      "champion_verdict": "blocked",
+      "champion_verdict": "fail",
       "metrics": {
         "auc": 0.6106421457456691,
         "brier": 0.26084580868617113,
@@ -64,12 +64,28 @@
         "downside_composite": 0.5749413001337811
       },
       "section_status": {
-        "quality_calibration": "diagnostic_only_blocked_T14",
+        "quality_calibration": "evaluated_fail",
         "downside_calibration": "evaluated_fail",
         "upside_stars": "blocked_missing_T17",
         "risk_register": "blocked_missing_T18_authority",
         "stress_pack": "blocked_missing_T18_authority",
         "bomb": "blocked_missing_T18_authority"
+      },
+      "quality_validation": {
+        "status": "evaluated",
+        "verdict": "fail",
+        "failure_reasons": {
+          "auc": "auc_below_0.65",
+          "brier": "brier_not_better_than_prevalence_baseline",
+          "calibration": "calibration_error_above_0.10",
+          "top_decile": "precision_at_top_below_2x_prevalence",
+          "monotonicity": "calibration_not_monotonic"
+        },
+        "excluded_criteria": [
+          "management_delivery",
+          "management_continuity",
+          "succession_planning"
+        ]
       },
       "downside_construct_validation": {
         "status": "evaluated",
@@ -110,9 +126,7 @@
         "stress_pack_status": "blocked_missing_authority",
         "bomb_status": "blocked_missing_authority"
       },
-      "failure_reasons": {
-        "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable"
-      }
+      "failure_reasons": {}
     }
   },
   "execution_disposition": "STOP_BEFORE_T23"

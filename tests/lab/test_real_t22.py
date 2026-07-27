@@ -6,6 +6,7 @@ import pandas as pd
 
 from company_quality.lab.real_t22 import (
     _evaluation_policy,
+    _scoring_family_ids,
     build_pit_downside_constructs,
     evaluate_downside_construct_calibration,
     execute_real_t22_calibration,
@@ -154,14 +155,19 @@ def _calibration_inputs():
     return labels, pd.DataFrame(feature_rows), pd.DataFrame(construct_rows)
 
 
-def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
+def test_real_calibration_excludes_management_criteria_and_evaluates_quality() -> None:
     labels, features, constructs = _calibration_inputs()
+    excluded = features.iloc[[0]].copy()
+    excluded["metric_id"] = "management_delivery_ratio"
+    excluded["evidence_family_id"] = "people:management_delivery"
+    excluded["metric_value"] = Decimal("100")
+    features = pd.concat([features, excluded], ignore_index=True)
     input_shas: dict[str, str | None] = _sha_inputs()
     input_shas["T17"] = None
     policy = _evaluation_policy(
         "real-generation",
         "a" * 64,
-        features["evidence_family_id"],
+        _scoring_family_ids(features),
         {
             "real_features": "1" * 64,
             "real_downside_constructs": "2" * 64,
@@ -176,7 +182,8 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
         row.evidence_family_id
         for row in policy.anti_double_count_policy.evidence_family_ownership
     }
-    assert set(features["evidence_family_id"]) <= families
+    assert "people:management_delivery" not in families
+    assert set(_scoring_family_ids(features)) <= families
     assert len(families) == len(
         policy.anti_double_count_policy.evidence_family_ownership
     )
@@ -189,11 +196,11 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
     assert rows
     assert all(row.upside_decimal is None for row in rows)
     assert report.metrics.auc == Decimal("1")
-    assert report.champion_verdict == "blocked"
+    assert report.champion_verdict == "pass"
     assert "T17" not in report.failure_reasons
     assert report.threshold_candidates.upside_status == "blocked_missing_T17"
-    assert report.threshold_candidates.quality_status == "diagnostic_only_blocked_T14"
-    assert report.failure_reasons["T14"].startswith("authoritative_PIT")
+    assert report.threshold_candidates.quality_status == "evaluated"
+    assert "T14" not in report.failure_reasons
     assert "T18" not in report.failure_reasons
     assert "stress" not in report.failure_reasons
     assert report.stability_checks.stress_status == "blocked_missing_authority"

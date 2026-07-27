@@ -42,7 +42,7 @@
       "count": 2
     }
   ],
-  "champion_verdict": "blocked",
+  "champion_verdict": "fail",
   "challenger_results": [
     {
       "challenger_id": "financial-downside-equal-weight",
@@ -73,7 +73,7 @@
     ],
     "bomb_materiality": 1.0,
     "upside_status": "blocked_missing_T17",
-    "quality_status": "diagnostic_only_blocked_T14"
+    "quality_status": "evaluated"
   },
   "leakage_checks": {
     "pit_join_pass": true,
@@ -95,9 +95,7 @@
     "stress_status": "blocked_missing_authority"
   },
   "validation_coverage": 0.9672007540056551,
-  "failure_reasons": {
-    "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable"
-  },
+  "failure_reasons": {},
   "input_producer_shas": {
     "T09": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T10": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
@@ -106,11 +104,11 @@
     "T16": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T17": null,
     "T18": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
-    "T19": "8ec15ae2736efbd0e9f2e0c2638f1aef97f835cab8caf52aca4af5a7132ed6eb",
+    "T19": "c358ae763e190f7dd65089d877ce99aae0b673d315f94b5406f7847614e1eb1b",
     "T21": "57573b7ab5e27afaf6e5f88d34d4f9fbcb90a48e63f0f218de7a9d491aa4b492"
   },
   "generation_id": "real-t20-2026-07-25",
-  "producer_candidate_sha": "f5755918fea79c53757c31ce3ded4734e0963a2f4d005ac12ba2e125742e6820",
+  "producer_candidate_sha": "01ee0ecd9aa0f470128dd8a68516fe45b568a20783ace11c282178241bea9ce6",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
   "schema_version": "CalibrationValidationReport.v1",
