@@ -7,7 +7,7 @@
   "required": [
     "issuer_id", "security_code", "market", "generation_id", "generated_at",
     "status", "ai_status", "input_source_versions", "quality", "upside",
-    "downside", "twelve_month_return", "official_events", "rating_disposition", "schema_version"
+    "downside", "twelve_month_return", "industry_route", "official_events", "rating_disposition", "schema_version"
   ],
   "$defs": {
     "status": {
@@ -74,6 +74,42 @@
         "evidence_id": {"type": "string", "minLength": 1},
         "confirmation_status": {"enum": ["confirmed", "unconfirmed_research"]},
         "downside_candidate_status": {"enum": ["eligible_for_validation", "display_only", "unconfirmed_research"]}
+      }
+    },
+    "industryRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_id", "issuer_id", "security_code", "market", "decision_date",
+        "status", "reason", "industry_code", "classification_effective_from",
+        "classification_effective_to", "classification_version",
+        "classification_authority_url", "classification_evidence_id",
+        "candidate_model_id", "train_observations", "final_oos_observations",
+        "official_benchmark_source_ref", "pit_value_chain_tags", "stars_eligible",
+        "all_market_fallback_model_id", "schema_version"
+      ],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "issuer_id": {"type": "string", "minLength": 1},
+        "security_code": {"type": "string", "minLength": 1},
+        "market": {"enum": ["TWSE", "TPEx"]},
+        "decision_date": {"type": "string", "format": "date"},
+        "status": {"enum": ["eligible", "industry_sample_insufficient", "classification_unverified", "financial_separate_model"]},
+        "reason": {"type": ["string", "null"]},
+        "industry_code": {"type": ["string", "null"]},
+        "classification_effective_from": {"type": ["string", "null"], "format": "date"},
+        "classification_effective_to": {"type": ["string", "null"], "format": "date"},
+        "classification_version": {"type": ["string", "null"]},
+        "classification_authority_url": {"type": ["string", "null"], "format": "uri"},
+        "classification_evidence_id": {"type": ["string", "null"]},
+        "candidate_model_id": {"type": ["string", "null"]},
+        "train_observations": {"type": ["integer", "null"], "minimum": 0},
+        "final_oos_observations": {"type": ["integer", "null"], "minimum": 0},
+        "official_benchmark_source_ref": {"type": "string", "format": "uri"},
+        "pit_value_chain_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "stars_eligible": {"type": "boolean"},
+        "all_market_fallback_model_id": {"type": "null"},
+        "schema_version": {"const": "IndustryModelRoute.v1"}
       }
     }
   },
@@ -152,6 +188,12 @@
       "oneOf": [
         {"type": "null"},
         {"$ref": "#/$defs/returnLabel"}
+      ]
+    },
+    "industry_route": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/industryRoute"}
       ]
     },
     "official_events": {
