@@ -9,10 +9,13 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+
+from company_quality.research_snapshot import UpsideCoreResult
 
 
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -183,25 +186,148 @@ def _finite_or_none(value: float | None) -> float | None:
     return value if value is not None and np.isfinite(value) else None
 
 
+def _holdout_mae(
+    data: pd.DataFrame,
+    feature_ids: list[str],
+    holdout_dates: list[pd.Timestamp],
+) -> tuple[float | None, list[str]]:
+    actual: list[float] = []
+    predicted: list[float] = []
+    used: list[str] = []
+    for holdout_stamp in holdout_dates:
+        train_cutoff = holdout_stamp - pd.DateOffset(months=12)
+        train = data.loc[data["decision"] < train_cutoff]
+        holdout = data.loc[data["decision"] == holdout_stamp]
+        if len(train) < 10 or holdout.empty:
+            continue
+        if any(train[item].notna().sum() < 2 for item in feature_ids):
+            continue
+        prediction, _ = _fit_predict(train, holdout, feature_ids, "actual_total_return")
+        actual.extend(holdout["actual_total_return"].astype(float))
+        predicted.extend(prediction)
+        used.append(holdout_stamp.date().isoformat())
+    if not actual:
+        return None, used
+    return float(np.mean(np.abs(np.asarray(actual) - np.asarray(predicted)))), used
+
+
+def _admit_valuation_features(
+    outcomes: pd.DataFrame,
+    base_matrix: pd.DataFrame,
+    base_feature_ids: list[str],
+    valuation_features: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str], dict[str, object], set[pd.Timestamp]]:
+    if set(valuation_features["model_scope"].dropna().astype(str)) != {"upside_only"}:
+        raise ValueError("valuation features must be upside_only")
+    if not valuation_features["evidence_family_id"].astype(str).str.startswith(
+        "valuation:"
+    ).all():
+        raise ValueError("valuation features require valuation evidence families")
+    valuation_matrix, valuation_ids = _feature_matrix(valuation_features)
+    base = outcomes.merge(
+        base_matrix, on=["issuer_id", "decision_date"], how="inner", validate="one_to_one"
+    )
+    candidates = base.merge(
+        valuation_matrix,
+        on=["issuer_id", "decision_date"],
+        how="left",
+        validate="one_to_one",
+    )
+    candidates["decision"] = pd.to_datetime(candidates["decision_date"])
+    dates = [
+        cast(pd.Timestamp, pd.Timestamp(value))
+        for value in sorted(candidates["decision"].unique())
+    ]
+    if len(dates) < 2:
+        raise ValueError("valuation challenger requires historical holdouts")
+    validation_dates = dates[1:]
+    baseline_mae, used_dates = _holdout_mae(
+        candidates, base_feature_ids, validation_dates
+    )
+    if baseline_mae is None:
+        raise ValueError("insufficient earlier holdout history for valuation challenger")
+    comparisons: list[dict[str, object]] = []
+    admitted: list[str] = []
+    for metric_id in valuation_ids:
+        challenger_mae, metric_dates = _holdout_mae(
+            candidates, [*base_feature_ids, metric_id], validation_dates
+        )
+        gain = (
+            baseline_mae - challenger_mae
+            if challenger_mae is not None
+            else None
+        )
+        admit = gain is not None and gain > 1e-12 and metric_dates == used_dates
+        if admit:
+            admitted.append(metric_id)
+        comparisons.append({
+            "metric_id": metric_id,
+            "baseline_mean_absolute_error": baseline_mae,
+            "challenger_mean_absolute_error": challenger_mae,
+            "mean_absolute_error_gain": gain,
+            "admitted": admit,
+        })
+    combined = base_matrix.merge(
+        valuation_matrix.loc[:, ["issuer_id", "decision_date", *admitted]],
+        on=["issuer_id", "decision_date"],
+        how="left",
+        validate="one_to_one",
+    )
+    report: dict[str, object] = {
+        "status": "research_only",
+        "publishable": False,
+        "earlier_holdout_dates": used_dates,
+        "baseline_mean_absolute_error": baseline_mae,
+        "admitted_metric_ids": admitted,
+        "rejected_metric_ids": [item for item in valuation_ids if item not in admitted],
+        "metric_comparisons": comparisons,
+    }
+    return (
+        combined,
+        [*base_feature_ids, *admitted],
+        report,
+        {cast(pd.Timestamp, pd.Timestamp(item)) for item in used_dates},
+    )
+
+
 def build_upside_validation(
     labels: pd.DataFrame,
     features: pd.DataFrame,
     adjusted_close: pd.DataFrame,
+    valuation_features: pd.DataFrame | None = None,
     *,
     producer_candidate_sha: str,
     input_artifact_shas: dict[str, str],
 ) -> tuple[pd.DataFrame, dict[str, object]]:
     if not _SHA.fullmatch(producer_candidate_sha):
         raise ValueError("producer candidate SHA required")
-    if set(input_artifact_shas) != {
-        "T21_labels", "real_features", "adjusted_total_return"
-    } or any(not _SHA.fullmatch(value) for value in input_artifact_shas.values()):
+    expected_input_shas = {
+        "T21_labels", "real_features", "adjusted_total_return",
+        *({"valuation_features"} if valuation_features is not None else set()),
+    }
+    if set(input_artifact_shas) != expected_input_shas or any(
+        not _SHA.fullmatch(value) for value in input_artifact_shas.values()
+    ):
         raise ValueError("exact input artifact SHAs required")
     generations = set(labels["generation_id"].astype(str))
     if len(generations) != 1:
         raise ValueError("labels must bind one generation")
     outcomes = _forward_labels(labels, adjusted_close)
     matrix, feature_ids = _feature_matrix(features)
+    valuation_report: dict[str, object] = {
+        "status": "not_provided",
+        "publishable": False,
+        "earlier_holdout_dates": [],
+        "baseline_mean_absolute_error": None,
+        "admitted_metric_ids": [],
+        "rejected_metric_ids": [],
+        "metric_comparisons": [],
+    }
+    evaluation_dates: set[pd.Timestamp] | None = None
+    if valuation_features is not None:
+        matrix, feature_ids, valuation_report, evaluation_dates = _admit_valuation_features(
+            outcomes, matrix, feature_ids, valuation_features
+        )
     data = outcomes.merge(
         matrix, on=["issuer_id", "decision_date"], how="inner", validate="one_to_one"
     )
@@ -209,7 +335,9 @@ def build_upside_validation(
     predictions: list[pd.DataFrame] = []
     windows: list[TemporalWindow] = []
     for holdout_date in sorted(data["decision"].unique())[1:]:
-        holdout_stamp = pd.Timestamp(holdout_date)
+        holdout_stamp = cast(pd.Timestamp, pd.Timestamp(holdout_date))
+        if evaluation_dates is not None and holdout_stamp not in evaluation_dates:
+            continue
         train_cutoff = holdout_stamp - pd.DateOffset(months=12)
         train = data.loc[data["decision"] < train_cutoff]
         holdout = data.loc[data["decision"] == holdout_stamp].copy()
@@ -237,7 +365,7 @@ def build_upside_validation(
         holdout["baseline_positive_probability"] = float(
             (train["actual_total_return"] > 0).mean()
         )
-        holdout["star"] = holdout["outperform_probability"].map(_star)
+        holdout["star"] = np.nan
         predictions.append(holdout)
         windows.append(TemporalWindow(
             train_start=train["decision_date"].min(),
@@ -260,7 +388,7 @@ def build_upside_validation(
     ].to_numpy(float)
     report: dict[str, object] = {
         "schema_version": "UpsidePotentialValidationReport.v1",
-        "source_version": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+pre_adjusted_total_return",
+        "source_version": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+PITValuationFeatures.v1+pre_adjusted_total_return",
         "model_version": "train_only_ridge_residual_distribution.v1",
         "formula_version": "12m-adjusted-return-official-market-total-return-benchmark.v1",
         "status": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE",
@@ -269,6 +397,7 @@ def build_upside_validation(
         "prediction_target": "12m_adjusted_total_return",
         "benchmark": "official_market_total_return_index",
         "secondary_benchmark": "same_market_decision_date_median_return",
+        "valuation_challenger": valuation_report,
         "feature_ids": feature_ids,
         "excluded_feature_families": [
             "management_delivery", "management_continuity", "succession_planning",
@@ -316,10 +445,43 @@ def build_upside_validation(
     return result.loc[:, output_columns].copy(), report
 
 
+def to_research_upside_core_result(
+    prediction: pd.Series,
+    report: dict[str, object],
+) -> UpsideCoreResult:
+    """Map an untouched-holdout row into the same-generation snapshot seam."""
+    if report.get("publishable") is not False or cast(
+        bool, pd.notna(prediction.get("star"))
+    ):
+        raise ValueError("only unpublished research upside results may enter this seam")
+    if str(prediction["generation_id"]) != str(report["generation_id"]):
+        raise ValueError("prediction/report generation mismatch")
+    return UpsideCoreResult(
+        generation_id=str(prediction["generation_id"]),
+        status="research_only",
+        positive_return_probability=float(prediction["positive_return_probability"]),
+        official_benchmark_outperform_probability=float(
+            prediction["outperform_probability"]
+        ),
+        secondary_market_median_outperform_probability=None,
+        p10_return=float(prediction["predicted_p10_return"]),
+        p50_return=float(prediction["predicted_p50_return"]),
+        p90_return=float(prediction["predicted_p90_return"]),
+        p10_price=None,
+        p50_price=None,
+        p90_price=None,
+        stars=None,
+        confidence=None,
+        model_version=str(report["model_version"]),
+        data_as_of=str(prediction["decision_date"]),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--labels", required=True, type=Path)
     parser.add_argument("--features", required=True, type=Path)
+    parser.add_argument("--valuation-features", required=True, type=Path)
     parser.add_argument("--adjusted-close", required=True, type=Path)
     parser.add_argument("--predictions-output", required=True, type=Path)
     parser.add_argument("--report-output", required=True, type=Path)
@@ -329,11 +491,13 @@ def main() -> int:
         pd.read_parquet(args.labels),
         pd.read_parquet(args.features),
         _wide(args.adjusted_close),
+        pd.read_parquet(args.valuation_features),
         producer_candidate_sha=source_sha,
         input_artifact_shas={
             "T21_labels": _file_sha(args.labels),
             "real_features": _file_sha(args.features),
             "adjusted_total_return": _file_sha(args.adjusted_close),
+            "valuation_features": _file_sha(args.valuation_features),
         },
     )
     args.predictions_output.parent.mkdir(parents=True, exist_ok=True)
