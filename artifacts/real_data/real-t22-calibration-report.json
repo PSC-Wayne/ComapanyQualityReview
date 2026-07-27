@@ -91,12 +91,12 @@
   "stability_checks": {
     "calibration_monotonic": false,
     "stress_auc": null,
-    "stress_period_count": 0
+    "stress_period_count": 0,
+    "stress_status": "blocked_missing_authority"
   },
   "validation_coverage": 0.9672007540056551,
   "failure_reasons": {
     "policy": "candidate_policy_incomplete",
-    "stress": "authoritative_stress_period_artifact_unavailable",
     "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable"
   },
   "input_producer_shas": {
@@ -107,11 +107,11 @@
     "T16": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T17": null,
     "T18": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
-    "T19": "9f80297d035253b85a2db8532dd62d0c7ea6858eb883640c3dbbb301e6cb5dff",
+    "T19": "767eb40d158e3a010f2ececc021100a45d8e53e7fa15cf27c86e8cb1a2342ef2",
     "T21": "57573b7ab5e27afaf6e5f88d34d4f9fbcb90a48e63f0f218de7a9d491aa4b492"
   },
   "generation_id": "real-t20-2026-07-25",
-  "producer_candidate_sha": "9f80297d035253b85a2db8532dd62d0c7ea6858eb883640c3dbbb301e6cb5dff",
+  "producer_candidate_sha": "767eb40d158e3a010f2ececc021100a45d8e53e7fa15cf27c86e8cb1a2342ef2",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
   "schema_version": "CalibrationValidationReport.v1",

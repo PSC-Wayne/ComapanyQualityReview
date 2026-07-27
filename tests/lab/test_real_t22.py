@@ -172,7 +172,8 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
     assert report.threshold_candidates.quality_status == "diagnostic_only_blocked_T14"
     assert report.failure_reasons["T14"].startswith("authoritative_PIT")
     assert "T18" not in report.failure_reasons
-    assert report.failure_reasons["stress"].startswith("authoritative")
+    assert "stress" not in report.failure_reasons
+    assert report.stability_checks.stress_status == "blocked_missing_authority"
     assert report.publishable is False
     assert report.rating_disposition == "NO_RATING_NOT_APPLICABLE"
 
