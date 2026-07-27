@@ -1,10 +1,12 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
+from decimal import Decimal
 
 import jsonschema
 import pytest
 
+from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
 from company_quality.research_snapshot import (
     CompanyResearchSnapshotError,
     DownsideCoreResult,
@@ -18,7 +20,7 @@ ROOT = Path(__file__).parents[2]
 GENERATION = "real-t20-2026-07-25"
 
 
-def _real_research_snapshot():
+def _real_research_snapshot(label: TwelveMonthReturnLabel | None = None):
     pipeline = json.loads(
         (ROOT / "artifacts/real_data/real-t20-t22-execution.json").read_text()
     )
@@ -30,7 +32,7 @@ def _real_research_snapshot():
     return build_company_research_snapshot(
         issuer_id="REAL_VALIDATION_COHORT",
         security_code=None,
-        market=None,
+        market=None if label is None else label.market,
         generated_at=pipeline["generated_at"],
         input_source_versions={
             "pipeline": pipeline["schema_version"],
@@ -70,6 +72,7 @@ def _real_research_snapshot():
             model_version="train-only-pava-adverse-risk.v1",
             data_as_of="2024-06-30",
         ),
+        twelve_month_return=label,
     )
 
 
@@ -93,6 +96,32 @@ def test_real_non_publishable_artifacts_build_one_closed_research_snapshot() -> 
     assert snapshot.upside.stars is None
     assert snapshot.downside.faces is None
     assert snapshot.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+
+
+def test_snapshot_carries_same_generation_twelve_month_label_without_publishing_stars() -> None:
+    label = TwelveMonthReturnLabel(
+        generation_id=GENERATION,
+        market="TWSE",
+        decision_date="2023-06-30",
+        result_end_date="2024-06-30",
+        actual_total_return=Decimal("0.2"),
+        official_benchmark_return=Decimal("0.1"),
+        official_excess_return=Decimal("0.1"),
+        same_market_median_return=Decimal("0.05"),
+        positive_return=True,
+        outperformed_official_market=True,
+        company_total_return_source_ref="finlab://etl/adj_close/2330",
+        official_benchmark_source_ref="https://openapi.twse.com.tw/v1/indicesReport/MFI94U",
+        same_market_median_source_ref="generation://real/TWSE/2023-06-30/median",
+        status="complete",
+        evidence_ids=("company-adjusted-return", "TWSE-MFI94U"),
+    )
+
+    snapshot = _real_research_snapshot(label)
+
+    assert snapshot.twelve_month_return == label
+    assert snapshot.upside.stars is None
+    assert snapshot.status == "research_only"
 
 
 def test_snapshot_rejects_mixed_generations() -> None:

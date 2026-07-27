@@ -3,7 +3,7 @@
   "$id": "OutcomeLabelSet.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["issuer_id", "decision_time", "wealth_series_ref", "adjusted_wealth_series", "drawdown_episodes", "adverse_labels", "horizon_months", "censoring_state", "label_version", "label_coverage", "sensitivity_outcomes", "adjustment_evidence_ids", "failure_reasons", "input_producer_shas", "available_at", "generation_id", "producer_candidate_sha", "rating_disposition", "schema_version", "source_version", "formula_version", "model_version"],
+  "required": ["issuer_id", "decision_time", "wealth_series_ref", "adjusted_wealth_series", "drawdown_episodes", "adverse_labels", "horizon_months", "twelve_month_return", "censoring_state", "label_version", "label_coverage", "sensitivity_outcomes", "adjustment_evidence_ids", "failure_reasons", "input_producer_shas", "available_at", "generation_id", "producer_candidate_sha", "rating_disposition", "schema_version", "source_version", "formula_version", "model_version"],
   "$defs": {
     "id": {"type": "string", "minLength": 1, "maxLength": 4096},
     "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -12,6 +12,29 @@
     "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"},
     "label": {"enum": ["drawdown_over_50", "forced_delisting", "default", "fraud", "restatement", "other_material_adverse"]},
     "censor": {"enum": ["fully_observed", "right_censored", "blocked_missing_authority"]},
+    "returnLabel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_id", "market", "decision_date", "result_end_date", "actual_total_return", "official_benchmark_return", "official_excess_return", "same_market_median_return", "positive_return", "outperformed_official_market", "company_total_return_source_ref", "official_benchmark_source_ref", "same_market_median_source_ref", "status", "evidence_ids", "schema_version"],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "market": {"enum": ["TWSE", "TPEx", null]},
+        "decision_date": {"$ref": "#/$defs/date"},
+        "result_end_date": {"$ref": "#/$defs/date"},
+        "actual_total_return": {"type": ["number", "null"]},
+        "official_benchmark_return": {"type": ["number", "null"]},
+        "official_excess_return": {"type": ["number", "null"]},
+        "same_market_median_return": {"type": ["number", "null"]},
+        "positive_return": {"type": ["boolean", "null"]},
+        "outperformed_official_market": {"type": ["boolean", "null"]},
+        "company_total_return_source_ref": {"$ref": "#/$defs/id"},
+        "official_benchmark_source_ref": {"type": ["string", "null"], "minLength": 1, "maxLength": 4096},
+        "same_market_median_source_ref": {"type": ["string", "null"], "minLength": 1, "maxLength": 4096},
+        "status": {"enum": ["complete", "blocked_missing_authority"]},
+        "evidence_ids": {"type": "array", "minItems": 1, "maxItems": 10000, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "schema_version": {"const": "TwelveMonthReturnLabel.v1"}
+      }
+    },
     "failures": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 256}},
     "episode": {
       "type": "object",
@@ -49,6 +72,7 @@
     "drawdown_episodes": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/episode"}},
     "adverse_labels": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/label"}},
     "horizon_months": {"const": 12},
+    "twelve_month_return": {"$ref": "#/$defs/returnLabel"},
     "censoring_state": {"$ref": "#/$defs/censor"},
     "label_version": {"$ref": "#/$defs/semver"},
     "label_coverage": {"type": "number", "minimum": 0, "maximum": 1},
@@ -70,7 +94,7 @@
     "producer_candidate_sha": {"$ref": "#/$defs/sha"},
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
     "schema_version": {"const": "OutcomeLabelSet.v1"},
-    "source_version": {"const": "AdverseControlCohort.v1+PITWealthInput.v1"},
+    "source_version": {"const": "AdverseControlCohort.v1+PITWealthInput.v1+OfficialMarketTotalReturnInput.v1"},
     "formula_version": {"enum": ["unadjusted-close-action-cash-total-return.v1", "pre-adjusted-total-return-series.v1"]},
     "model_version": {"const": "deterministic-outcome-labels-no-calibration.v1"}
   }

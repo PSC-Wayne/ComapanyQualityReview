@@ -12,6 +12,8 @@ from company_quality.lab.outcome_labels import (
     CorporateAction,
     DailyClose,
     GovernedOutcomeEvent,
+    OfficialMarketTotalReturnInput,
+    OfficialTotalReturnPoint,
     OutcomeLabelError,
     PITWealthInput,
     SuspensionInterval,
@@ -82,7 +84,35 @@ def wealth_input(
     )
 
 
-def build(source):
+def official_benchmark(market: Literal["TWSE", "TPEx"] = "TWSE"):
+    source = (
+        "https://openapi.twse.com.tw/v1/indicesReport/MFI94U"
+        if market == "TWSE"
+        else "https://www.tpex.org.tw/openapi/v1/tpex_reward_index"
+    )
+    return OfficialMarketTotalReturnInput(
+        market=market,
+        series_ref=source,
+        points=(
+            OfficialTotalReturnPoint(
+                effective_on="2020-12-31",
+                value=Decimal("200"),
+                available_at="2020-12-31T18:00:00+08:00",
+                evidence_ids=(f"{market}:total-return:baseline",),
+            ),
+            OfficialTotalReturnPoint(
+                effective_on="2022-01-01",
+                value=Decimal("220"),
+                available_at="2022-01-01T18:00:00+08:00",
+                evidence_ids=(f"{market}:total-return:end",),
+            ),
+        ),
+        complete_through="2024-01-01",
+        evidence_ids=(f"{market}:official-total-return-index",),
+    )
+
+
+def build(source, *, benchmark=None):
     return build_outcome_label_set(
         cohort(),
         source,
@@ -92,6 +122,10 @@ def build(source):
         producer_shas={"T20": sha("e"), "PITWealthInput": sha("f")},
         generation_id="r9",
         producer_candidate_sha=sha("1"),
+        market="TWSE",
+        official_market_total_return=benchmark or official_benchmark(),
+        same_market_median_return=Decimal("0.05"),
+        same_market_median_source_ref="generation://r9/TWSE/2021-01-01/median",
     )
 
 
@@ -153,6 +187,32 @@ def test_drawdown_over_50_and_governed_event_return_to_authority() -> None:
     assert episode.maximum_drawdown_pct == Decimal("-60.000000")
     assert episode.recovery_date is None
     assert "authority:default" in result.adjustment_evidence_ids
+
+
+def test_twelve_month_total_return_uses_market_specific_official_benchmark() -> None:
+    result = build(wealth_input([
+        close("2020-12-31", "100"), close("2022-01-01", "120"),
+        close("2023-01-01", "120"), close("2024-01-01", "120"),
+    ], price_basis="pre_adjusted_total_return"))
+
+    label = result.twelve_month_return
+    assert label.status == "complete"
+    assert label.decision_date == "2021-01-01"
+    assert label.result_end_date == "2022-01-01"
+    assert label.actual_total_return == Decimal("0.200000")
+    assert label.official_benchmark_return == Decimal("0.100000")
+    assert label.official_excess_return == Decimal("0.100000")
+    assert label.same_market_median_return == Decimal("0.050000")
+    assert label.positive_return is True
+    assert label.outperformed_official_market is True
+    assert label.official_benchmark_source_ref.endswith("MFI94U")
+    assert result.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+
+    with pytest.raises(OutcomeLabelError, match="market mismatch"):
+        build(wealth_input([
+            close("2020-12-31", "100"), close("2022-01-01", "120"),
+            close("2023-01-01", "120"), close("2024-01-01", "120"),
+        ]), benchmark=official_benchmark("TPEx"))
 
 
 def test_pre_adjusted_total_return_is_not_adjusted_twice() -> None:

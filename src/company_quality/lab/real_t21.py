@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, Mapping, cast
 
 import pandas as pd
 
 from company_quality.lab.cohort import AdverseControlCohort
 from company_quality.lab.outcome_labels import (
     DailyClose,
+    OfficialMarketTotalReturnInput,
+    OfficialTotalReturnPoint,
     PITWealthInput,
     build_outcome_label_set,
 )
@@ -23,6 +25,13 @@ from company_quality.lab.outcome_labels import (
 
 def _sha(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _series(path: Path) -> pd.Series:
+    frame = pd.read_parquet(path)
+    if len(frame.columns) != 1:
+        raise ValueError(f"official total-return index must have one column: {path}")
+    return frame.iloc[:, 0]
 
 
 def _cohort(payload: dict[str, object]) -> AdverseControlCohort:
@@ -33,11 +42,51 @@ def _cohort(payload: dict[str, object]) -> AdverseControlCohort:
     ))
 
 
+def _official_benchmark(
+    market: Literal["TWSE", "TPEx"],
+    series: pd.Series,
+) -> OfficialMarketTotalReturnInput:
+    source_ref = (
+        "https://openapi.twse.com.tw/v1/indicesReport/MFI94U"
+        if market == "TWSE"
+        else "https://www.tpex.org.tw/openapi/v1/tpex_reward_index"
+    )
+    cleaned = series.dropna().sort_index()
+    if cleaned.empty:
+        raise ValueError(f"{market} official total-return index is empty")
+    evidence_id = f"official:{market}:total-return-index"
+
+    def point(index: object, value: object) -> OfficialTotalReturnPoint:
+        effective_on = pd.Timestamp(str(index)).date()
+        return OfficialTotalReturnPoint(
+            effective_on=effective_on.isoformat(),
+            value=Decimal(str(value)),
+            available_at=(
+                f"{(effective_on + timedelta(days=1)).isoformat()}T00:00:00+08:00"
+            ),
+            evidence_ids=(evidence_id,),
+        )
+
+    points = tuple(
+        point(index, value)
+        for index, value in cleaned.items()
+        if Decimal(str(value)) > 0
+    )
+    return OfficialMarketTotalReturnInput(
+        market=market,
+        series_ref=source_ref,
+        points=points,
+        complete_through=points[-1].effective_on,
+        evidence_ids=(evidence_id,),
+    )
+
+
 def build_real_t21(
     t20_payload: dict[str, object],
     adjusted_close: pd.DataFrame,
     identity: pd.DataFrame,
     materializer_report: dict[str, object],
+    official_total_return: Mapping[str, pd.Series],
     *,
     decision_dates: tuple[str, ...],
     source_root: Path,
@@ -49,6 +98,15 @@ def build_real_t21(
     }
     candidate_sha = _sha(source_root / "lab/outcome_labels/__init__.py")
     generation_id = str(t20_payload["generation_id"])
+    if set(official_total_return) != {"TWSE", "TPEx"}:
+        raise ValueError("both TWSE and TPEx official total-return indices required")
+    benchmarks = {
+        market: _official_benchmark(
+            market,
+            official_total_return[market],
+        )
+        for market in ("TWSE", "TPEx")
+    }
     identity_by_code = {
         str(row.security_code): row for row in identity.itertuples(index=False)
     }
@@ -123,6 +181,8 @@ def build_real_t21(
                     producer_shas=producer_shas,
                     generation_id=generation_id,
                     producer_candidate_sha=candidate_sha,
+                    market=market,
+                    official_market_total_return=benchmarks[market],
                 )
                 adverse_episodes = [
                     item for item in result.drawdown_episodes
@@ -133,6 +193,20 @@ def build_real_t21(
                     "security_code": code,
                     "market": market,
                     "decision_date": decision_date,
+                    "result_end_date": result.twelve_month_return.result_end_date,
+                    "actual_total_return": result.twelve_month_return.actual_total_return,
+                    "official_benchmark_return": (
+                        result.twelve_month_return.official_benchmark_return
+                    ),
+                    "official_excess_return": result.twelve_month_return.official_excess_return,
+                    "positive_return": result.twelve_month_return.positive_return,
+                    "outperformed_official_market": (
+                        result.twelve_month_return.outperformed_official_market
+                    ),
+                    "return_label_status": result.twelve_month_return.status,
+                    "official_benchmark_source_ref": (
+                        result.twelve_month_return.official_benchmark_source_ref
+                    ),
                     "adverse_outcome": bool(result.adverse_labels),
                     "adverse_labels_json": json.dumps(
                         result.adverse_labels, ensure_ascii=False
@@ -157,6 +231,15 @@ def build_real_t21(
                 })
 
     frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame["same_market_median_return"] = frame.groupby(
+            ["market", "decision_date"]
+        )["actual_total_return"].transform("median")
+        frame["same_market_median_source_ref"] = (
+            "generation://" + frame["generation_id"].astype(str)
+            + "/" + frame["market"].astype(str)
+            + "/" + frame["decision_date"].astype(str) + "/median"
+        )
     fully_observed = int(frame["fully_observed"].sum()) if not frame.empty else 0
     adverse = int(
         frame.loc[frame["fully_observed"], "adverse_outcome"].sum()
@@ -184,6 +267,8 @@ def main() -> int:
     parser.add_argument("--adjusted-close", required=True, type=Path)
     parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--materializer-report", required=True, type=Path)
+    parser.add_argument("--twse-total-return-index", required=True, type=Path)
+    parser.add_argument("--tpex-total-return-index", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument(
@@ -196,6 +281,10 @@ def main() -> int:
         pd.read_parquet(args.adjusted_close),
         pd.read_parquet(args.identity),
         json.loads(args.materializer_report.read_text()),
+        {
+            "TWSE": _series(args.twse_total_return_index),
+            "TPEx": _series(args.tpex_total_return_index),
+        },
         decision_dates=tuple(args.decision_dates.split(",")),
         source_root=Path(__file__).parents[1],
     )

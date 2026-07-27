@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal, Mapping, cast
 
+from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
+
 
 CoreStatus = Literal[
     "formal",
@@ -73,6 +75,7 @@ class CompanyResearchSnapshot:
     quality: QualityCoreResult
     upside: UpsideCoreResult
     downside: DownsideCoreResult
+    twelve_month_return: TwelveMonthReturnLabel | None
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
         "NO_RATING_NOT_APPLICABLE"
     )
@@ -113,6 +116,7 @@ def build_company_research_snapshot(
     quality: QualityCoreResult,
     upside: UpsideCoreResult,
     downside: DownsideCoreResult,
+    twelve_month_return: TwelveMonthReturnLabel | None = None,
 ) -> CompanyResearchSnapshot:
     """Bind independent existing results without recomputing or merging their values."""
     generations = {
@@ -123,6 +127,14 @@ def build_company_research_snapshot(
     if len(generations) != 1 or not next(iter(generations)):
         raise CompanyResearchSnapshotError(
             "all core results must bind the same successful generation"
+        )
+    generation_id = next(iter(generations))
+    if twelve_month_return is not None and (
+        twelve_month_return.generation_id != generation_id
+        or twelve_month_return.market != market
+    ):
+        raise CompanyResearchSnapshotError(
+            "12-month return label must bind the same generation and market"
         )
     if not issuer_id:
         raise CompanyResearchSnapshotError("issuer_id required")
@@ -181,7 +193,7 @@ def build_company_research_snapshot(
         issuer_id=issuer_id,
         security_code=security_code,
         market=market,
-        generation_id=next(iter(generations)),
+        generation_id=generation_id,
         generated_at=generated_at,
         status=status,
         ai_status="AI_unavailable",
@@ -189,6 +201,7 @@ def build_company_research_snapshot(
         quality=quality,
         upside=upside,
         downside=downside,
+        twelve_month_return=twelve_month_return,
     )
 
 

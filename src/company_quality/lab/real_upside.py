@@ -48,45 +48,44 @@ def _instant(value: object) -> datetime:
     return stamp
 
 
-def _forward_labels(labels: pd.DataFrame, adjusted_close: pd.DataFrame) -> pd.DataFrame:
-    rows: list[dict[str, object]] = []
-    prices = adjusted_close.copy()
-    prices.index = pd.to_datetime(prices.index)
-    for _, row in labels.iterrows():
-        if not bool(row["fully_observed"]):
-            continue
-        code = str(row["security_code"])
-        if code not in prices.columns:
-            continue
-        decision = pd.Timestamp(str(row["decision_date"]))
-        end = decision + pd.DateOffset(months=12)
-        series = prices[code].dropna().astype(float)
-        baseline = series.loc[series.index <= decision]
-        horizon = series.loc[(series.index > decision) & (series.index <= end)]
-        if baseline.empty or horizon.empty or series.index.max() < end:
-            continue
-        start_value = float(baseline.iloc[-1])
-        end_value = float(horizon.iloc[-1])
-        if not np.isfinite(start_value) or not np.isfinite(end_value) or start_value <= 0:
-            continue
-        rows.append({
-            "issuer_id": str(row["issuer_id"]),
-            "security_code": code,
-            "market": str(row["market"]),
-            "decision_date": decision.date().isoformat(),
-            "label_end_date": horizon.index[-1].date().isoformat(),
-            "actual_total_return": end_value / start_value - 1.0,
-            "generation_id": str(row["generation_id"]),
-        })
-    frame = pd.DataFrame(rows)
+def _forward_labels(labels: pd.DataFrame, _adjusted_close: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "issuer_id", "security_code", "market", "decision_date", "result_end_date",
+        "fully_observed", "actual_total_return", "official_benchmark_return",
+        "official_excess_return", "same_market_median_return", "positive_return",
+        "outperformed_official_market", "official_benchmark_source_ref",
+        "generation_id",
+    }
+    missing = required - set(labels.columns)
+    if missing:
+        raise ValueError(
+            "official 12-month return labels required: " + ", ".join(sorted(missing))
+        )
+    frame = labels.loc[
+        labels["fully_observed"].astype(bool)
+        & labels["actual_total_return"].notna()
+        & labels["official_benchmark_return"].notna()
+        & labels["official_excess_return"].notna()
+    ].copy()
     if frame.empty:
-        raise ValueError("no fully observed 12-month return labels")
-    frame["market_benchmark_return"] = frame.groupby(
-        ["market", "decision_date"]
-    )["actual_total_return"].transform("median")
-    frame["actual_excess_return"] = (
-        frame["actual_total_return"] - frame["market_benchmark_return"]
-    )
+        raise ValueError("no fully observed official 12-month return labels")
+    expected_source = {
+        "TWSE": "MFI94U",
+        "TPEx": "tpex_reward_index",
+    }
+    if any(
+        market not in expected_source
+        or expected_source[market] not in str(source)
+        for market, source in zip(
+            frame["market"].astype(str),
+            frame["official_benchmark_source_ref"],
+            strict=True,
+        )
+    ):
+        raise ValueError("official total-return benchmark market/source mismatch")
+    frame["label_end_date"] = frame["result_end_date"].astype(str)
+    frame["market_benchmark_return"] = frame["official_benchmark_return"].astype(float)
+    frame["actual_excess_return"] = frame["official_excess_return"].astype(float)
     return frame
 
 
@@ -140,7 +139,7 @@ def _fit_predict(
     x_train = x_train.fillna(medians)
     x_holdout = holdout[feature_ids].astype(float).fillna(medians)
     means = np.asarray(x_train.mean(axis=0), dtype=float)
-    scales = np.asarray(x_train.std(axis=0, ddof=0), dtype=float)
+    scales = np.asarray(x_train.std(axis=0, ddof=0), dtype=float).copy()
     scales[(scales == 0) | ~np.isfinite(scales)] = 1
     train_array = (x_train.to_numpy(float) - means) / scales
     holdout_array = (x_holdout.to_numpy(float) - means) / scales
@@ -263,12 +262,13 @@ def build_upside_validation(
         "schema_version": "UpsidePotentialValidationReport.v1",
         "source_version": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+pre_adjusted_total_return",
         "model_version": "train_only_ridge_residual_distribution.v1",
-        "formula_version": "12m-adjusted-return-same-market-median-benchmark.v1",
+        "formula_version": "12m-adjusted-return-official-market-total-return-benchmark.v1",
         "status": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE",
         "publishable": False,
         "rating_disposition": "NO_RATING_NOT_APPLICABLE",
         "prediction_target": "12m_adjusted_total_return",
-        "benchmark": "same_market_decision_date_median_return",
+        "benchmark": "official_market_total_return_index",
+        "secondary_benchmark": "same_market_decision_date_median_return",
         "feature_ids": feature_ids,
         "excluded_feature_families": [
             "management_delivery", "management_continuity", "succession_planning",
@@ -281,7 +281,7 @@ def build_upside_validation(
         "metrics": {
             "mean_absolute_error": float(np.mean(np.abs(actual - p50))),
             "spearman_rank_correlation": _finite_or_none(float(
-                pd.Series(actual).corr(pd.Series(p50), method="spearman")
+                pd.Series(actual).rank().corr(pd.Series(p50).rank())
             )),
             "positive_direction_accuracy": float(np.mean(
                 (result["positive_return_probability"].to_numpy() >= 0.5)
@@ -308,6 +308,7 @@ def build_upside_validation(
     output_columns = [
         "issuer_id", "security_code", "market", "decision_date", "label_end_date",
         "actual_total_return", "market_benchmark_return", "actual_excess_return",
+        "same_market_median_return", "official_benchmark_source_ref",
         "predicted_p10_return", "predicted_p50_return", "predicted_p90_return",
         "positive_return_probability", "outperform_probability", "star",
         "generation_id",

@@ -22,10 +22,20 @@ def _inputs():
             "market": "TWSE",
             "decision_date": decision,
             "fully_observed": True,
+            "actual_total_return": 0.01 + rank * 0.015,
+            "official_benchmark_return": 0.08,
+            "official_excess_return": 0.01 + rank * 0.015 - 0.08,
+            "same_market_median_return": 0.0925,
+            "positive_return": True,
+            "outperformed_official_market": 0.01 + rank * 0.015 > 0.08,
+            "result_end_date": f"{int(decision[:4]) + 1}{decision[4:]}",
+            "official_benchmark_source_ref": (
+                "https://openapi.twse.com.tw/v1/indicesReport/MFI94U"
+            ),
             "generation_id": "generation-upside-test",
         }
         for decision in decisions
-        for issuer, code in zip(issuers, codes, strict=True)
+        for rank, (issuer, code) in enumerate(zip(issuers, codes, strict=True))
     ])
     features = pd.DataFrame([
         {
@@ -69,7 +79,8 @@ def test_builds_separate_pit_upside_predictions_without_management_or_market_ove
     assert report["publishable"] is False
     assert report["rating_disposition"] == "NO_RATING_NOT_APPLICABLE"
     assert report["prediction_target"] == "12m_adjusted_total_return"
-    assert report["benchmark"] == "same_market_decision_date_median_return"
+    assert report["benchmark"] == "official_market_total_return_index"
+    assert report["secondary_benchmark"] == "same_market_decision_date_median_return"
     assert report["excluded_feature_families"] == [
         "management_delivery",
         "management_continuity",
