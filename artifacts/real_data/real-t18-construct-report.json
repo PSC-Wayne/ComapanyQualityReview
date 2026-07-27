@@ -1,0 +1,21 @@
+{
+  "schema_version": "RealPITDownsideConstructInputs.v1",
+  "status": "EXECUTED_NON_PUBLISHABLE_LINEAGE_BOUND",
+  "publishable": false,
+  "formal_T18_status": "BLOCKED_MISSING_RISK_STRESS_AND_BOMB_CONTRACTS",
+  "observation_count": 5305,
+  "complete_construct_count": 5230,
+  "complete_construct_coverage": 0.9858623939679547,
+  "regulatory_source_start": "2019-01-07T00:00:00+08:00",
+  "regulatory_complete_window_count": 5305,
+  "construct_lineage": {
+    "maximum_drawdown_vulnerability": "FinLab pre-adjusted total-return close; trailing 252 sessions; minimum 120",
+    "permanent_capital_loss_vulnerability": "same-date percentile ranks of PIT-admitted debt ratio, current ratio and free cash flow; at least two inputs",
+    "material_adverse_event_vulnerability": "prior-three-year information-violation penalty amount; zero admitted only when source window is complete"
+  },
+  "missing_contracts": [
+    "T18 causal risk register",
+    "T18 bear/base/bull stress pack",
+    "authoritative current-relevance Bomb event admission"
+  ]
+}

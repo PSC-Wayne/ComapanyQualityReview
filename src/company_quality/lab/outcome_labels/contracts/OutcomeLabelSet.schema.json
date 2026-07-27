@@ -71,7 +71,7 @@
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
     "schema_version": {"const": "OutcomeLabelSet.v1"},
     "source_version": {"const": "AdverseControlCohort.v1+PITWealthInput.v1"},
-    "formula_version": {"const": "unadjusted-close-action-cash-total-return.v1"},
+    "formula_version": {"enum": ["unadjusted-close-action-cash-total-return.v1", "pre-adjusted-total-return-series.v1"]},
     "model_version": {"const": "deterministic-outcome-labels-no-calibration.v1"}
   }
 }

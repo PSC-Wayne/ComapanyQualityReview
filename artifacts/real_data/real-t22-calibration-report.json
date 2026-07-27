@@ -1,0 +1,116 @@
+{
+  "policy_version": "1.0.0",
+  "train_windows": [
+    {
+      "start": "2022-06-30",
+      "end": "2022-06-30",
+      "issuer_count": 980
+    }
+  ],
+  "holdout_windows": [
+    {
+      "start": "2024-06-30",
+      "end": "2024-06-30",
+      "issuer_count": 1027
+    }
+  ],
+  "purge_days": 365,
+  "embargo_days": 30,
+  "metrics": {
+    "auc": 0.5954355523731989,
+    "brier": 0.2535067669709313,
+    "calibration_error": 0.24929707101465295,
+    "precision_at_top": 0.2912621359223301
+  },
+  "calibration_curves": [
+    {
+      "bucket": "00-10%",
+      "predicted": 0.010569924611510526,
+      "observed": 0.2571711177052423,
+      "count": 1011
+    },
+    {
+      "bucket": "10-20%",
+      "predicted": 0.14285714285714285,
+      "observed": 0.5625,
+      "count": 16
+    }
+  ],
+  "champion_verdict": "blocked",
+  "challenger_results": [
+    {
+      "challenger_id": "financial-downside-equal-weight",
+      "metrics_hash": "d84c671bef855c83ff76bdfb71db47b2cf33d145a2fb4b9d5c1428526b8cc340",
+      "verdict": "inconclusive"
+    }
+  ],
+  "threshold_candidates": {
+    "quality_bands": [
+      0.0,
+      50.0,
+      60.0,
+      70.0,
+      80.0,
+      90.0
+    ],
+    "upside_stars": [
+      0.0,
+      0.1,
+      0.2,
+      0.3
+    ],
+    "downside_faces": [
+      20.0,
+      40.0,
+      60.0,
+      80.0
+    ],
+    "bomb_materiality": 1.0
+  },
+  "leakage_checks": {
+    "pit_join_pass": true,
+    "purge_pass": true,
+    "embargo_pass": true,
+    "survivorship_pass": true,
+    "same_generation_pass": true
+  },
+  "error_analysis": {
+    "false_positives": 0,
+    "false_negatives": 269,
+    "false_signal_rate": null,
+    "mean_adverse_lead_days": null
+  },
+  "stability_checks": {
+    "calibration_monotonic": true,
+    "stress_auc": null,
+    "stress_period_count": 0
+  },
+  "validation_coverage": 0.5694627709707822,
+  "failure_reasons": {
+    "coverage": "validation_coverage_below_0.85",
+    "policy": "candidate_policy_incomplete",
+    "stress": "authoritative_stress_period_artifact_unavailable",
+    "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
+    "T17": "same_generation_explicit_assumption_valuation_observations_unavailable",
+    "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
+  },
+  "input_producer_shas": {
+    "T09": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T10": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T13": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T14": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T16": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T17": "b8844a14c7d52d46ab5f87d9da02f45c0282248c5fea4a33dde05f11f5f8141a",
+    "T18": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
+    "T19": "8906b4ea25a8462c205e7606a5d1956d83781171ca8ebeffdbd7d58c0eb6b886",
+    "T21": "57573b7ab5e27afaf6e5f88d34d4f9fbcb90a48e63f0f218de7a9d491aa4b492"
+  },
+  "generation_id": "real-t20-2026-07-25",
+  "producer_candidate_sha": "8906b4ea25a8462c205e7606a5d1956d83781171ca8ebeffdbd7d58c0eb6b886",
+  "publishable": false,
+  "rating_disposition": "NO_RATING_NOT_APPLICABLE",
+  "schema_version": "CalibrationValidationReport.v1",
+  "source_version": "T09+T10+T13+T14+T16+T17+T18+CandidatePolicyBundle.v1+OutcomeLabelSet.v1",
+  "formula_version": "winsor-family-rank-expanding-isotonic.v1",
+  "model_version": "train-only-pava-adverse-risk.v1"
+}

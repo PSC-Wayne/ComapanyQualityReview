@@ -199,6 +199,7 @@ def build_adverse_control_cohort(
     producer_shas: Mapping[str, str],
     generation_id: str,
     producer_candidate_sha: str,
+    eligibility_failures: Mapping[str, str] | None = None,
 ) -> AdverseControlCohort:
     if market not in {"TWSE", "TPEx"}:
         raise CohortError("market must be TWSE or TPEx")
@@ -234,6 +235,12 @@ def build_adverse_control_cohort(
             raise CohortError("member evidence breaches PIT boundary")
         by_issuer[item.issuer_id] = item
 
+    excluded = dict(eligibility_failures or {})
+    if any(not key or not reason for key, reason in excluded.items()):
+        raise CohortError("eligibility failures require non-empty keys and reasons")
+    if set(excluded).intersection(by_issuer):
+        raise CohortError("eligibility failure duplicates admitted issuer")
+
     labels_by_issuer: dict[str, list[GovernedEventLabel]] = {}
     for label in event_labels:
         if label.issuer_id not in by_issuer:
@@ -248,12 +255,12 @@ def build_adverse_control_cohort(
         labels_by_issuer.setdefault(label.issuer_id, []).append(label)
 
     output: list[CohortMember] = []
-    failures: dict[str, str] = {}
+    failures: dict[str, str] = dict(sorted(excluded.items()))
     all_evidence: list[str] = []
     available_values: list[datetime] = []
     unresolved_delisting = False
     kind_hits: set[str] = set()
-    eligible_count = 0
+    eligible_count = len(excluded)
     for issuer_id in sorted(by_issuer):
         item = by_issuer[issuer_id]
         listed = _day(item.listed_on, "listed_on")

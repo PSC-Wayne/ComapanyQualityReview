@@ -1,0 +1,68 @@
+{
+  "schema_version": "RealPipelineExecutionReport.v3",
+  "generated_at": "2026-07-25T18:43:01.026838+00:00",
+  "authorization_scope": "real T03-T22 execution; no T23, no freeze, no rating",
+  "execution_status": "NON_PUBLISHABLE",
+  "publishable": false,
+  "rating_disposition": "NO_RATING_NOT_APPLICABLE",
+  "t23_started": false,
+  "freeze_created": false,
+  "rating_created": false,
+  "scorer_semantics": {
+    "within_pillar": "equal_weight_available_metrics",
+    "directions": "explicit_high_good_or_low_good",
+    "missing_values": "not_imputed; available weights renormalized within pillar",
+    "cross_pillar": "all six pillars require at least one available metric"
+  },
+  "stage_results": {
+    "T03_T06": {
+      "status": "EXECUTED_WITH_MEMBERSHIP_LEVEL_EXCLUSIONS",
+      "membership_level_failure_count": 41
+    },
+    "T09_T14": {
+      "status": "EXECUTED_WITH_NULL_AUTHORITY_GAPS",
+      "observation_count": 5305,
+      "available_metric_counts": {
+        "audit_reliability": 5305,
+        "earnings_capital_efficiency": 15909,
+        "cash_balance_allocation": 5305,
+        "business_moat": 3038,
+        "governance": 5302,
+        "people_adaptability": 0
+      }
+    },
+    "T16_T19": {
+      "status": "BLOCKED_INCOMPLETE_CANDIDATE_CONTRACT",
+      "fully_covered_six_pillar_count": 0,
+      "total_observation_count": 5305
+    },
+    "T20": {
+      "status": "EXECUTED_NON_PUBLISHABLE",
+      "TWSE_member_count": 1082,
+      "TPEx_member_count": 894
+    },
+    "T21": {
+      "status": "EXECUTED_NON_PUBLISHABLE",
+      "label_count": 5305,
+      "fully_observed_count": 5302,
+      "adverse_fully_observed_count": 567,
+      "coverage": 0.9994344957587182
+    },
+    "T22": {
+      "status": "BLOCKED_INPUT_CONTRACT",
+      "calibration_executed": false,
+      "publishable": false,
+      "failure_reasons": {
+        "candidate_matrix": "no_fully_covered_six_pillar_candidate_rows",
+        "people_adaptability": "no_authoritative_PIT_management_delivery_or_succession_evidence",
+        "downside_constructs": "governed_PIT_permanent_loss_and_material_event_constructs_unavailable"
+      }
+    }
+  },
+  "failure_reasons": {
+    "candidate_matrix": "no_fully_covered_six_pillar_candidate_rows",
+    "people_adaptability": "no_authoritative_PIT_management_delivery_or_succession_evidence",
+    "downside_constructs": "governed_PIT_permanent_loss_and_material_event_constructs_unavailable"
+  },
+  "next_authorized_stage": "NONE"
+}

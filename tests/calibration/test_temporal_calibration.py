@@ -195,6 +195,46 @@ def test_missing_pillar_does_not_redistribute_weight() -> None:
     )
 
 
+def test_missing_metric_is_not_imputed_and_available_metrics_are_reweighted() -> None:
+    source = observations()
+    expanded = []
+    for item in source:
+        extra = tuple(
+            AdmittedMetric(
+                pillar=metric.pillar,
+                metric_id=f"{metric.metric_id}:second",
+                evidence_family_id=metric.evidence_family_id,
+                value=(
+                    None
+                    if item.decision_date == "2022-06-30"
+                    and item.issuer_id == "issuer-119"
+                    and metric.pillar == "business_moat"
+                    else metric.value
+                ),
+                direction=metric.direction,
+                evidence_ids=(
+                    ()
+                    if item.decision_date == "2022-06-30"
+                    and item.issuer_id == "issuer-119"
+                    and metric.pillar == "business_moat"
+                    else tuple(f"{value}:second" for value in metric.evidence_ids)
+                ),
+            )
+            for metric in item.metrics
+        )
+        expanded.append(replace(item, metrics=(*item.metrics, *extra)))
+
+    rows = build_candidate_score_matrix(
+        expanded, policy(), input_producer_shas=producer_shas()
+    )
+    target = next(
+        row for row in rows
+        if row.decision_date == "2022-06-30" and row.issuer_id == "issuer-119"
+    )
+    assert len(rows) == 360
+    assert target.pillar_coverages["business_moat"] == Decimal("0.5")
+
+
 def test_expanding_purged_train_only_isotonic_pass_report() -> None:
     rows = build_candidate_score_matrix(
         observations(), policy(), input_producer_shas=producer_shas()
