@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/FrozenPreOOSCandidate.v1.schema.json",
+  "title": "FrozenPreOOSCandidate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "generation_id", "final_oos_start", "frozen_through",
+    "champion_candidate_id", "champion_score", "candidate_scores",
+    "fixed_baselines", "star_weights", "confidence_weights",
+    "cross_year_stability", "selection_row_count", "selection_years",
+    "status", "publishable", "formal_stars_enabled", "schema_version"
+  ],
+  "properties": {
+    "generation_id": {"type": "string", "minLength": 1},
+    "final_oos_start": {"type": "string", "format": "date"},
+    "frozen_through": {"type": "string", "format": "date"},
+    "champion_candidate_id": {"type": "string", "minLength": 1},
+    "champion_score": {"type": "number", "minimum": 0},
+    "candidate_scores": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["candidate_id", "mean_absolute_error", "outperform_brier", "outperform_auc", "selection_score", "row_count"],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "mean_absolute_error": {"type": "number", "minimum": 0},
+          "outperform_brier": {"type": "number", "minimum": 0},
+          "outperform_auc": {"type": "number", "minimum": 0, "maximum": 1},
+          "selection_score": {"type": "number", "minimum": 0},
+          "row_count": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "fixed_baselines": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["baseline_id", "mean_absolute_error", "official_benchmark_guess_mean_absolute_error", "uses_company_features", "frozen"],
+          "properties": {
+            "baseline_id": {"const": "no_company_data_temporal_median"},
+            "mean_absolute_error": {"type": ["number", "null"], "minimum": 0},
+            "official_benchmark_guess_mean_absolute_error": {"type": ["number", "null"], "minimum": 0},
+            "uses_company_features": {"const": false},
+            "frozen": {"const": true}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["baseline_id", "mean_absolute_error", "uses_company_features", "feature_ids", "frozen"],
+          "properties": {
+            "baseline_id": {"const": "same_data_normalized_linear"},
+            "mean_absolute_error": {"type": ["number", "null"], "minimum": 0},
+            "uses_company_features": {"const": true},
+            "feature_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "frozen": {"const": true}
+          }
+        }
+      ],
+      "items": false
+    },
+    "star_weights": {
+      "type": "object", "additionalProperties": false,
+      "required": ["official_outperform_probability", "predicted_p50_return", "confidence"],
+      "properties": {
+        "official_outperform_probability": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "predicted_p50_return": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "confidence": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+      }
+    },
+    "confidence_weights": {
+      "type": "object", "additionalProperties": false,
+      "required": ["data_completeness", "interval_precision", "industry_sample", "cross_year_stability"],
+      "properties": {
+        "data_completeness": {"type": "number", "minimum": 0, "maximum": 1},
+        "interval_precision": {"type": "number", "minimum": 0, "maximum": 1},
+        "industry_sample": {"type": "number", "minimum": 0, "maximum": 1},
+        "cross_year_stability": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "cross_year_stability": {"type": "number", "minimum": 0, "maximum": 1},
+    "selection_row_count": {"type": "integer", "minimum": 1},
+    "selection_years": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"type": "integer", "minimum": 1900, "maximum": 2200}
+    },
+    "status": {"const": "research_only"},
+    "publishable": {"const": false},
+    "formal_stars_enabled": {"const": false},
+    "schema_version": {"const": "FrozenPreOOSCandidate.v1"}
+  }
+}
