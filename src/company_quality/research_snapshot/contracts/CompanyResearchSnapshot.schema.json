@@ -85,7 +85,8 @@
         "classification_effective_to", "classification_version",
         "classification_authority_url", "classification_evidence_id",
         "candidate_model_id", "train_observations", "final_oos_observations",
-        "official_benchmark_source_ref", "pit_value_chain_tags", "stars_eligible",
+        "official_benchmark_source_ref", "pit_value_chain_tags", "financial_subtype",
+        "stars_eligible",
         "all_market_fallback_model_id", "schema_version"
       ],
       "properties": {
@@ -107,6 +108,7 @@
         "final_oos_observations": {"type": ["integer", "null"], "minimum": 0},
         "official_benchmark_source_ref": {"type": "string", "format": "uri"},
         "pit_value_chain_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "financial_subtype": {"enum": ["bank", "life_insurer", "securities", null]},
         "stars_eligible": {"type": "boolean"},
         "all_market_fallback_model_id": {"type": "null"},
         "schema_version": {"const": "IndustryModelRoute.v1"}

@@ -62,6 +62,7 @@ class IndustryModelRoute:
     final_oos_observations: int | None
     official_benchmark_source_ref: str
     pit_value_chain_tags: list[str]
+    financial_subtype: Literal["bank", "life_insurer", "securities"] | None
     stars_eligible: bool
     all_market_fallback_model_id: None = None
     schema_version: Literal["IndustryModelRoute.v1"] = "IndustryModelRoute.v1"
@@ -117,6 +118,7 @@ def route_industry_model(
     classifications: Sequence[EffectiveIndustryClassification],
     sample_counts: Mapping[tuple[str, str], tuple[int, int]],
     pit_value_chain_tags: Sequence[str] = (),
+    financial_subtype: Literal["bank", "life_insurer", "securities"] | None = None,
 ) -> IndustryModelRoute:
     """Resolve one PIT exact-industry route; never use latest or all-market fallback."""
     decision = _day(decision_date, "decision_date")
@@ -167,6 +169,7 @@ def route_industry_model(
             final_oos_observations=None,
             official_benchmark_source_ref=benchmark,
             pit_value_chain_tags=tags,
+            financial_subtype=None,
             stars_eligible=False,
         )
     signatures = {
@@ -187,9 +190,17 @@ def route_industry_model(
         status: RouteStatus = "financial_separate_model"
         train_count = None
         oos_count = None
-        candidate = f"financial-candidate:{market}:17"
+        candidate = (
+            f"financial-candidate:{market}:{financial_subtype}"
+            if financial_subtype is not None
+            else f"financial-candidate:{market}:17"
+        )
         reason = "financial_model_required"
     else:
+        if financial_subtype is not None:
+            raise IndustryModelRouteError(
+                "financial subtype is only valid for official industry 17"
+            )
         train_count, oos_count = sample_counts.get(
             (market, item.industry_code), (0, 0)
         )
@@ -221,6 +232,7 @@ def route_industry_model(
         final_oos_observations=oos_count,
         official_benchmark_source_ref=benchmark,
         pit_value_chain_tags=tags,
+        financial_subtype=financial_subtype if item.industry_code == "17" else None,
         stars_eligible=status == "eligible",
     )
 
