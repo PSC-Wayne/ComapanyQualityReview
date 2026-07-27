@@ -20,7 +20,7 @@ PILLARS = (
 )
 
 
-def _sha_inputs():
+def _sha_inputs() -> dict[str, str | None]:
     return {
         ticket: str((index % 9) + 1) * 64
         for index, ticket in enumerate(
@@ -154,16 +154,19 @@ def _calibration_inputs():
 
 def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
     labels, features, constructs = _calibration_inputs()
+    input_shas: dict[str, str | None] = _sha_inputs()
+    input_shas["T17"] = None
     report, rows = execute_real_t22_calibration(
         labels, features, constructs,
-        input_producer_shas=_sha_inputs(),
+        input_producer_shas=input_shas,
         producer_candidate_sha="a" * 64,
     )
     assert rows
     assert all(row.upside_decimal is None for row in rows)
     assert report.metrics.auc == Decimal("1")
     assert report.champion_verdict == "blocked"
-    assert report.failure_reasons["T17"].startswith("same_generation")
+    assert "T17" not in report.failure_reasons
+    assert report.threshold_candidates.upside_status == "blocked_missing_T17"
     assert report.failure_reasons["T18"].startswith("causal_risk")
     assert report.failure_reasons["stress"].startswith("authoritative")
     assert report.publishable is False

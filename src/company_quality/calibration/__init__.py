@@ -118,6 +118,7 @@ class ThresholdCandidates:
     upside_stars: tuple[Decimal, Decimal, Decimal, Decimal]
     downside_faces: tuple[Decimal, Decimal, Decimal, Decimal]
     bomb_materiality: Decimal
+    upside_status: Literal["evaluated", "blocked_missing_T17"] = "evaluated"
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +162,7 @@ class CalibrationValidationReport:
     stability_checks: StabilityChecks
     validation_coverage: Decimal
     failure_reasons: dict[str, str]
-    input_producer_shas: dict[str, str]
+    input_producer_shas: dict[str, str | None]
     generation_id: str
     producer_candidate_sha: str
     publishable: Literal[False] = False
@@ -210,6 +211,18 @@ def _quantile(values: Sequence[Decimal], q: Decimal) -> Decimal:
     return ordered[low] + (ordered[high] - ordered[low]) * fraction
 
 
+def _valid_input_shas(
+    values: Mapping[str, str | None], *, allow_missing_t17: bool
+) -> bool:
+    if set(values) != _REQUIRED_SHAS:
+        return False
+    return all(
+        (key == "T17" and value is None and allow_missing_t17)
+        or (isinstance(value, str) and _SHA.fullmatch(value) is not None)
+        for key, value in values.items()
+    )
+
+
 def _rank(values: Mapping[str, Decimal], low_q: Decimal, high_q: Decimal) -> dict[str, Decimal]:
     lower = _quantile(tuple(values.values()), low_q)
     upper = _quantile(tuple(values.values()), high_q)
@@ -230,12 +243,13 @@ def build_candidate_score_matrix(
     observations: Sequence[CandidateObservation],
     policy: CandidatePolicyBundle,
     *,
-    input_producer_shas: Mapping[str, str],
+    input_producer_shas: Mapping[str, str | None],
 ) -> tuple[CandidateScoreRow, ...]:
     if policy.schema_version != "CandidatePolicyBundle.v1":
         raise CalibrationError("BLOCKED_CONTRACT: T19 schema mismatch")
-    if set(input_producer_shas) != _REQUIRED_SHAS or any(
-        not _SHA.fullmatch(value) for value in input_producer_shas.values()
+    if not _valid_input_shas(
+        input_producer_shas,
+        allow_missing_t17=all(item.upside_decimal is None for item in observations),
     ):
         raise CalibrationError("BLOCKED_CONTRACT: exact T09..T21 producer SHAs required")
     if not observations:
@@ -496,7 +510,7 @@ def build_calibration_validation_report(
     *,
     total_candidate_count: int,
     leakage_checks: LeakageChecks,
-    input_producer_shas: Mapping[str, str],
+    input_producer_shas: Mapping[str, str | None],
     generation_id: str,
     producer_candidate_sha: str,
 ) -> CalibrationValidationReport:
@@ -504,8 +518,9 @@ def build_calibration_validation_report(
         raise CalibrationError("policy_version must be semver")
     if policy.publishable:
         raise CalibrationError("T19 candidate policy must be non-publishable")
-    if set(input_producer_shas) != _REQUIRED_SHAS or any(
-        not _SHA.fullmatch(value) for value in input_producer_shas.values()
+    if not _valid_input_shas(
+        input_producer_shas,
+        allow_missing_t17=all(row.upside_decimal is None for row in rows),
     ):
         raise CalibrationError("BLOCKED_CONTRACT: exact producer SHAs required")
     if not generation_id or not _SHA.fullmatch(producer_candidate_sha):

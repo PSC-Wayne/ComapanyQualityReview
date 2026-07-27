@@ -423,7 +423,7 @@ def execute_real_t22_calibration(
     features: pd.DataFrame,
     constructs: pd.DataFrame,
     *,
-    input_producer_shas: Mapping[str, str],
+    input_producer_shas: Mapping[str, str | None],
     producer_candidate_sha: str,
 ):
     generations = set(labels["generation_id"].astype(str))
@@ -448,11 +448,18 @@ def execute_real_t22_calibration(
     failures = dict(report.failure_reasons)
     failures.update({
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-        "T17": "same_generation_explicit_assumption_valuation_observations_unavailable",
         "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete",
         "stress": "authoritative_stress_period_artifact_unavailable",
     })
-    return replace(report, champion_verdict="blocked", failure_reasons=failures), rows
+    thresholds = replace(
+        report.threshold_candidates, upside_status="blocked_missing_T17"
+    )
+    return replace(
+        report,
+        champion_verdict="blocked",
+        failure_reasons=failures,
+        threshold_candidates=thresholds,
+    ), rows
 
 
 def _file_sha(path: Path) -> str:
@@ -502,7 +509,7 @@ def main() -> int:
     input_shas = {
         "T09": feature_sha, "T10": feature_sha, "T13": feature_sha,
         "T14": feature_sha, "T16": feature_sha,
-        "T17": _file_sha(args.construct_report),
+        "T17": None,
         "T18": _file_sha(args.construct_rows),
         "T19": source_sha,
         "T21": _file_sha(args.labels),
@@ -565,6 +572,10 @@ def main() -> int:
             "same_holdout_diagnostic_auc": json.loads(
                 json.dumps(diagnostic_auc, default=float)
             ),
+            "section_status": {
+                "quality_downside_calibration": "evaluated",
+                "upside_stars": "blocked_missing_T17",
+            },
             "failure_reasons": report.failure_reasons,
         },
     }

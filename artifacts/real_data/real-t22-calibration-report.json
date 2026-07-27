@@ -71,7 +71,8 @@
       60.0,
       80.0
     ],
-    "bomb_materiality": 1.0
+    "bomb_materiality": 1.0,
+    "upside_status": "blocked_missing_T17"
   },
   "leakage_checks": {
     "pit_join_pass": true,
@@ -96,7 +97,6 @@
     "policy": "candidate_policy_incomplete",
     "stress": "authoritative_stress_period_artifact_unavailable",
     "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-    "T17": "same_generation_explicit_assumption_valuation_observations_unavailable",
     "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
   },
   "input_producer_shas": {
@@ -105,13 +105,13 @@
     "T13": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T14": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T16": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
-    "T17": "b8844a14c7d52d46ab5f87d9da02f45c0282248c5fea4a33dde05f11f5f8141a",
+    "T17": null,
     "T18": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
-    "T19": "8906b4ea25a8462c205e7606a5d1956d83781171ca8ebeffdbd7d58c0eb6b886",
+    "T19": "0256f880d562ab05ad2085d5929c2c46916ee4aca9c39f881bad8b2f44ed8686",
     "T21": "57573b7ab5e27afaf6e5f88d34d4f9fbcb90a48e63f0f218de7a9d491aa4b492"
   },
   "generation_id": "real-t20-2026-07-25",
-  "producer_candidate_sha": "8906b4ea25a8462c205e7606a5d1956d83781171ca8ebeffdbd7d58c0eb6b886",
+  "producer_candidate_sha": "0256f880d562ab05ad2085d5929c2c46916ee4aca9c39f881bad8b2f44ed8686",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
   "schema_version": "CalibrationValidationReport.v1",
