@@ -7,7 +7,7 @@
   "required": [
     "issuer_id", "security_code", "market", "generation_id", "generated_at",
     "status", "ai_status", "input_source_versions", "quality", "upside",
-    "downside", "twelve_month_return", "rating_disposition", "schema_version"
+    "downside", "twelve_month_return", "official_events", "rating_disposition", "schema_version"
   ],
   "$defs": {
     "status": {
@@ -47,6 +47,33 @@
         "status": {"enum": ["complete", "blocked_missing_authority"]},
         "evidence_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "schema_version": {"const": "TwelveMonthReturnLabel.v1"}
+      }
+    },
+    "officialEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_id", "issuer_id", "security_code", "market", "event_id",
+        "event_type", "title", "effective_date", "available_at", "official_reason",
+        "source_authority", "source_url", "evidence_id", "confirmation_status",
+        "downside_candidate_status"
+      ],
+      "properties": {
+        "generation_id": {"type": "string", "minLength": 1},
+        "issuer_id": {"type": "string", "minLength": 1},
+        "security_code": {"type": "string", "minLength": 1},
+        "market": {"enum": ["TWSE", "TPEx"]},
+        "event_id": {"type": "string", "minLength": 1},
+        "event_type": {"enum": ["material_announcement", "trading_suspension", "altered_trading", "delisting", "regulatory_violation", "filing_violation", "financial_restatement"]},
+        "title": {"type": "string", "minLength": 1},
+        "effective_date": {"type": "string", "format": "date"},
+        "available_at": {"type": "string", "format": "date-time"},
+        "official_reason": {"type": "string", "minLength": 1},
+        "source_authority": {"enum": ["TWSE", "TPEx"]},
+        "source_url": {"type": "string", "format": "uri"},
+        "evidence_id": {"type": "string", "minLength": 1},
+        "confirmation_status": {"enum": ["confirmed", "unconfirmed_research"]},
+        "downside_candidate_status": {"enum": ["eligible_for_validation", "display_only", "unconfirmed_research"]}
       }
     }
   },
@@ -126,6 +153,10 @@
         {"type": "null"},
         {"$ref": "#/$defs/returnLabel"}
       ]
+    },
+    "official_events": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/officialEvent"}
     },
     "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
     "schema_version": {"const": "CompanyResearchSnapshot.v1"}
