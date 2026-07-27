@@ -5,7 +5,9 @@ import numpy as np
 import pandas as pd
 
 from company_quality.lab.real_t22 import (
+    _evaluation_policy,
     build_pit_downside_constructs,
+    evaluate_downside_construct_calibration,
     execute_real_t22_calibration,
 )
 
@@ -169,7 +171,20 @@ def test_real_calibration_executes_without_fabricating_t17_or_pass() -> None:
     assert report.threshold_candidates.upside_status == "blocked_missing_T17"
     assert report.threshold_candidates.quality_status == "diagnostic_only_blocked_T14"
     assert report.failure_reasons["T14"].startswith("authoritative_PIT")
-    assert report.failure_reasons["T18"].startswith("causal_risk")
+    assert "T18" not in report.failure_reasons
     assert report.failure_reasons["stress"].startswith("authoritative")
     assert report.publishable is False
     assert report.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+
+    downside_report, validation = evaluate_downside_construct_calibration(
+        rows,
+        _evaluation_policy("real-generation", "a" * 64),
+        total_candidate_count=len(labels),
+        input_producer_shas=input_shas,
+        generation_id="real-generation",
+        producer_candidate_sha="a" * 64,
+    )
+    assert downside_report.metrics.auc == Decimal("1")
+    assert validation["verdict"] == "pass"
+    assert validation["stress_pack_status"] == "blocked_missing_authority"
+    assert validation["bomb_status"] == "blocked_missing_authority"

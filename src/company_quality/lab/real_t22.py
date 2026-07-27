@@ -17,6 +17,7 @@ import pandas as pd
 from company_quality.calibration import (
     AdmittedMetric,
     CandidateObservation,
+    ChallengerResult,
     LeakageChecks,
     build_calibration_validation_report,
     build_candidate_score_matrix,
@@ -448,7 +449,6 @@ def execute_real_t22_calibration(
     failures = dict(report.failure_reasons)
     failures.update({
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
-        "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete",
         "stress": "authoritative_stress_period_artifact_unavailable",
     })
     thresholds = replace(
@@ -462,6 +462,72 @@ def execute_real_t22_calibration(
         failure_reasons=failures,
         threshold_candidates=thresholds,
     ), rows
+
+
+def evaluate_downside_construct_calibration(
+    rows,
+    policy: CandidatePolicyBundle,
+    *,
+    total_candidate_count: int,
+    input_producer_shas: Mapping[str, str | None],
+    generation_id: str,
+    producer_candidate_sha: str,
+):
+    downside_rows = tuple(
+        replace(row, raw_adverse_risk=row.downside_composite / Decimal("100"))
+        for row in rows
+    )
+    report = build_calibration_validation_report(
+        downside_rows,
+        policy,
+        total_candidate_count=total_candidate_count,
+        leakage_checks=LeakageChecks(True, True, True, True, True),
+        input_producer_shas=input_producer_shas,
+        generation_id=generation_id,
+        producer_candidate_sha=producer_candidate_sha,
+    )
+    holdout_dates = {
+        row.decision_date
+        for row in downside_rows
+        if any(
+            window.start <= row.decision_date <= window.end
+            for window in report.holdout_windows
+        )
+    }
+    holdout = [row for row in downside_rows if row.decision_date in holdout_dates]
+    prevalence = Decimal(sum(row.adverse_outcome for row in holdout)) / Decimal(
+        len(holdout)
+    )
+    naive_brier = prevalence * (Decimal("1") - prevalence)
+    metrics = report.metrics
+    failures: dict[str, str] = {}
+    if metrics.auc is None or metrics.auc < Decimal("0.65"):
+        failures["auc"] = "auc_below_0.65"
+    if metrics.brier is None or metrics.brier >= naive_brier:
+        failures["brier"] = "brier_not_better_than_prevalence_baseline"
+    if metrics.calibration_error is None or metrics.calibration_error > Decimal("0.10"):
+        failures["calibration"] = "calibration_error_above_0.10"
+    if (
+        metrics.precision_at_top is None
+        or metrics.precision_at_top < prevalence * Decimal("2")
+    ):
+        failures["top_decile"] = "precision_at_top_below_2x_prevalence"
+    if not report.stability_checks.calibration_monotonic:
+        failures["monotonicity"] = "calibration_not_monotonic"
+    payload = {
+        "status": "evaluated",
+        "verdict": "fail" if failures else "pass",
+        "metrics": json.loads(json.dumps(asdict(metrics), default=float)),
+        "calibration_curves": json.loads(
+            json.dumps(
+                [asdict(item) for item in report.calibration_curves], default=float
+            )
+        ),
+        "failure_reasons": failures,
+        "stress_pack_status": "blocked_missing_authority",
+        "bomb_status": "blocked_missing_authority",
+    }
+    return report, payload
 
 
 def _file_sha(path: Path) -> str:
@@ -521,6 +587,39 @@ def main() -> int:
         input_producer_shas=input_shas,
         producer_candidate_sha=source_sha,
     )
+    generation_id = str(labels["generation_id"].iloc[0])
+    downside_report, downside_validation = evaluate_downside_construct_calibration(
+        rows,
+        _evaluation_policy(generation_id, source_sha),
+        total_candidate_count=int(
+            labels[["issuer_id", "decision_date"]].drop_duplicates().shape[0]
+        ),
+        input_producer_shas=input_shas,
+        generation_id=generation_id,
+        producer_candidate_sha=source_sha,
+    )
+    downside_metrics_hash = sha256(
+        json.dumps(
+            downside_validation["metrics"],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    quality_auc = report.metrics.auc
+    downside_auc = downside_report.metrics.auc
+    comparison = (
+        "inconclusive"
+        if quality_auc is None or downside_auc is None or downside_auc == quality_auc
+        else ("better" if downside_auc > quality_auc else "worse")
+    )
+    report = replace(
+        report,
+        challenger_results=(ChallengerResult(
+            challenger_id="financial-downside-equal-weight",
+            metrics_hash=downside_metrics_hash,
+            verdict=comparison,
+        ),),
+    )
     calibration_payload = json.loads(json.dumps(asdict(report), default=float))
     args.calibration_output.write_text(
         json.dumps(calibration_payload, ensure_ascii=False, indent=2) + "\n"
@@ -576,9 +675,15 @@ def main() -> int:
             ),
             "section_status": {
                 "quality_calibration": "diagnostic_only_blocked_T14",
-                "downside_calibration": "diagnostic_only_blocked_T18",
+                "downside_calibration": (
+                    f"evaluated_{downside_validation['verdict']}"
+                ),
                 "upside_stars": "blocked_missing_T17",
+                "risk_register": "blocked_missing_T18_authority",
+                "stress_pack": "blocked_missing_T18_authority",
+                "bomb": "blocked_missing_T18_authority",
             },
+            "downside_construct_validation": downside_validation,
             "failure_reasons": report.failure_reasons,
         },
     }
