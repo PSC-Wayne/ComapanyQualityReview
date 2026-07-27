@@ -1,6 +1,6 @@
 {
   "schema_version": "RealPipelineExecutionReport.v4",
-  "generated_at": "2026-07-27T01:39:36.019946+00:00",
+  "generated_at": "2026-07-27T01:57:12.096143+00:00",
   "execution_status": "NON_PUBLISHABLE",
   "publishable": false,
   "rating_disposition": "NO_RATING_NOT_APPLICABLE",
@@ -51,20 +51,19 @@
     },
     "T22": {
       "status": "CALIBRATION_EXECUTED_BLOCKED",
-      "candidate_score_row_count": 3023,
+      "candidate_score_row_count": 5134,
       "champion_verdict": "blocked",
       "metrics": {
-        "auc": 0.5954355523731989,
-        "brier": 0.2535067669709313,
-        "calibration_error": 0.24929707101465295,
-        "precision_at_top": 0.2912621359223301
+        "auc": 0.6106421457456691,
+        "brier": 0.26084580868617113,
+        "calibration_error": 0.257311462842453,
+        "precision_at_top": 0.36416184971098264
       },
       "same_holdout_diagnostic_auc": {
-        "quality_adverse_risk": 0.597347321607868,
-        "downside_composite": 0.5758947157039932
+        "quality_adverse_risk": 0.613492095994758,
+        "downside_composite": 0.5749413001337811
       },
       "failure_reasons": {
-        "coverage": "validation_coverage_below_0.85",
         "policy": "candidate_policy_incomplete",
         "stress": "authoritative_stress_period_artifact_unavailable",
         "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",

@@ -4,36 +4,42 @@
     {
       "start": "2022-06-30",
       "end": "2022-06-30",
-      "issuer_count": 980
+      "issuer_count": 1687
     }
   ],
   "holdout_windows": [
     {
       "start": "2024-06-30",
       "end": "2024-06-30",
-      "issuer_count": 1027
+      "issuer_count": 1726
     }
   ],
   "purge_days": 365,
   "embargo_days": 30,
   "metrics": {
-    "auc": 0.5954355523731989,
-    "brier": 0.2535067669709313,
-    "calibration_error": 0.24929707101465295,
-    "precision_at_top": 0.2912621359223301
+    "auc": 0.6106421457456691,
+    "brier": 0.26084580868617113,
+    "calibration_error": 0.257311462842453,
+    "precision_at_top": 0.36416184971098264
   },
   "calibration_curves": [
     {
       "bucket": "00-10%",
-      "predicted": 0.010569924611510526,
-      "observed": 0.2571711177052423,
-      "count": 1011
+      "predicted": 0.010258472900830248,
+      "observed": 0.264619019492026,
+      "count": 1693
     },
     {
       "bucket": "10-20%",
-      "predicted": 0.14285714285714285,
-      "observed": 0.5625,
-      "count": 16
+      "predicted": 0.10256410256410256,
+      "observed": 0.5161290322580645,
+      "count": 31
+    },
+    {
+      "bucket": "30-40%",
+      "predicted": 0.3333333333333333,
+      "observed": 0.0,
+      "count": 2
     }
   ],
   "champion_verdict": "blocked",
@@ -76,18 +82,17 @@
   },
   "error_analysis": {
     "false_positives": 0,
-    "false_negatives": 269,
+    "false_negatives": 464,
     "false_signal_rate": null,
     "mean_adverse_lead_days": null
   },
   "stability_checks": {
-    "calibration_monotonic": true,
+    "calibration_monotonic": false,
     "stress_auc": null,
     "stress_period_count": 0
   },
-  "validation_coverage": 0.5694627709707822,
+  "validation_coverage": 0.9672007540056551,
   "failure_reasons": {
-    "coverage": "validation_coverage_below_0.85",
     "policy": "candidate_policy_incomplete",
     "stress": "authoritative_stress_period_artifact_unavailable",
     "T14": "authoritative_PIT_management_delivery_and_succession_evidence_unavailable",
@@ -95,11 +100,11 @@
     "T18": "causal_risk_register_stress_pack_and_bomb_admission_incomplete"
   },
   "input_producer_shas": {
-    "T09": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
-    "T10": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
-    "T13": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
-    "T14": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
-    "T16": "a6f2729a14a7cac600922b5b71df4b5a39be0c0b4b7e06fb6ddc584523a9f52f",
+    "T09": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
+    "T10": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
+    "T13": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
+    "T14": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
+    "T16": "a44ea159d3f5ef497e444bfcef75854a7063569cea010c9d5607c42bc6b337e2",
     "T17": "b8844a14c7d52d46ab5f87d9da02f45c0282248c5fea4a33dde05f11f5f8141a",
     "T18": "024c0dbf935786c2458c8034e0928e8ddc354f7e45b8a21053ad6bb1cbbd7c0b",
     "T19": "8906b4ea25a8462c205e7606a5d1956d83781171ca8ebeffdbd7d58c0eb6b886",
