@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import date
 import json
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
 from jsonschema import Draft202012Validator, FormatChecker
 
 from company_quality.lab.official_benchmarks import TWSE_TOTAL_RETURN_URL
+from company_quality.lab.real_pre_oos_candidates import build_pre_oos_candidates
 from company_quality.lab.real_upside import (
     build_upside_validation,
     to_research_upside_core_result,
@@ -136,6 +138,11 @@ def test_builds_separate_pit_upside_predictions_without_management_or_market_ove
     shared = predictions.loc[predictions["issuer_id"].eq("issuer-shared")]
     assert set(shared["security_code"]) == {"1000", "1001"}
     assert "management_delivery_ratio" not in report["feature_ids"]
+    assert {
+        column.removeprefix("linear_feature_")
+        for column in predictions
+        if column.startswith("linear_feature_")
+    } == set(cast(list[str], report["feature_ids"]))
     assert report["temporal_windows"]
     assert all(
         date.fromisoformat(window["train_end"])
@@ -178,3 +185,39 @@ def test_builds_separate_pit_upside_predictions_without_management_or_market_ove
     assert snapshot.upside.p10_return is not None
     assert snapshot.upside.p90_return is not None
     assert snapshot.upside.stars is None
+
+
+def test_builds_two_same_observation_pre_oos_candidates_with_linear_features() -> None:
+    labels, features, adjusted, valuation = _inputs()
+
+    rows, report = build_pre_oos_candidates(
+        labels,
+        features,
+        adjusted,
+        valuation,
+        producer_candidate_sha="a" * 64,
+        input_artifact_shas={
+            "T21_labels": "1" * 64,
+            "real_features": "2" * 64,
+            "adjusted_total_return": "3" * 64,
+            "valuation_features": "4" * 64,
+        },
+        ridge_penalties=(10.0, 100.0),
+    )
+
+    assert report["candidate_count"] == 2
+    assert set(rows["candidate_id"]) == {"ridge_penalty_10", "ridge_penalty_100"}
+    assert any(column.startswith("linear_feature_") for column in rows)
+    assert (pd.to_datetime(rows["trained_through"]) < pd.to_datetime(
+        rows["decision_date"]
+    )).all()
+    counts = rows.groupby("candidate_id").size()
+    assert counts.nunique() == 1
+    model_versions = {
+        str(item["model_version"])
+        for item in cast(list[dict[str, object]], report["candidates"])
+    }
+    assert model_versions == {
+        "train_only_ridge_residual_distribution.penalty_10.v1",
+        "train_only_ridge_residual_distribution.penalty_100.v1",
+    }

@@ -25,6 +25,7 @@ _RAW_METRICS = (
     "liquidity_improvement",
 )
 _MISSING_SUPPRESSION_THRESHOLD = 0.5
+_OBSERVATION_KEY = ["issuer_id", "security_code", "market", "decision_date"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,20 +276,20 @@ def _pit_matrix(
         "metric_value",
     ] = np.nan
     conflicts = selected.loc[selected["metric_value"].notna()].groupby(
-        ["issuer_id", "decision_date", "metric_id"]
+        [*_OBSERVATION_KEY, "metric_id"]
     )["metric_value"].nunique(dropna=True)
     if (conflicts > 1).any():
         raise ValueError("conflicting PIT trend values")
     metric_ids = sorted(selected["metric_id"].astype(str).unique())
-    keys = selected[["issuer_id", "decision_date"]].drop_duplicates()
+    keys = selected[_OBSERVATION_KEY].drop_duplicates()
     values = selected.pivot_table(
-        index=["issuer_id", "decision_date"],
+        index=_OBSERVATION_KEY,
         columns="metric_id",
         values="metric_value",
         aggfunc="first",
     ).reindex(columns=metric_ids).reset_index()
     matrix = keys.merge(
-        values, on=["issuer_id", "decision_date"], how="left", validate="one_to_one"
+        values, on=_OBSERVATION_KEY, how="left", validate="one_to_one"
     )
     matrix.columns.name = None
     return matrix, metric_ids
@@ -396,12 +397,12 @@ def validate_three_model_trends(
         trend_matrix, trend_ids = _pit_matrix(trend_features, scope=scope)
         data = label_data.merge(
             base_matrix,
-            on=["issuer_id", "decision_date"],
+            on=_OBSERVATION_KEY,
             how="inner",
             validate="one_to_one",
         ).merge(
             trend_matrix,
-            on=["issuer_id", "decision_date"],
+            on=_OBSERVATION_KEY,
             how="left",
             validate="one_to_one",
         )

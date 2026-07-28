@@ -140,6 +140,7 @@ def _fit_predict(
     holdout: pd.DataFrame,
     feature_ids: list[str],
     target: str,
+    ridge_penalty: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     x_train = train[feature_ids].astype(float)
     medians = x_train.median(axis=0)
@@ -155,7 +156,7 @@ def _fit_predict(
     raw_y = train[target].to_numpy(float)
     lower, upper = np.quantile(raw_y, [0.025, 0.975])
     y = np.clip(raw_y, lower, upper)
-    penalty = np.eye(train_design.shape[1])
+    penalty = np.eye(train_design.shape[1]) * ridge_penalty
     penalty[0, 0] = 0
     coefficients = np.linalg.solve(
         train_design.T @ train_design + penalty,
@@ -307,7 +308,10 @@ def build_upside_validation(
     *,
     producer_candidate_sha: str,
     input_artifact_shas: dict[str, str],
+    ridge_penalty: float = 1.0,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
+    if not np.isfinite(ridge_penalty) or ridge_penalty <= 0:
+        raise ValueError("positive finite ridge penalty required")
     if not _SHA.fullmatch(producer_candidate_sha):
         raise ValueError("producer candidate SHA required")
     expected_input_shas = {
@@ -356,10 +360,10 @@ def build_upside_validation(
         if len(train) < 10 or holdout.empty:
             continue
         return_prediction, return_residuals = _fit_predict(
-            train, holdout, feature_ids, "actual_total_return"
+            train, holdout, feature_ids, "actual_total_return", ridge_penalty
         )
         excess_prediction, excess_residuals = _fit_predict(
-            train, holdout, feature_ids, "actual_excess_return"
+            train, holdout, feature_ids, "actual_excess_return", ridge_penalty
         )
         quantiles = np.quantile(return_residuals, [0.1, 0.5, 0.9])
         holdout["predicted_p10_return"] = return_prediction + quantiles[0]
@@ -390,6 +394,11 @@ def build_upside_validation(
     if not predictions:
         raise ValueError("insufficient temporal history for upside holdout")
     result = pd.concat(predictions, ignore_index=True)
+    linear_feature_columns: list[str] = []
+    for feature_id in feature_ids:
+        column = f"linear_feature_{feature_id}"
+        result[column] = result[feature_id]
+        linear_feature_columns.append(column)
     actual = result["actual_total_return"].to_numpy(float)
     p50 = result["predicted_p50_return"].to_numpy(float)
     excess_actual = (result["actual_excess_return"] > 0).astype(int).to_numpy()
@@ -401,7 +410,11 @@ def build_upside_validation(
     report: dict[str, object] = {
         "schema_version": "UpsidePotentialValidationReport.v1",
         "source_version": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+PITValuationFeatures.v1+pre_adjusted_total_return",
-        "model_version": "train_only_ridge_residual_distribution.v1",
+        "model_version": (
+            "train_only_ridge_residual_distribution.v1"
+            if ridge_penalty == 1.0
+            else f"train_only_ridge_residual_distribution.penalty_{ridge_penalty:g}.v1"
+        ),
         "formula_version": "12m-adjusted-return-official-market-total-return-benchmark.v1",
         "status": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE",
         "publishable": False,
@@ -453,6 +466,7 @@ def build_upside_validation(
         "predicted_p10_return", "predicted_p50_return", "predicted_p90_return",
         "positive_return_probability", "outperform_probability", "star",
         "generation_id",
+        *linear_feature_columns,
     ]
     return result.loc[:, output_columns].copy(), report
 

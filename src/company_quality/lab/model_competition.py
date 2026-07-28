@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -140,8 +141,12 @@ def _fit_linear(train: pd.DataFrame, holdout: pd.DataFrame, fields: list[str]) -
     return holdout_design @ coefficients
 
 
-def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
+def _fixed_baselines(
+    rows: pd.DataFrame,
+) -> tuple[list[dict[str, object]], set[tuple[str, str, str, str]]]:
     feature_ids = sorted(column for column in rows if column.startswith("linear_feature_"))
+    if not feature_ids:
+        raise ValueError("same-data linear baseline features required")
     identity = [
         "issuer_id", "security_code", "market", "decision_date",
         "actual_total_return", "official_benchmark_return",
@@ -164,7 +169,8 @@ def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
     benchmark_predicted: list[float] = []
     linear_actual: list[float] = []
     linear_predicted: list[float] = []
-    for holdout_date in sorted(observations["decision"].unique())[1:]:
+    evaluated_keys: set[tuple[str, str, str, str]] = set()
+    for holdout_date in sorted(observations["decision"].unique()):
         holdout_stamp = pd.Timestamp(holdout_date)
         train = observations.loc[
             observations["decision"] < holdout_stamp - pd.DateOffset(months=12)
@@ -173,6 +179,13 @@ def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
         if len(train) < 10 or holdout.empty:
             continue
         actual = holdout["actual_total_return"].to_numpy(float)
+        evaluated_keys.update(zip(
+            holdout["issuer_id"].astype(str),
+            holdout["security_code"].astype(str),
+            holdout["market"].astype(str),
+            holdout["decision_date"].astype(str),
+            strict=True,
+        ))
         naive_actual.extend(actual)
         naive_predicted.extend(
             np.repeat(float(train["actual_total_return"].median()), len(holdout))
@@ -195,6 +208,8 @@ def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
         float(np.mean(np.abs(np.asarray(linear_actual) - np.asarray(linear_predicted))))
         if linear_actual else None
     )
+    if not evaluated_keys or naive_mae is None or linear_mae is None:
+        raise ValueError("fixed baselines require common temporal holdout observations")
     return [
         {
             "baseline_id": "no_company_data_temporal_median",
@@ -210,7 +225,7 @@ def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
             "feature_ids": feature_ids,
             "frozen": True,
         },
-    ]
+    ], evaluated_keys
 
 
 def _stability(frame: pd.DataFrame) -> float:
@@ -287,6 +302,7 @@ def freeze_pre_oos_candidate(
     scores: list[dict[str, object]] = []
     numeric_scores: list[tuple[float, str]] = []
     expected_keys: set[tuple[str, str, str, str]] | None = None
+    fixed_baselines, evaluated_keys = _fixed_baselines(data)
     for candidate_id, candidate_rows in data.groupby("candidate_id", sort=True):
         keys = set(zip(
             candidate_rows["issuer_id"].astype(str),
@@ -299,7 +315,18 @@ def freeze_pre_oos_candidate(
             expected_keys = keys
         elif keys != expected_keys:
             raise ValueError("all candidates must use identical pre-OOS observations")
-        score, detail = _candidate_score(candidate_rows)
+        common_mask = [
+            key in evaluated_keys
+            for key in zip(
+                candidate_rows["issuer_id"].astype(str),
+                candidate_rows["security_code"].astype(str),
+                candidate_rows["market"].astype(str),
+                candidate_rows["decision_date"].astype(str),
+                strict=True,
+            )
+        ]
+        common = candidate_rows.loc[common_mask]
+        score, detail = _candidate_score(common)
         scores.append(detail)
         numeric_scores.append((score, str(candidate_id)))
     numeric_scores.sort()
@@ -307,6 +334,27 @@ def freeze_pre_oos_candidate(
         raise ValueError("no unique pre-OOS champion")
     champion_score, champion_id = numeric_scores[0]
     champion = data.loc[data["candidate_id"].astype(str).eq(champion_id)].copy()
+    champion_mask = [
+        key in evaluated_keys
+        for key in zip(
+            champion["issuer_id"].astype(str),
+            champion["security_code"].astype(str),
+            champion["market"].astype(str),
+            champion["decision_date"].astype(str),
+            strict=True,
+        )
+    ]
+    champion = champion.loc[champion_mask]
+    champion_detail = next(
+        item for item in scores if str(item["candidate_id"]) == champion_id
+    )
+    champion_mae = cast(float, champion_detail["mean_absolute_error"])
+    naive_mae = cast(float, fixed_baselines[0]["mean_absolute_error"])
+    linear_mae = cast(float, fixed_baselines[1]["mean_absolute_error"])
+    if champion_mae > 0.95 * naive_mae:
+        raise ValueError("pre-OOS champion does not beat no-company baseline by 5%")
+    if champion_mae >= linear_mae:
+        raise ValueError("pre-OOS champion does not beat same-data linear baseline")
     stability = _stability(champion)
     confidence = _confidence(champion, stability)
     weights = _learn_star_weights(champion, confidence)
@@ -317,7 +365,7 @@ def freeze_pre_oos_candidate(
         champion_candidate_id=champion_id,
         champion_score=champion_score,
         candidate_scores=scores,
-        fixed_baselines=_fixed_baselines(data),
+        fixed_baselines=fixed_baselines,
         star_weights=weights,
         confidence_weights=dict(_CONFIDENCE_WEIGHTS),
         cross_year_stability=stability,

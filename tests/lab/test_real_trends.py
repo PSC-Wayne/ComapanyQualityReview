@@ -100,11 +100,12 @@ def _validation_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     trends: list[dict[str, object]] = []
     for decision in dates:
         for index in range(12):
-            issuer = f"issuer-{index:02d}"
+            issuer = "issuer-shared" if index < 2 else f"issuer-{index:02d}"
+            security_code = f"{1000 + index}"
             rank = index / 11
             labels.append({
                 "issuer_id": issuer,
-                "security_code": f"{1000 + index}",
+                "security_code": security_code,
                 "market": "TWSE",
                 "decision_date": decision,
                 "generation_id": "g1",
@@ -113,6 +114,8 @@ def _validation_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             })
             base.append({
                 "issuer_id": issuer,
+                "security_code": security_code,
+                "market": "TWSE",
                 "decision_date": decision,
                 "metric_id": "base_noise",
                 "metric_value": float(index % 2),
@@ -137,6 +140,8 @@ def _validation_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                 for metric_id, value in metrics.items():
                     trends.append({
                         "issuer_id": issuer,
+                        "security_code": security_code,
+                        "market": "TWSE",
                         "decision_date": decision,
                         "model_scope": scope,
                         "metric_id": metric_id,
@@ -166,6 +171,8 @@ def test_three_models_ablate_independently_and_missingness_suppresses() -> None:
     assert predictions.loc[
         predictions["result_status"] == "data_insufficient", "predicted_target"
     ].isna().all()
+    shared = predictions.loc[predictions["issuer_id"] == "issuer-shared"]
+    assert set(shared["security_code"]) == {"1000", "1001"}
     metric_sets = [
         set(item["admitted_metric_ids"]) | set(item["rejected_metric_ids"])
         for item in models.values()
