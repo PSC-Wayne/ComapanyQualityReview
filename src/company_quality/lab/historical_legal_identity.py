@@ -30,6 +30,9 @@ from company_quality.lab.finlab_materializer import (
 
 
 FetchFiling = Callable[[str, tuple[int, ...]], tuple[str, str] | None]
+FetchOCRFiling = Callable[
+    [str, tuple[int, ...], tuple[str, ...]], tuple[str, str] | None
+]
 FetchRegistry = Callable[[str, str], dict[str, object] | None]
 FetchTradingRegistry = Callable[[str, str], dict[str, object] | None]
 FetchPreOOSEventName = Callable[
@@ -105,93 +108,255 @@ def _current_by_code(
     return result
 
 
-def _live_document_filing(
-    code: str, years: tuple[int, ...]
+def _document_pdf(
+    session: requests.Session,
+    endpoint: str,
+    code: str,
+    filename: str,
+) -> bytes | None:
+    time.sleep(0.5)
+    data = {
+        "step": "9",
+        "kind": "A",
+        "co_id": code,
+        "filename": filename,
+        "colorchg": "1",
+    }
+    try:
+        launch = session.post(
+            endpoint,
+            data=data,
+            headers={"User-Agent": "CompanyQualityResearch/0.1"},
+            timeout=60,
+        )
+    except requests.ConnectionError:
+        time.sleep(2)
+        launch = session.post(
+            endpoint,
+            data=data,
+            headers={"User-Agent": "CompanyQualityResearch/0.1"},
+            timeout=60,
+        )
+    if launch.status_code != 200:
+        raise RuntimeError(
+            f"official TWSE document launch failed: HTTP {launch.status_code}"
+        )
+    href = re.search(r"href=['\"]([^'\"]+\.pdf)['\"]", launch.text)
+    if href is None:
+        return None
+    pdf = session.get(
+        urljoin(endpoint, href.group(1)),
+        headers={"User-Agent": "CompanyQualityResearch/0.1"},
+        timeout=120,
+    )
+    if pdf.status_code != 200 or not pdf.content.startswith(b"%PDF"):
+        raise RuntimeError("official TWSE financial report PDF unavailable")
+    return pdf.content
+
+
+def _pdf_text(content: bytes, _filename: str) -> str:
+    reader = PdfReader(BytesIO(content))
+    return "\n".join((page.extract_text() or "") for page in reader.pages[:3])
+
+
+def _document_index(
+    session: requests.Session,
+    endpoint: str,
+    code: str,
+    year: int,
+) -> tuple[dict[str, str], list[str]]:
+    time.sleep(0.5)
+    params = {
+        "step": "1",
+        "colorchg": "1",
+        "seamon": "",
+        "mtype": "A",
+        "co_id": code,
+        "year": str(year - 1911),
+    }
+    index = session.get(
+        endpoint,
+        params=params,
+        headers={"User-Agent": "CompanyQualityResearch/0.1"},
+        timeout=60,
+    )
+    if index.status_code != 200:
+        raise RuntimeError(
+            f"official TWSE document index failed: HTTP {index.status_code}"
+        )
+    filenames = re.findall(
+        rf'readfile2\(\\?"A\\?",\\?"{re.escape(code)}\\?",'
+        rf'\\?"([^"\\]+\.pdf)\\?"\)',
+        index.text,
+    )
+    preferred = [
+        name
+        for suffix in ("AI1.pdf", "AI3.pdf", "AI2.pdf")
+        for name in filenames
+        if name == f"{year}04_{code}_{suffix}"
+    ]
+    return params, preferred
+
+
+def _live_document_filing(code: str, years: tuple[int, ...]) -> tuple[str, str] | None:
+    endpoint = "https://doc.twse.com.tw/server-java/t57sb01"
+    session = requests.Session()
+    for year in years:
+        params, preferred = _document_index(session, endpoint, code, year)
+        for filename in preferred:
+            content = _document_pdf(session, endpoint, code, filename)
+            if content is None:
+                continue
+            text = _pdf_text(content, filename)
+            if not text.strip():
+                continue
+            compact = re.sub(r"\s+", "", text)
+            if re.search(rf"股票代碼[：:]?{re.escape(code)}", compact) is None:
+                other_codes = re.findall(r"股票代碼[：:]?([0-9]{4})", compact)
+                if other_codes:
+                    raise ValueError(
+                        f"official TWSE report security code mismatch: {code} {filename}"
+                    )
+                continue
+            for line in text.splitlines():
+                candidate = re.sub(r"\s+", "", line).removesuffix("及子公司")
+                if candidate.endswith("股份有限公司") and 6 <= len(candidate) <= 60:
+                    source = endpoint + "?" + urlencode(params) + f"#{filename}"
+                    return candidate, source
+        if preferred:
+            return None
+    return None
+
+
+def _ocr_identity_from_pages(
+    code: str,
+    observed_names: tuple[str, ...],
+    pages: list[list[str]],
+) -> str | None:
+    try:
+        from opencc import OpenCC
+    except ImportError as exc:
+        raise RuntimeError(
+            "OCR identity dependencies required; install the real-data extra"
+        ) from exc
+    convert = OpenCC("s2t").convert
+    normalized = [
+        [re.sub(r"\s+", "", convert(str(line))) for line in page] for page in pages
+    ]
+    if not any(
+        re.search(rf"(?<![0-9]){re.escape(code)}(?![0-9])", line)
+        for page in normalized
+        for line in page
+    ):
+        return None
+    cover_candidates: set[str] = set()
+    observed_candidates: set[str] = set()
+    for page_index, page in enumerate(normalized):
+        for line in page:
+            trimmed = line.removesuffix("及子公司")
+            cover_candidate: str | None = None
+            if page_index == 0:
+                trimmed = re.sub(rf"^(?:股票代碼[：:]?)?{re.escape(code)}", "", trimmed)
+                if re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9]{2,40}股份有限公司", trimmed):
+                    cover_candidate = trimmed
+                    cover_candidates.add(trimmed)
+            if cover_candidate is not None:
+                continue
+            for observed_name in observed_names:
+                match = re.search(
+                    re.escape(observed_name)
+                    + r"[\u4e00-\u9fffA-Za-z0-9]{0,20}股份有限公司",
+                    trimmed,
+                )
+                if match:
+                    observed_candidates.add(match.group(0))
+
+    def maximal(candidates: set[str]) -> set[str]:
+        return {
+            candidate
+            for candidate in candidates
+            if not any(
+                candidate != other and candidate in other for other in candidates
+            )
+        }
+
+    observed_candidates = maximal(observed_candidates)
+    if len(observed_candidates) == 1:
+        return next(iter(observed_candidates))
+    if len(observed_candidates) > 1:
+        return None
+    cover_candidates = maximal(cover_candidates)
+    return next(iter(cover_candidates)) if len(cover_candidates) == 1 else None
+
+
+def _ocr_pdf_pages(content: bytes) -> list[list[str]]:
+    try:
+        import fitz
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as exc:
+        raise RuntimeError(
+            "OCR identity dependencies required; install the real-data extra"
+        ) from exc
+    engine = RapidOCR()
+    document = fitz.open(stream=content, filetype="pdf")
+    pages: list[list[str]] = []
+    for page in document[: min(3, len(document))]:
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+        result, _ = engine(pixmap.tobytes("png"))
+        pages.append([str(item[1]) for item in result] if result else [])
+    return pages
+
+
+def _registry_valid_ocr_candidate(
+    code: str,
+    candidates: dict[str, str],
+    fetch_registry: FetchRegistry,
+) -> tuple[str, str] | None:
+    valid: dict[str, str] = {}
+    for name, source in candidates.items():
+        registry = fetch_registry(code, name)
+        if registry is None:
+            continue
+        if (
+            _ubn(registry.get("Business_Accounting_NO"))
+            and str(registry.get("Company_Name", "")).strip() == name
+        ):
+            valid[name] = source
+    if len(valid) != 1:
+        return None
+    name = next(iter(valid))
+    return name, valid[name]
+
+
+def _live_ocr_document_filing(
+    code: str,
+    years: tuple[int, ...],
+    observed_names: tuple[str, ...],
 ) -> tuple[str, str] | None:
     endpoint = "https://doc.twse.com.tw/server-java/t57sb01"
     session = requests.Session()
     for year in years:
-        params = {
-            "step": "1", "colorchg": "1", "seamon": "", "mtype": "A",
-            "co_id": code, "year": str(year - 1911),
-        }
-        index = session.get(
-            endpoint,
-            params=params,
-            headers={"User-Agent": "CompanyQualityResearch/0.1"},
-            timeout=60,
-        )
-        if index.status_code != 200:
-            raise RuntimeError(
-                f"official TWSE document index failed: HTTP {index.status_code}"
+        params, preferred = _document_index(session, endpoint, code, year)
+        found: dict[str, str] = {}
+        for filename in preferred:
+            content = _document_pdf(session, endpoint, code, filename)
+            if content is None:
+                continue
+            candidate = _ocr_identity_from_pages(
+                code, observed_names, _ocr_pdf_pages(content)
             )
-        filenames = re.findall(
-            rf'readfile2\(\\?"A\\?",\\?"{re.escape(code)}\\?",'
-            rf'\\?"([^"\\]+\.pdf)\\?"\)',
-            index.text,
-        )
-        preferred = [
-            name
-            for suffix in ("AI1.pdf", "AI3.pdf")
-            for name in filenames
-            if name == f"{year}04_{code}_{suffix}"
-        ]
-        if not preferred:
-            continue
-        filename = preferred[0]
-        try:
-            launch = session.post(
-                endpoint,
-                data={
-                    "step": "9", "kind": "A", "co_id": code,
-                    "filename": filename, "colorchg": "1",
-                },
-                headers={"User-Agent": "CompanyQualityResearch/0.1"},
-                timeout=60,
-            )
-        except requests.ConnectionError:
-            time.sleep(2)
-            launch = session.post(
-                endpoint,
-                data={
-                    "step": "9", "kind": "A", "co_id": code,
-                    "filename": filename, "colorchg": "1",
-                },
-                headers={"User-Agent": "CompanyQualityResearch/0.1"},
-                timeout=60,
-            )
-        if launch.status_code != 200:
-            raise RuntimeError(
-                f"official TWSE document launch failed: HTTP {launch.status_code}"
-            )
-        href = re.search(r"href=['\"]([^'\"]+\.pdf)['\"]", launch.text)
-        if href is None:
-            return None
-        pdf = session.get(
-            urljoin(endpoint, href.group(1)),
-            headers={"User-Agent": "CompanyQualityResearch/0.1"},
-            timeout=120,
-        )
-        if pdf.status_code != 200 or not pdf.content.startswith(b"%PDF"):
-            raise RuntimeError("official TWSE financial report PDF unavailable")
-        reader = PdfReader(BytesIO(pdf.content))
-        text = "\n".join((page.extract_text() or "") for page in reader.pages[:3])
-        if not text.strip():
-            return None
-        compact = re.sub(r"\s+", "", text)
-        if re.search(rf"股票代碼[：:]?{re.escape(code)}", compact) is None:
-            other_codes = re.findall(r"股票代碼[：:]?([0-9]{4})", compact)
-            if other_codes:
-                raise ValueError(
-                    f"official TWSE report security code mismatch: {code} {filename}"
+            if candidate:
+                source = (
+                    endpoint + "?" + urlencode(params) + f"#{filename};ocr-pages=1-3"
                 )
+                found[candidate] = source
+        if len(found) == 1:
+            name = next(iter(found))
+            return name, found[name]
+        if len(found) > 1:
+            return _registry_valid_ocr_candidate(code, found, _live_registry)
+        if preferred:
             return None
-        for line in text.splitlines():
-            candidate = re.sub(r"\s+", "", line).removesuffix("及子公司")
-            if candidate.endswith("股份有限公司") and 6 <= len(candidate) <= 60:
-                source = endpoint + "?" + urlencode(params) + f"#{filename}"
-                return candidate, source
-        return None
     return None
 
 
@@ -392,6 +557,7 @@ def resolve_historical_legal_identities(
     tpex_current: object,
     final_oos_start: date,
     fetch_filing: FetchFiling = _live_filing,
+    fetch_ocr_filing: FetchOCRFiling = _live_ocr_document_filing,
     fetch_registry: FetchRegistry = _live_registry,
     fetch_trading_registry: FetchTradingRegistry = _live_trading_registry,
     fetch_pre_oos_event_name: FetchPreOOSEventName = _live_pre_oos_event_name,
@@ -430,6 +596,7 @@ def resolve_historical_legal_identities(
             str(current_identity["source_ref"]) if current_identity else None
         )
         filing_source: str | None = None
+        ocr_filing_used = False
         source_error: str | None = None
         status = ""
         last_decision_date = pd.Timestamp(last["decision"]).date().isoformat()
@@ -457,6 +624,17 @@ def resolve_historical_legal_identities(
                 filing = None
                 status = "SOURCE_UNAVAILABLE"
                 source_error = f"{type(exc).__name__}: {exc}"
+            if (
+                source_error is None
+                and filing is None
+                and "source_ref" in rows.columns
+            ):
+                try:
+                    filing = fetch_ocr_filing(code, years, tuple(names))
+                    ocr_filing_used = filing is not None
+                except (requests.RequestException, RuntimeError) as exc:
+                    status = "SOURCE_UNAVAILABLE"
+                    source_error = f"{type(exc).__name__}: {exc}"
             if source_error is not None:
                 pass
             elif filing is None:
@@ -522,7 +700,11 @@ def resolve_historical_legal_identities(
                             registry.get("_identity_link_source", "")
                             or GCIS_COMPANY_REGISTRY_URL
                         )
-                        status = "PRE_OOS_FILING_GCIS_UBN"
+                        status = (
+                            "OCR_PRE_OOS_FILING_GCIS_UBN"
+                            if ocr_filing_used
+                            else "PRE_OOS_FILING_GCIS_UBN"
+                        )
                     else:
                         status = "GCIS_IDENTITY_UNRESOLVED"
 

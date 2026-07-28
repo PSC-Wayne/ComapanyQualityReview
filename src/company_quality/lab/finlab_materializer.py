@@ -30,7 +30,7 @@ MOPS_COMPANY_PROFILE_URL = "https://mops.twse.com.tw/mops/api/t05st03"
 GCIS_COMPANY_REGISTRY_URL = (
     "https://data.gcis.nat.gov.tw/od/data/api/6BBA2268-1367-4B42-9CCA-BC17499EBE8C"
 )
-GCIS_STATUSES = tuple(f"{value:02d}" for value in range(1, 11))
+GCIS_STATUSES = tuple(f"{value:02d}" for value in range(1, 34))
 MOPSOV_FILING_URL = "https://mopsov.twse.com.tw/server-java/t164sb01"
 
 DataGetter = Callable[[str], pd.DataFrame]

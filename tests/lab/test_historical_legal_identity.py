@@ -12,6 +12,8 @@ from company_quality.lab.historical_legal_identity import (
     _live_mopsov_filing,
     _live_pre_oos_event_name,
     _live_trading_registry,
+    _ocr_identity_from_pages,
+    _registry_valid_ocr_candidate,
     resolve_historical_legal_identities,
 )
 
@@ -125,7 +127,7 @@ def test_live_filing_reads_official_financial_report_pdf(
             if "params" in kwargs:
                 return Response(
                     200,
-                    text=r'readfile2(\"A\",\"1724\",\"202004_1724_AI1.pdf\")',
+                    text=r'readfile2(\"A\",\"1724\",\"202004_1724_AI2.pdf\")',
                 )
             return Response(200, content=b"%PDF-fake")
 
@@ -159,7 +161,7 @@ def test_live_filing_reads_official_financial_report_pdf(
         "台硝股份有限公司",
         "https://doc.twse.com.tw/server-java/t57sb01?"
         "step=1&colorchg=1&seamon=&mtype=A&co_id=1724&year=109#"
-        "202004_1724_AI1.pdf",
+        "202004_1724_AI2.pdf",
     )
 
 
@@ -214,8 +216,99 @@ def test_live_filing_keeps_scanned_pdf_unresolved(
         "company_quality.lab.historical_legal_identity.PdfReader",
         lambda _stream: Reader(),
     )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.time.sleep",
+        lambda _seconds: None,
+    )
 
     assert _live_document_filing("1566", (2018,)) is None
+
+
+def test_live_document_filing_continues_after_scanned_preferred_pdf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+        content = b"%PDF-fake"
+
+        def __init__(self, text: str = "") -> None:
+            self.text = text
+
+    class Session:
+        def get(self, _url: str, **kwargs: object) -> Response:
+            if "params" in kwargs:
+                return Response(
+                    r'readfile2(\"A\",\"2475\",\"201704_2475_AI1.pdf\") '
+                    r'readfile2(\"A\",\"2475\",\"201704_2475_AI3.pdf\")'
+                )
+            return Response()
+
+        def post(self, _url: str, **_kwargs: object) -> Response:
+            return Response("<a href='/pdf/report.pdf'>report</a>")
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.Session", Session
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity._pdf_text",
+        lambda _content, filename: (
+            "" if filename.endswith("AI1.pdf")
+            else "中華映管股份有限公司\n股票代碼：2475"
+        ),
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.time.sleep",
+        lambda _seconds: None,
+    )
+
+    assert _live_document_filing("2475", (2017,)) == (
+        "中華映管股份有限公司",
+        "https://doc.twse.com.tw/server-java/t57sb01?"
+        "step=1&colorchg=1&seamon=&mtype=A&co_id=2475&year=106#"
+        "201704_2475_AI3.pdf",
+    )
+
+
+def test_ocr_identity_requires_code_exact_name_and_fails_ambiguity() -> None:
+    assert _ocr_identity_from_pages(
+        "3519", ("綠能",), [["股票代碼：3519", "绿能科技股份有限公司及子公司"]]
+    ) == "綠能科技股份有限公司"
+    assert _ocr_identity_from_pages(
+        "2475", ("華映",), [["2475", "中華映管股份有限公司及子公司"]]
+    ) == "中華映管股份有限公司"
+    assert _ocr_identity_from_pages(
+        "3553",
+        ("力積",),
+        [["股票代碼3553", "力電子股份有限公司"], ["查核意見力积電子股份有限公司"]],
+    ) == "力積電子股份有限公司"
+    assert _ocr_identity_from_pages(
+        "3519", ("綠能",), [["绿能科技股份有限公司"]]
+    ) is None
+    assert _ocr_identity_from_pages(
+        "3519",
+        ("綠能",),
+        [["3519", "綠能科技股份有限公司", "綠能投資股份有限公司"]],
+    ) is None
+
+
+def test_ocr_candidate_uses_exact_unique_gcis_identity() -> None:
+    candidates = {
+        "力電子股份有限公司": "official.pdf#AI1",
+        "力積電子股份有限公司": "official.pdf#AI3",
+    }
+
+    def registry(_code: str, name: str) -> dict[str, object] | None:
+        if name != "力積電子股份有限公司":
+            return None
+        return {
+            "Business_Accounting_NO": "80149790",
+            "Company_Name": name,
+        }
+
+    assert _registry_valid_ocr_candidate("3553", candidates, registry) == (
+        "力積電子股份有限公司",
+        "official.pdf#AI3",
+    )
 
 
 def test_live_filing_uses_document_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,6 +419,7 @@ def test_resolves_unique_legal_name_matching_official_trading_name() -> None:
         tpex_current=[],
         final_oos_start=date(2025, 1, 1),
         fetch_filing=lambda _code, _years: None,
+        fetch_ocr_filing=lambda _code, _years, _names: None,
         fetch_registry=lambda _code, _name: None,
         fetch_trading_registry=lambda _code, _name: {
             "Business_Accounting_NO": "12503674",
@@ -340,6 +434,40 @@ def test_resolves_unique_legal_name_matching_official_trading_name() -> None:
     assert row["identity_status"] == "OFFICIAL_TRADING_NAME_GCIS_UBN"
     assert row["filing_source_ref"] == universe.loc[0, "source_ref"]
     assert row["identity_source_ref"] == "https://data.gcis.nat.gov.tw/1566"
+    assert report["resolved_ubn_count"] == 1
+
+
+def test_resolver_admits_exact_ocr_name_only_through_gcis() -> None:
+    universe = pd.DataFrame([{
+        "decision_date": "2017-06-30",
+        "market": "TWSE",
+        "security_code": "3553",
+        "company_name": "力積",
+        "source_ref": "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX",
+    }])
+
+    frame, report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=lambda _code, _years: None,
+        fetch_ocr_filing=lambda _code, _years, _names: (
+            "力積電子股份有限公司",
+            "https://doc.twse.com.tw/201604_3553_AI3.pdf;ocr-pages=1-3",
+        ),
+        fetch_registry=lambda _code, name: {
+            "Business_Accounting_NO": "80149790",
+            "Company_Name": name,
+            "_identity_link_source": "https://data.gcis.nat.gov.tw/3553",
+        },
+    )
+
+    row = frame.iloc[0]
+    assert row["official_name"] == "力積電子股份有限公司"
+    assert row["unified_business_number"] == "80149790"
+    assert row["identity_status"] == "OCR_PRE_OOS_FILING_GCIS_UBN"
+    assert row["filing_source_ref"].endswith("ocr-pages=1-3")
     assert report["resolved_ubn_count"] == 1
 
 
