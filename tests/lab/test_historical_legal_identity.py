@@ -9,6 +9,8 @@ import requests
 from company_quality.lab.historical_legal_identity import (
     _live_document_filing,
     _live_filing,
+    _live_mopsov_filing,
+    _live_trading_registry,
     resolve_historical_legal_identities,
 )
 
@@ -239,6 +241,139 @@ def test_live_filing_uses_document_fallback(monkeypatch: pytest.MonkeyPatch) -> 
         "https://doc.twse.com.tw/report",
     )
     assert calls == ["mopsov", "document"]
+
+
+def test_mopsov_filing_removes_group_scope_suffix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+        url = "https://mopsov.twse.com.tw/4944"
+        content = (
+            'name="tifrs-notes:CompanyID">4944<'
+            'name="tifrs-notes:CompanyChineseName">兆遠科技股份有限公司及子公司<'
+        ).encode("big5")
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.get",
+        lambda *_args, **_kwargs: Response(),
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.time.sleep",
+        lambda _seconds: None,
+    )
+
+    assert _live_mopsov_filing("4944", (2022,)) == (
+        "兆遠科技股份有限公司",
+        "https://mopsov.twse.com.tw/4944",
+    )
+
+
+def test_mopsov_filing_falls_back_from_c_to_a(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class Response:
+        status_code = 200
+        url = "https://mopsov.twse.com.tw/1566"
+
+        def __init__(self, report_id: str) -> None:
+            self.content = (
+                (
+                    'name="tifrs-notes:CompanyID">1566<'
+                    'name="tifrs-notes:CompanyChineseName">捷邦精密股份有限公司<'
+                ).encode("big5")
+                if report_id == "A"
+                else b"no filing"
+            )
+
+    def get(*_args: object, **kwargs: object) -> Response:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        report_id = str(params["REPORT_ID"])
+        calls.append(report_id)
+        return Response(report_id)
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.get", get
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.time.sleep",
+        lambda _seconds: None,
+    )
+
+    assert _live_mopsov_filing("1566", (2018,)) == (
+        "捷邦精密股份有限公司",
+        "https://mopsov.twse.com.tw/1566",
+    )
+    assert calls == ["C", "A"]
+
+
+def test_resolves_unique_legal_name_matching_official_trading_name() -> None:
+    universe = pd.DataFrame([{
+        "decision_date": "2019-06-30",
+        "market": "TPEx",
+        "security_code": "1566",
+        "company_name": "捷邦",
+        "source_ref": "https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",
+    }])
+
+    frame, report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=lambda _code, _years: None,
+        fetch_registry=lambda _code, _name: None,
+        fetch_trading_registry=lambda _code, _name: {
+            "Business_Accounting_NO": "12503674",
+            "Company_Name": "捷邦股份有限公司",
+            "_identity_link_source": "https://data.gcis.nat.gov.tw/1566",
+        },
+    )
+
+    row = frame.iloc[0]
+    assert row["official_name"] == "捷邦股份有限公司"
+    assert row["unified_business_number"] == "12503674"
+    assert row["identity_status"] == "OFFICIAL_TRADING_NAME_GCIS_UBN"
+    assert row["filing_source_ref"] == universe.loc[0, "source_ref"]
+    assert row["identity_source_ref"] == "https://data.gcis.nat.gov.tw/1566"
+    assert report["resolved_ubn_count"] == 1
+
+
+def test_trading_name_registry_rejects_two_distinct_ubns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+
+        def __init__(self, status: str) -> None:
+            self.url = f"https://data.gcis.nat.gov.tw/status/{status}"
+            self.content = b"[]"
+            self._status = status
+
+        def json(self) -> list[dict[str, object]]:
+            if self._status not in {"01", "04"}:
+                return []
+            return [{
+                "Business_Accounting_NO": (
+                    "22248651" if self._status == "01" else "22203367"
+                ),
+                "Company_Name": "連展科技股份有限公司",
+            }]
+
+    def get(*_args: object, **kwargs: object) -> Response:
+        params = kwargs["params"]
+        assert isinstance(params, dict)
+        status = str(params["$filter"]).rsplit(" ", 1)[-1]
+        return Response(status)
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.get", get
+    )
+
+    assert _live_trading_registry("5491", "連展科技") is None
 
 
 def test_source_failure_is_separate_from_confirmed_identity_gap() -> None:

@@ -20,6 +20,7 @@ import requests
 
 from company_quality.lab.finlab_materializer import (
     GCIS_COMPANY_REGISTRY_URL,
+    GCIS_STATUSES,
     MOPSOV_FILING_URL,
     TPEX_CURRENT_IDENTITY_URL,
     TWSE_CURRENT_IDENTITY_URL,
@@ -30,6 +31,7 @@ from company_quality.lab.finlab_materializer import (
 
 FetchFiling = Callable[[str, tuple[int, ...]], tuple[str, str] | None]
 FetchRegistry = Callable[[str, str], dict[str, object] | None]
+FetchTradingRegistry = Callable[[str, str], dict[str, object] | None]
 RecordCallback = Callable[[dict[str, object]], None]
 _REQUIRED_UNIVERSE_COLUMNS = {
     "decision_date", "market", "security_code", "company_name",
@@ -192,31 +194,35 @@ def _live_mopsov_filing(
     code: str, years: tuple[int, ...]
 ) -> tuple[str, str] | None:
     for year in years:
-        time.sleep(0.5)
-        response = requests.get(
-            MOPSOV_FILING_URL,
-            params={
-                "step": "1", "CO_ID": code, "SYEAR": str(year),
-                "SSEASON": "4", "REPORT_ID": "C",
-            },
-            headers={"User-Agent": "CompanyQualityResearch/0.1"},
-            timeout=60,
-        )
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"official MOPSOV filing request blocked: HTTP {response.status_code}"
+        for report_id in ("C", "A", "B"):
+            time.sleep(0.5)
+            response = requests.get(
+                MOPSOV_FILING_URL,
+                params={
+                    "step": "1", "CO_ID": code, "SYEAR": str(year),
+                    "SSEASON": "4", "REPORT_ID": report_id,
+                },
+                headers={"User-Agent": "CompanyQualityResearch/0.1"},
+                timeout=60,
             )
-        text = response.content.decode("big5", "replace")
-        code_match = re.search(
-            r'name="tifrs-notes:CompanyID"[^>]*>([^<]+)', text
-        )
-        name_match = re.search(
-            r'name="tifrs-notes:CompanyChineseName"[^>]*>([^<]+)', text
-        )
-        if code_match and name_match and code_match.group(1).strip() == code:
-            return unescape(name_match.group(1)).strip(), response.url
+            if response.status_code != 200:
+                raise RuntimeError(
+                    "official MOPSOV filing request blocked: "
+                    f"HTTP {response.status_code}"
+                )
+            text = response.content.decode("big5", errors="replace")
+            code_match = re.search(
+                r'name="tifrs-notes:CompanyID"[^>]*>([^<]+)', text
+            )
+            name_match = re.search(
+                r'name="tifrs-notes:CompanyChineseName"[^>]*>([^<]+)', text
+            )
+            if code_match and name_match and code_match.group(1).strip() == code:
+                name = (
+                    unescape(name_match.group(1)).strip().removesuffix("及子公司")
+                )
+                return name, response.url
     return None
-
 
 def _live_filing(code: str, years: tuple[int, ...]) -> tuple[str, str] | None:
     return _live_mopsov_filing(code, years) or _live_document_filing(code, years)
@@ -224,6 +230,46 @@ def _live_filing(code: str, years: tuple[int, ...]) -> tuple[str, str] | None:
 
 def _live_registry(code: str, name: str) -> dict[str, object] | None:
     return _fetch_gcis_exact_identity(code, name)
+
+
+def _live_trading_registry(
+    _code: str,
+    trading_name: str,
+) -> dict[str, object] | None:
+    expected_name = trading_name + "股份有限公司"
+    matches: dict[str, dict[str, object]] = {}
+    for status_code in GCIS_STATUSES:
+        response = requests.get(
+            GCIS_COMPANY_REGISTRY_URL,
+            params={
+                "$format": "json",
+                "$filter": (
+                    f"Company_Name like {trading_name} and "
+                    f"Company_Status eq {status_code}"
+                ),
+            },
+            headers={"User-Agent": "CompanyQualityResearch/0.1"},
+            timeout=60,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"official GCIS registry request failed: HTTP {response.status_code}"
+            )
+        if not response.content:
+            continue
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("official GCIS registry payload drifted")
+        for row in payload:
+            if not isinstance(row, dict):
+                raise ValueError("official GCIS registry row drifted")
+            ubn = _ubn(row.get("Business_Accounting_NO"))
+            name = str(row.get("Company_Name", "")).strip()
+            if ubn and name == expected_name:
+                candidate = dict(row)
+                candidate["_identity_link_source"] = response.url
+                matches[ubn] = candidate
+    return next(iter(matches.values())) if len(matches) == 1 else None
 
 
 def resolve_historical_legal_identities(
@@ -234,6 +280,7 @@ def resolve_historical_legal_identities(
     final_oos_start: date,
     fetch_filing: FetchFiling = _live_filing,
     fetch_registry: FetchRegistry = _live_registry,
+    fetch_trading_registry: FetchTradingRegistry = _live_trading_registry,
     resume_records: pd.DataFrame | None = None,
     record_callback: RecordCallback | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -296,7 +343,44 @@ def resolve_historical_legal_identities(
             if source_error is not None:
                 pass
             elif filing is None:
-                status = "MISSING_PRE_OOS_FILING_IDENTITY"
+                trading_source = (
+                    str(last["source_ref"]).strip()
+                    if "source_ref" in rows.columns
+                    else ""
+                )
+                trading_registry = None
+                if len(names) == 1 and trading_source:
+                    try:
+                        trading_registry = fetch_trading_registry(code, names[0])
+                    except (requests.RequestException, RuntimeError) as exc:
+                        status = "SOURCE_UNAVAILABLE"
+                        source_error = f"{type(exc).__name__}: {exc}"
+                trading_ubn = None
+                trading_legal_name = ""
+                if source_error is None and trading_registry is not None:
+                    trading_ubn = _ubn(
+                        trading_registry.get("Business_Accounting_NO")
+                    )
+                    trading_legal_name = str(
+                        trading_registry.get("Company_Name", "")
+                    ).strip()
+                if source_error is not None:
+                    pass
+                elif (
+                    trading_ubn
+                    and trading_legal_name == names[0] + "股份有限公司"
+                ):
+                    assert trading_registry is not None
+                    official_name = trading_legal_name
+                    ubn = trading_ubn
+                    filing_source = trading_source
+                    identity_source = str(
+                        trading_registry.get("_identity_link_source", "")
+                        or GCIS_COMPANY_REGISTRY_URL
+                    )
+                    status = "OFFICIAL_TRADING_NAME_GCIS_UBN"
+                else:
+                    status = "MISSING_PRE_OOS_FILING_IDENTITY"
             else:
                 official_name, filing_source = filing
                 if _foreign(*names, official_name):
