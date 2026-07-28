@@ -32,6 +32,10 @@ from company_quality.lab.finlab_materializer import (
 FetchFiling = Callable[[str, tuple[int, ...]], tuple[str, str] | None]
 FetchRegistry = Callable[[str, str], dict[str, object] | None]
 FetchTradingRegistry = Callable[[str, str], dict[str, object] | None]
+FetchPreOOSEventName = Callable[
+    [str, tuple[str, ...], str | None, tuple[int, ...]],
+    tuple[str, str, str] | None,
+]
 RecordCallback = Callable[[dict[str, object]], None]
 _REQUIRED_UNIVERSE_COLUMNS = {
     "decision_date", "market", "security_code", "company_name",
@@ -272,6 +276,76 @@ def _live_trading_registry(
     return next(iter(matches.values())) if len(matches) == 1 else None
 
 
+def _live_pre_oos_event_name(
+    code: str,
+    observed_names: tuple[str, ...],
+    official_name: str | None,
+    years: tuple[int, ...],
+) -> tuple[str, str, str] | None:
+    endpoint = "https://mops.twse.com.tw/mops/api/t05st01"
+    for year in years:
+        roc_year = str(year - 1911)
+        response = requests.post(
+            endpoint,
+            json={
+                "companyId": code,
+                "year": roc_year,
+                "month": "all",
+                "firstDay": "",
+                "lastDay": "",
+            },
+            headers={
+                "User-Agent": "CompanyQualityResearch/0.1",
+                "Content-Type": "application/json",
+            },
+            timeout=60,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"official MOPS event request failed: HTTP {response.status_code}"
+            )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("official MOPS event payload drifted")
+        result = payload.get("result")
+        if result is None:
+            continue
+        if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+            raise ValueError("official MOPS event result drifted")
+        for row in result["data"]:
+            if not isinstance(row, list) or len(row) < 5:
+                raise ValueError("official MOPS event row drifted")
+            if str(row[0]).strip() != code:
+                continue
+            title = re.sub(r"\s+", "", str(row[4]))
+            candidate: str | None = None
+            historical_name: str | None = None
+            rename = re.search(
+                r"名稱由「([^」]+股份有限公司)」更名為「([^」]+股份有限公司)」",
+                title,
+            )
+            if rename and (
+                rename.group(1) == official_name
+                or rename.group(1).removesuffix("股份有限公司") in observed_names
+            ):
+                candidate = rename.group(2)
+                historical_name = rename.group(1)
+            if candidate is None:
+                for observed_name in observed_names:
+                    name = observed_name + "股份有限公司"
+                    if name in title:
+                        candidate = name
+                        historical_name = name
+                        break
+            if candidate:
+                source = endpoint + "#" + urlencode({
+                    "companyId": code, "year": roc_year, "title": title,
+                })
+                assert historical_name is not None
+                return candidate, historical_name, source
+    return None
+
+
 def resolve_historical_legal_identities(
     universe: pd.DataFrame,
     *,
@@ -281,6 +355,7 @@ def resolve_historical_legal_identities(
     fetch_filing: FetchFiling = _live_filing,
     fetch_registry: FetchRegistry = _live_registry,
     fetch_trading_registry: FetchTradingRegistry = _live_trading_registry,
+    fetch_pre_oos_event_name: FetchPreOOSEventName = _live_pre_oos_event_name,
     resume_records: pd.DataFrame | None = None,
     record_callback: RecordCallback | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -408,6 +483,53 @@ def resolve_historical_legal_identities(
                         status = "PRE_OOS_FILING_GCIS_UBN"
                     else:
                         status = "GCIS_IDENTITY_UNRESOLVED"
+
+        if (
+            not ubn
+            and status in {
+                "MISSING_PRE_OOS_FILING_IDENTITY", "GCIS_IDENTITY_UNRESOLVED",
+            }
+            and "source_ref" in rows.columns
+        ):
+            event = None
+            try:
+                event = fetch_pre_oos_event_name(
+                    code,
+                    tuple(names),
+                    official_name,
+                    tuple(range(
+                        int(pd.Timestamp(last["decision"]).year),
+                        final_oos_start.year,
+                    )),
+                )
+            except (requests.RequestException, RuntimeError) as exc:
+                status = "SOURCE_UNAVAILABLE"
+                source_error = f"{type(exc).__name__}: {exc}"
+            if event is not None and source_error is None:
+                event_name, historical_name, event_source = event
+                try:
+                    event_registry = fetch_registry(code, event_name)
+                except (requests.RequestException, RuntimeError) as exc:
+                    event_registry = None
+                    status = "SOURCE_UNAVAILABLE"
+                    source_error = f"{type(exc).__name__}: {exc}"
+                event_ubn = None
+                registry_name = ""
+                if event_registry is not None:
+                    event_ubn = _ubn(event_registry.get("Business_Accounting_NO"))
+                    registry_name = str(
+                        event_registry.get("Company_Name", "")
+                    ).strip()
+                if event_ubn and registry_name == event_name:
+                    assert event_registry is not None
+                    official_name = historical_name
+                    ubn = event_ubn
+                    filing_source = event_source
+                    identity_source = str(
+                        event_registry.get("_identity_link_source", "")
+                        or GCIS_COMPANY_REGISTRY_URL
+                    )
+                    status = "PRE_OOS_EVENT_GCIS_UBN"
 
         record = {
             "security_code": code,
