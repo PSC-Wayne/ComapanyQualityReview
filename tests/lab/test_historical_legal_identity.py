@@ -4,8 +4,11 @@ from datetime import date
 
 import pandas as pd
 import pytest
+import requests
 
 from company_quality.lab.historical_legal_identity import (
+    _live_document_filing,
+    _live_filing,
     resolve_historical_legal_identities,
 )
 
@@ -69,6 +72,7 @@ def test_resolves_current_and_historical_domestic_and_separates_foreign() -> Non
         "security_code_count": 4,
         "resolved_ubn_count": 2,
         "foreign_issuer_count": 1,
+        "source_unavailable_count": 0,
         "domestic_identity_gap_count": 1,
         "status_counts": {
             "CURRENT_OFFICIAL_UBN": 1,
@@ -99,3 +103,219 @@ def test_refuses_universe_touching_final_oos_before_fetch() -> None:
             fetch_filing=forbidden,
             fetch_registry=forbidden,
         )
+
+
+def test_live_filing_reads_official_financial_report_pdf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        def __init__(self, status: int, *, text: str = "", content: bytes = b"") -> None:
+            self.status_code = status
+            self.text = text
+            self.content = content
+
+    class Session:
+        def __init__(self) -> None:
+            self.post_calls = 0
+
+        def get(self, _url: str, **kwargs: object) -> Response:
+            if "params" in kwargs:
+                return Response(
+                    200,
+                    text=r'readfile2(\"A\",\"1724\",\"202004_1724_AI1.pdf\")',
+                )
+            return Response(200, content=b"%PDF-fake")
+
+        def post(self, _url: str, **_kwargs: object) -> Response:
+            self.post_calls += 1
+            if self.post_calls == 1:
+                raise requests.ConnectionError("transient")
+            return Response(200, text="<a href='/pdf/report.pdf'>report</a>")
+
+    class Page:
+        def extract_text(self) -> str:
+            return "台硝股份有限公司及子公司\n民國109年度\n(股票代碼1724)"
+
+    class Reader:
+        pages = [Page()]
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.Session",
+        Session,
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.PdfReader",
+        lambda _stream: Reader(),
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.time.sleep",
+        lambda _seconds: None,
+    )
+
+    assert _live_document_filing("1724", (2020,)) == (
+        "台硝股份有限公司",
+        "https://doc.twse.com.tw/server-java/t57sb01?"
+        "step=1&colorchg=1&seamon=&mtype=A&co_id=1724&year=109#"
+        "202004_1724_AI1.pdf",
+    )
+
+
+def test_live_filing_fails_on_document_index_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 503
+        text = ""
+
+    class Session:
+        def get(self, _url: str, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.Session",
+        Session,
+    )
+
+    with pytest.raises(RuntimeError, match="document index failed: HTTP 503"):
+        _live_document_filing("1724", (2020,))
+
+
+def test_live_filing_keeps_scanned_pdf_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+        text = r'readfile2(\"A\",\"1566\",\"201804_1566_AI1.pdf\")'
+        content = b"%PDF-fake"
+
+    class Session:
+        def get(self, _url: str, **_kwargs: object) -> Response:
+            return Response()
+
+        def post(self, _url: str, **_kwargs: object) -> Response:
+            response = Response()
+            response.text = "<a href='/pdf/report.pdf'>report</a>"
+            return response
+
+    class Page:
+        def extract_text(self) -> str:
+            return ""
+
+    class Reader:
+        pages = [Page()]
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.Session", Session
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.PdfReader",
+        lambda _stream: Reader(),
+    )
+
+    assert _live_document_filing("1566", (2018,)) is None
+
+
+def test_live_filing_uses_document_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def mops(_code: str, _years: tuple[int, ...]) -> None:
+        calls.append("mopsov")
+        return None
+
+    def document(_code: str, _years: tuple[int, ...]) -> tuple[str, str]:
+        calls.append("document")
+        return "台硝股份有限公司", "https://doc.twse.com.tw/report"
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity._live_mopsov_filing", mops
+    )
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity._live_document_filing",
+        document,
+    )
+
+    assert _live_filing("1724", (2020,)) == (
+        "台硝股份有限公司",
+        "https://doc.twse.com.tw/report",
+    )
+    assert calls == ["mopsov", "document"]
+
+
+def test_source_failure_is_separate_from_confirmed_identity_gap() -> None:
+    universe = _universe().query("security_code == '1333'")
+
+    def unavailable(_code: str, _years: tuple[int, ...]) -> None:
+        raise requests.ConnectionError("official source disconnected")
+
+    frame, report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=unavailable,
+        fetch_registry=lambda _code, _name: None,
+    )
+
+    assert frame.loc[0, "identity_status"] == "SOURCE_UNAVAILABLE"
+    assert frame.loc[0, "source_error"] == (
+        "ConnectionError: official source disconnected"
+    )
+    assert report["source_unavailable_count"] == 1
+    assert report["domestic_identity_gap_count"] == 0
+    assert report["status"] == "BLOCKED_SOURCE_UNAVAILABLE"
+
+
+def test_resume_reuses_completed_rows_and_retries_source_unavailable() -> None:
+    universe = _universe().query("security_code in ['1333', '2358']")
+    resumed = pd.DataFrame([
+        {
+            "security_code": "1333",
+            "markets": '["TPEx"]',
+            "observed_names": '["恩得利"]',
+            "last_decision_date": "2019-06-30",
+            "official_name": None,
+            "unified_business_number": None,
+            "identity_status": "MISSING_PRE_OOS_FILING_IDENTITY",
+            "filing_source_ref": None,
+            "identity_source_ref": None,
+            "source_error": None,
+        },
+        {
+            "security_code": "2358",
+            "markets": '["TWSE"]',
+            "observed_names": '["廷鑫"]',
+            "last_decision_date": "2024-06-30",
+            "official_name": None,
+            "unified_business_number": None,
+            "identity_status": "SOURCE_UNAVAILABLE",
+            "filing_source_ref": None,
+            "identity_source_ref": None,
+            "source_error": "ConnectionError: old failure",
+        },
+    ])
+    filing_calls: list[str] = []
+    checkpointed: list[str] = []
+
+    def filing(code: str, _years: tuple[int, ...]) -> None:
+        filing_calls.append(code)
+        return None
+
+    frame, _report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=filing,
+        fetch_registry=lambda _code, _name: None,
+        resume_records=resumed,
+        record_callback=lambda row: checkpointed.append(str(row["security_code"])),
+    )
+
+    assert filing_calls == ["2358"]
+    assert checkpointed == ["2358"]
+    assert frame.set_index("security_code").loc["1333", "identity_status"] == (
+        "MISSING_PRE_OOS_FILING_IDENTITY"
+    )
+    assert frame.set_index("security_code").loc["2358", "identity_status"] == (
+        "MISSING_PRE_OOS_FILING_IDENTITY"
+    )
