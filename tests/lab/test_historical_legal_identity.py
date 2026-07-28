@@ -10,6 +10,7 @@ from company_quality.lab.historical_legal_identity import (
     _live_document_filing,
     _live_filing,
     _live_mopsov_filing,
+    _live_pre_oos_event_name,
     _live_trading_registry,
     resolve_historical_legal_identities,
 )
@@ -374,6 +375,89 @@ def test_trading_name_registry_rejects_two_distinct_ubns(
     )
 
     assert _live_trading_registry("5491", "連展科技") is None
+
+
+def test_resolves_pre_oos_rename_event_to_unique_current_ubn() -> None:
+    universe = pd.DataFrame([{
+        "decision_date": "2023-06-30",
+        "market": "TPEx",
+        "security_code": "4712",
+        "company_name": "南璋",
+        "source_ref": "https://www.tpex.org.tw/www/zh-tw/afterTrading/dailyQuotes",
+    }])
+    registry_calls: list[str] = []
+
+    def registry(_code: str, name: str) -> dict[str, object] | None:
+        registry_calls.append(name)
+        if name != "福格創新股份有限公司":
+            return None
+        return {
+            "Business_Accounting_NO": "43696296",
+            "Company_Name": name,
+            "_identity_link_source": "https://data.gcis.nat.gov.tw/4712",
+        }
+
+    frame, report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=lambda _code, _years: (
+            "南璋股份有限公司", "https://mopsov.twse.com.tw/4712"
+        ),
+        fetch_registry=registry,
+        fetch_pre_oos_event_name=lambda *_args: (
+            "福格創新股份有限公司",
+            "南璋股份有限公司",
+            "https://mops.twse.com.tw/mops/api/t05st01#4712-112",
+        ),
+    )
+
+    row = frame.iloc[0]
+    assert registry_calls == ["南璋股份有限公司", "福格創新股份有限公司"]
+    assert row["official_name"] == "南璋股份有限公司"
+    assert row["unified_business_number"] == "43696296"
+    assert row["identity_status"] == "PRE_OOS_EVENT_GCIS_UBN"
+    assert row["filing_source_ref"].endswith("#4712-112")
+    assert row["identity_source_ref"] == "https://data.gcis.nat.gov.tw/4712"
+    assert report["resolved_ubn_count"] == 1
+
+
+def test_pre_oos_event_extracts_exact_official_trading_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"result": {"data": [[
+                "6806", "森崴能源", "113/03/05", "14:48:06",
+                "公告森崴能源股份有限公司國內第一次有擔保轉換公司債",
+            ]]}}
+
+    calls: list[dict[str, object]] = []
+
+    def post(*_args: object, **kwargs: object) -> Response:
+        body = kwargs["json"]
+        assert isinstance(body, dict)
+        calls.append(body)
+        return Response()
+
+    monkeypatch.setattr(
+        "company_quality.lab.historical_legal_identity.requests.post", post
+    )
+
+    result = _live_pre_oos_event_name(
+        "6806", ("森崴能源",), "森崴股份有限公司", (2024,)
+    )
+
+    assert result is not None
+    assert result[0] == "森崴能源股份有限公司"
+    assert result[1] == "森崴能源股份有限公司"
+    assert calls == [{
+        "companyId": "6806", "year": "113", "month": "all",
+        "firstDay": "", "lastDay": "",
+    }]
 
 
 def test_source_failure_is_separate_from_confirmed_identity_gap() -> None:
