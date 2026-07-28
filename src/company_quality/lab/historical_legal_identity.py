@@ -36,6 +36,7 @@ FetchPreOOSEventName = Callable[
     [str, tuple[str, ...], str | None, tuple[int, ...]],
     tuple[str, str, str] | None,
 ]
+FetchCurrentIdentityChain = Callable[[str], tuple[str, str, str] | None]
 RecordCallback = Callable[[dict[str, object]], None]
 _REQUIRED_UNIVERSE_COLUMNS = {
     "decision_date", "market", "security_code", "company_name",
@@ -346,6 +347,44 @@ def _live_pre_oos_event_name(
     return None
 
 
+def _live_current_identity_chain(code: str) -> tuple[str, str, str] | None:
+    endpoint = "https://mops.twse.com.tw/mops/api/t05st03"
+    response = requests.post(
+        endpoint,
+        json={"companyId": code},
+        headers={
+            "User-Agent": "CompanyQualityResearch/0.1",
+            "Content-Type": "application/json",
+        },
+        timeout=60,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"official MOPS company profile request failed: HTTP {response.status_code}"
+        )
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("official MOPS company profile payload drifted")
+    result = payload.get("result")
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise ValueError("official MOPS company profile result drifted")
+
+    def value(key: str) -> str:
+        field = result.get(key)
+        if isinstance(field, dict):
+            field = field.get("value")
+        return str(field or "").strip()
+
+    current_name = value("companyName")
+    before_change_name = value("beforeChangeName")
+    if not current_name or not before_change_name:
+        return None
+    source = endpoint + "#" + urlencode({"companyId": code})
+    return current_name, before_change_name, source
+
+
 def resolve_historical_legal_identities(
     universe: pd.DataFrame,
     *,
@@ -356,6 +395,9 @@ def resolve_historical_legal_identities(
     fetch_registry: FetchRegistry = _live_registry,
     fetch_trading_registry: FetchTradingRegistry = _live_trading_registry,
     fetch_pre_oos_event_name: FetchPreOOSEventName = _live_pre_oos_event_name,
+    fetch_current_identity_chain: FetchCurrentIdentityChain = (
+        _live_current_identity_chain
+    ),
     resume_records: pd.DataFrame | None = None,
     record_callback: RecordCallback | None = None,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -530,6 +572,46 @@ def resolve_historical_legal_identities(
                         or GCIS_COMPANY_REGISTRY_URL
                     )
                     status = "PRE_OOS_EVENT_GCIS_UBN"
+
+        if (
+            not ubn
+            and source_error is None
+            and official_name
+            and status == "GCIS_IDENTITY_UNRESOLVED"
+        ):
+            try:
+                identity_chain = fetch_current_identity_chain(code)
+            except (requests.RequestException, RuntimeError) as exc:
+                identity_chain = None
+                status = "SOURCE_UNAVAILABLE"
+                source_error = f"{type(exc).__name__}: {exc}"
+            if identity_chain is not None and source_error is None:
+                current_name, before_change_name, chain_source = identity_chain
+                if before_change_name == official_name:
+                    try:
+                        current_registry = fetch_registry(code, current_name)
+                    except (requests.RequestException, RuntimeError) as exc:
+                        current_registry = None
+                        status = "SOURCE_UNAVAILABLE"
+                        source_error = f"{type(exc).__name__}: {exc}"
+                    current_ubn = None
+                    registry_name = ""
+                    if current_registry is not None:
+                        current_ubn = _ubn(
+                            current_registry.get("Business_Accounting_NO")
+                        )
+                        registry_name = str(
+                            current_registry.get("Company_Name", "")
+                        ).strip()
+                    if current_ubn and registry_name == current_name:
+                        assert current_registry is not None
+                        ubn = current_ubn
+                        filing_source = chain_source
+                        identity_source = str(
+                            current_registry.get("_identity_link_source", "")
+                            or GCIS_COMPANY_REGISTRY_URL
+                        )
+                        status = "CURRENT_OFFICIAL_IDENTITY_CHAIN_UBN"
 
         record = {
             "security_code": code,

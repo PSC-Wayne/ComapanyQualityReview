@@ -460,6 +460,55 @@ def test_pre_oos_event_extracts_exact_official_trading_name(
     }]
 
 
+def test_resolves_exact_current_identity_name_chain() -> None:
+    universe = pd.DataFrame([{
+        "decision_date": "2021-06-30",
+        "market": "TWSE",
+        "security_code": "2823",
+        "company_name": "中壽",
+        "source_ref": "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX",
+    }])
+    registry_calls: list[str] = []
+
+    def registry(_code: str, name: str) -> dict[str, object] | None:
+        registry_calls.append(name)
+        if name != "凱基人壽保險股份有限公司":
+            return None
+        return {
+            "Business_Accounting_NO": "03434016",
+            "Company_Name": name,
+            "_identity_link_source": "https://data.gcis.nat.gov.tw/2823",
+        }
+
+    frame, report = resolve_historical_legal_identities(
+        universe,
+        twse_current=[],
+        tpex_current=[],
+        final_oos_start=date(2025, 1, 1),
+        fetch_filing=lambda _code, _years: (
+            "中國人壽保險股份有限公司", "https://mopsov.twse.com.tw/2823"
+        ),
+        fetch_registry=registry,
+        fetch_pre_oos_event_name=lambda *_args: None,
+        fetch_current_identity_chain=lambda _code: (
+            "凱基人壽保險股份有限公司",
+            "中國人壽保險股份有限公司",
+            "https://mops.twse.com.tw/mops/api/t05st03#companyId=2823",
+        ),
+    )
+
+    row = frame.iloc[0]
+    assert registry_calls == [
+        "中國人壽保險股份有限公司", "凱基人壽保險股份有限公司",
+    ]
+    assert row["official_name"] == "中國人壽保險股份有限公司"
+    assert row["unified_business_number"] == "03434016"
+    assert row["identity_status"] == "CURRENT_OFFICIAL_IDENTITY_CHAIN_UBN"
+    assert row["filing_source_ref"].endswith("#companyId=2823")
+    assert row["identity_source_ref"] == "https://data.gcis.nat.gov.tw/2823"
+    assert report["resolved_ubn_count"] == 1
+
+
 def test_source_failure_is_separate_from_confirmed_identity_gap() -> None:
     universe = _universe().query("security_code == '1333'")
 
