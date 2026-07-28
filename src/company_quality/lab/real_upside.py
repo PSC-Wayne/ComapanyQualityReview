@@ -15,6 +15,10 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from company_quality.lab.official_benchmarks import (
+    TPEX_TOTAL_RETURN_URL,
+    TWSE_TOTAL_RETURN_URL,
+)
 from company_quality.research_snapshot import UpsideCoreResult
 
 
@@ -73,12 +77,12 @@ def _forward_labels(labels: pd.DataFrame, _adjusted_close: pd.DataFrame) -> pd.D
     if frame.empty:
         raise ValueError("no fully observed official 12-month return labels")
     expected_source = {
-        "TWSE": "MFI94U",
-        "TPEx": "tpex_reward_index",
+        "TWSE": TWSE_TOTAL_RETURN_URL,
+        "TPEx": TPEX_TOTAL_RETURN_URL,
     }
     if any(
         market not in expected_source
-        or expected_source[market] not in str(source)
+        or expected_source[market] != str(source)
         for market, source in zip(
             frame["market"].astype(str),
             frame["official_benchmark_source_ref"],
@@ -111,12 +115,12 @@ def _feature_matrix(features: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     )
     admitted = admitted.loc[admitted["available"] <= decision_end]
     conflicts = admitted.groupby(
-        ["issuer_id", "decision_date", "metric_id"]
+        ["issuer_id", "security_code", "market", "decision_date", "metric_id"]
     )["metric_value"].nunique(dropna=True)
     if (conflicts > 1).any():
         raise ValueError("conflicting PIT feature values")
     pivot = admitted.pivot_table(
-        index=["issuer_id", "decision_date"],
+        index=["issuer_id", "security_code", "market", "decision_date"],
         columns="metric_id",
         values="metric_value",
         aggfunc="first",
@@ -124,7 +128,7 @@ def _feature_matrix(features: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     pivot.columns.name = None
     feature_ids = sorted(
         column for column in pivot.columns
-        if column not in {"issuer_id", "decision_date"}
+        if column not in {"issuer_id", "security_code", "market", "decision_date"}
     )
     if not feature_ids:
         raise ValueError("no admitted upside features")
@@ -225,11 +229,14 @@ def _admit_valuation_features(
         raise ValueError("valuation features require valuation evidence families")
     valuation_matrix, valuation_ids = _feature_matrix(valuation_features)
     base = outcomes.merge(
-        base_matrix, on=["issuer_id", "decision_date"], how="inner", validate="one_to_one"
+        base_matrix,
+        on=["issuer_id", "security_code", "market", "decision_date"],
+        how="inner",
+        validate="one_to_one",
     )
     candidates = base.merge(
         valuation_matrix,
-        on=["issuer_id", "decision_date"],
+        on=["issuer_id", "security_code", "market", "decision_date"],
         how="left",
         validate="one_to_one",
     )
@@ -268,8 +275,10 @@ def _admit_valuation_features(
             "admitted": admit,
         })
     combined = base_matrix.merge(
-        valuation_matrix.loc[:, ["issuer_id", "decision_date", *admitted]],
-        on=["issuer_id", "decision_date"],
+        valuation_matrix.loc[:, [
+            "issuer_id", "security_code", "market", "decision_date", *admitted
+        ]],
+        on=["issuer_id", "security_code", "market", "decision_date"],
         how="left",
         validate="one_to_one",
     )
@@ -329,7 +338,10 @@ def build_upside_validation(
             outcomes, matrix, feature_ids, valuation_features
         )
     data = outcomes.merge(
-        matrix, on=["issuer_id", "decision_date"], how="inner", validate="one_to_one"
+        matrix,
+        on=["issuer_id", "security_code", "market", "decision_date"],
+        how="inner",
+        validate="one_to_one",
     )
     data["decision"] = pd.to_datetime(data["decision_date"])
     predictions: list[pd.DataFrame] = []

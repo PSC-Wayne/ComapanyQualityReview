@@ -7,6 +7,10 @@ from pathlib import Path
 import jsonschema
 import pandas as pd
 
+from company_quality.lab.official_benchmarks import (
+    TPEX_TOTAL_RETURN_URL,
+    TWSE_TOTAL_RETURN_URL,
+)
 from company_quality.lab.pre_oos_readiness import assess_pre_oos_readiness
 
 
@@ -16,13 +20,13 @@ ROOT = Path(__file__).parents[2]
 def _labels() -> pd.DataFrame:
     rows = []
     refs = {
-        "TWSE": "https://openapi.twse.com.tw/v1/indicesReport/MFI94U",
-        "TPEx": "https://www.tpex.org.tw/openapi/v1/tpex_reward_index",
+        "TWSE": TWSE_TOTAL_RETURN_URL,
+        "TPEx": TPEX_TOTAL_RETURN_URL,
     }
     for year in range(2017, 2021):
         for market, code in (("TWSE", "2330"), ("TPEx", "6488")):
             rows.append({
-                "issuer_id": f"issuer-{market}",
+                "issuer_id": "issuer-shared-across-securities",
                 "security_code": code,
                 "market": market,
                 "decision_date": f"{year}-06-30",

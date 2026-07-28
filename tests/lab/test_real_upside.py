@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from jsonschema import Draft202012Validator, FormatChecker
 
+from company_quality.lab.official_benchmarks import TWSE_TOTAL_RETURN_URL
 from company_quality.lab.real_upside import (
     build_upside_validation,
     to_research_upside_core_result,
@@ -25,7 +26,7 @@ def _inputs():
     decisions = ["2020-06-30", "2021-06-30", "2022-06-30", "2023-06-30"]
     labels = pd.DataFrame([
         {
-            "issuer_id": issuer,
+            "issuer_id": "issuer-shared" if rank < 2 else issuer,
             "security_code": code,
             "market": "TWSE",
             "decision_date": decision,
@@ -37,9 +38,7 @@ def _inputs():
             "positive_return": True,
             "outperformed_official_market": 0.01 + rank * 0.015 > 0.08,
             "result_end_date": f"{int(decision[:4]) + 1}{decision[4:]}",
-            "official_benchmark_source_ref": (
-                "https://openapi.twse.com.tw/v1/indicesReport/MFI94U"
-            ),
+            "official_benchmark_source_ref": TWSE_TOTAL_RETURN_URL,
             "generation_id": "generation-upside-test",
         }
         for decision in decisions
@@ -47,7 +46,9 @@ def _inputs():
     ])
     features = pd.DataFrame([
         {
-            "issuer_id": issuer,
+            "issuer_id": "issuer-shared" if index < 2 else issuer,
+            "security_code": code,
+            "market": "TWSE",
             "decision_date": decision,
             "metric_id": metric,
             "metric_value": float(index % 2) if metric == "roe_after_tax" else float(index),
@@ -55,7 +56,7 @@ def _inputs():
             "evidence_family_id": family,
         }
         for decision in decisions
-        for index, issuer in enumerate(issuers)
+        for index, (issuer, code) in enumerate(zip(issuers, codes, strict=True))
         for metric, family in (
             ("roe_after_tax", "earnings_outcomes"),
             ("management_delivery_ratio", "people:management_delivery"),
@@ -68,7 +69,9 @@ def _inputs():
         adjusted[code] = 100 * np.exp((0.01 + rank * 0.015) * elapsed)
     valuation = pd.DataFrame([
         {
-            "issuer_id": issuer,
+            "issuer_id": "issuer-shared" if rank < 2 else issuer,
+            "security_code": code,
+            "market": "TWSE",
             "decision_date": decision,
             "metric_id": metric,
             "metric_value": rank * 0.015 if metric == "earnings_yield" else 1.0,
@@ -77,7 +80,7 @@ def _inputs():
             "model_scope": "upside_only",
         }
         for decision in decisions
-        for rank, issuer in enumerate(issuers)
+        for rank, (issuer, code) in enumerate(zip(issuers, codes, strict=True))
         for metric in ("earnings_yield", "book_yield")
     ])
     return labels, features, adjusted, valuation
@@ -130,6 +133,8 @@ def test_builds_separate_pit_upside_predictions_without_management_or_market_ove
     ).all()
     assert predictions["positive_return_probability"].between(0, 1).all()
     assert predictions["outperform_probability"].between(0, 1).all()
+    shared = predictions.loc[predictions["issuer_id"].eq("issuer-shared")]
+    assert set(shared["security_code"]) == {"1000", "1001"}
     assert "management_delivery_ratio" not in report["feature_ids"]
     assert report["temporal_windows"]
     assert all(

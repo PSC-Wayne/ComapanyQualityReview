@@ -9,6 +9,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from company_quality.lab.official_benchmarks import (
+    TPEX_TOTAL_RETURN_URL,
+    TWSE_TOTAL_RETURN_URL,
+)
+
 
 _LABEL_REQUIRED = {
     "issuer_id", "security_code", "market", "decision_date", "result_end_date",
@@ -23,8 +28,8 @@ _CANDIDATE_REQUIRED = {
     "data_completeness", "industry_train_observations",
 }
 _OFFICIAL_BENCHMARK_REFS = {
-    "TWSE": "https://openapi.twse.com.tw/v1/indicesReport/MFI94U",
-    "TPEx": "https://www.tpex.org.tw/openapi/v1/tpex_reward_index",
+    "TWSE": TWSE_TOTAL_RETURN_URL,
+    "TPEx": TPEX_TOTAL_RETURN_URL,
 }
 
 
@@ -44,9 +49,13 @@ class PreOOSReadinessReport:
     schema_version: str = "PreOOSReadinessReport.v1"
 
 
-def _keys(frame: pd.DataFrame) -> set[tuple[str, str]]:
+def _keys(frame: pd.DataFrame) -> set[tuple[str, str, str, str]]:
     return set(zip(
-        frame["issuer_id"].astype(str), frame["decision_date"].astype(str), strict=True
+        frame["issuer_id"].astype(str),
+        frame["security_code"].astype(str),
+        frame["market"].astype(str),
+        frame["decision_date"].astype(str),
+        strict=True,
     ))
 
 
@@ -78,7 +87,7 @@ def assess_pre_oos_readiness(
 
     years: list[int] = []
     markets: list[str] = []
-    label_keys: set[tuple[str, str]] = set()
+    label_keys: set[tuple[str, str, str, str]] = set()
     if "decision_date" in labels:
         decisions = pd.to_datetime(labels["decision_date"], errors="coerce")
         if decisions.isna().any():
@@ -134,7 +143,7 @@ def assess_pre_oos_readiness(
             candidate_generations = set(candidate_rows["generation_id"].astype(str))
             if generation is None or candidate_generations != {generation}:
                 blockers.append("candidate_label_generation_mismatch")
-            expected: set[tuple[str, str]] | None = None
+            expected: set[tuple[str, str, str, str]] | None = None
             for candidate_id, rows in candidate_rows.groupby("candidate_id", sort=True):
                 row_keys = _keys(rows)
                 if expected is None:
