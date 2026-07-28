@@ -57,7 +57,7 @@ def _rows(*, final=False):
                     "outperform_probability": probability,
                     "data_completeness": 0.9,
                     "industry_train_observations": 600,
-                    "linear_feature_x": x,
+                    "linear_feature_x": float(offset % 2),
                 })
                 sequence += 1
     return pd.DataFrame(records)
@@ -67,7 +67,7 @@ def test_pre_oos_selects_unique_champion_learns_weights_and_freezes() -> None:
     freeze = freeze_pre_oos_candidate(_rows(), final_oos_start="2023-01-01")
 
     assert freeze.champion_candidate_id == "good"
-    assert freeze.selection_years == [2018, 2019, 2020, 2021]
+    assert freeze.selection_years == [2020, 2021]
     assert set(freeze.star_weights) == {
         "official_outperform_probability", "predicted_p50_return", "confidence"
     }
@@ -144,3 +144,21 @@ def test_exact_tie_and_candidate_observation_mismatch_fail_closed() -> None:
     missing = rows.drop(rows.loc[rows["candidate_id"].eq("bad")].index[0])
     with pytest.raises(ValueError, match="identical pre-OOS"):
         freeze_pre_oos_candidate(missing, final_oos_start="2023-01-01")
+
+
+def test_freeze_requires_same_data_linear_baseline_features() -> None:
+    rows = _rows().drop(columns=["linear_feature_x"])
+
+    with pytest.raises(ValueError, match="same-data linear baseline features"):
+        freeze_pre_oos_candidate(rows, final_oos_start="2023-01-01")
+
+
+def test_freeze_rejects_candidate_that_does_not_beat_fixed_baselines() -> None:
+    rows = _rows()
+    median = float(np.median(rows["actual_total_return"].to_numpy(float)))
+    rows["predicted_p10_return"] = median - 0.2
+    rows["predicted_p50_return"] = median
+    rows["predicted_p90_return"] = median + 0.2
+
+    with pytest.raises(ValueError, match="no-company baseline"):
+        freeze_pre_oos_candidate(rows, final_oos_start="2023-01-01")

@@ -20,7 +20,10 @@
   "properties": {
     "schema_version": {"const": "UpsidePotentialValidationReport.v1"},
     "source_version": {"const": "RealT21LabelIndex.v1+RealPITFeatureMatrix.v1+PITValuationFeatures.v1+pre_adjusted_total_return"},
-    "model_version": {"const": "train_only_ridge_residual_distribution.v1"},
+    "model_version": {
+      "type": "string",
+      "pattern": "^train_only_ridge_residual_distribution(?:\\.penalty_[0-9]+(?:\\.[0-9]+)?)?\\.v1$"
+    },
     "formula_version": {"const": "12m-adjusted-return-official-market-total-return-benchmark.v1"},
     "status": {"const": "NON_PUBLISHABLE_DIAGNOSTIC_NO_APPROVED_GATE"},
     "publishable": {"const": false},
