@@ -87,6 +87,7 @@ def build_real_t21(
     identity: pd.DataFrame,
     materializer_report: dict[str, object],
     official_total_return: Mapping[str, pd.Series],
+    eligible_observations: pd.DataFrame | None = None,
     *,
     decision_dates: tuple[str, ...],
     source_root: Path,
@@ -110,6 +111,20 @@ def build_real_t21(
     identity_by_code = {
         str(row.security_code): row for row in identity.itertuples(index=False)
     }
+    eligible_keys: set[tuple[str, str, str]] | None = None
+    if eligible_observations is not None:
+        required = {"market", "security_code", "decision_date"}
+        missing = sorted(required - set(eligible_observations.columns))
+        if missing:
+            raise ValueError(
+                "eligible observation columns missing: " + ",".join(missing)
+            )
+        eligible_keys = set(zip(
+            eligible_observations["market"].astype(str),
+            eligible_observations["security_code"].astype(str),
+            eligible_observations["decision_date"].astype(str),
+            strict=True,
+        ))
     rows: list[dict[str, object]] = []
     attempted = 0
     cohorts = t20_payload["cohorts"]
@@ -147,10 +162,13 @@ def build_real_t21(
             )
             if not closes:
                 continue
-            listed_on = datetime.fromisoformat(str(member["listed_on"])).date()
+            listed_on = (
+                datetime.fromisoformat(str(member["listed_on"])).date()
+                if eligible_keys is None else None
+            )
             delisted_on = (
                 datetime.fromisoformat(str(member["delisted_on"])).date()
-                if member.get("delisted_on")
+                if eligible_keys is None and member.get("delisted_on")
                 else None
             )
             wealth = PITWealthInput(
@@ -167,8 +185,17 @@ def build_real_t21(
             )
             for decision_date in decision_dates:
                 decision = datetime.fromisoformat(decision_date).date()
-                if decision < listed_on or (delisted_on is not None and decision >= delisted_on):
+                if eligible_keys is not None and (
+                    market, code, decision_date
+                ) not in eligible_keys:
                     continue
+                if eligible_keys is None:
+                    if listed_on is None:
+                        raise ValueError("cohort member listed_on required")
+                    if decision < listed_on or (
+                        delisted_on is not None and decision >= delisted_on
+                    ):
+                        continue
                 if decision < datetime.fromisoformat(closes[0].effective_on).date():
                     continue
                 attempted += 1
@@ -269,6 +296,7 @@ def main() -> int:
     parser.add_argument("--materializer-report", required=True, type=Path)
     parser.add_argument("--twse-total-return-index", required=True, type=Path)
     parser.add_argument("--tpex-total-return-index", required=True, type=Path)
+    parser.add_argument("--trading-universe", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument(
@@ -285,6 +313,10 @@ def main() -> int:
             "TWSE": _series(args.twse_total_return_index),
             "TPEx": _series(args.tpex_total_return_index),
         },
+        (
+            pd.read_parquet(args.trading_universe)
+            if args.trading_universe is not None else None
+        ),
         decision_dates=tuple(args.decision_dates.split(",")),
         source_root=Path(__file__).parents[1],
     )

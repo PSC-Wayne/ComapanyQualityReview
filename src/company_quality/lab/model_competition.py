@@ -143,16 +143,18 @@ def _fit_linear(train: pd.DataFrame, holdout: pd.DataFrame, fields: list[str]) -
 def _fixed_baselines(rows: pd.DataFrame) -> list[dict[str, object]]:
     feature_ids = sorted(column for column in rows if column.startswith("linear_feature_"))
     identity = [
-        "issuer_id", "decision_date", "actual_total_return", "official_benchmark_return",
+        "issuer_id", "security_code", "market", "decision_date",
+        "actual_total_return", "official_benchmark_return",
         *feature_ids,
     ]
-    conflicts = rows.groupby(["issuer_id", "decision_date"])[
+    observation_key = ["issuer_id", "security_code", "market", "decision_date"]
+    conflicts = rows.groupby(observation_key)[
         ["actual_total_return", "official_benchmark_return", *feature_ids]
     ].nunique(dropna=False)
     if bool((conflicts > 1).any(axis=None)):
         raise ValueError("candidate baselines must share identical observations")
     observations = rows.loc[:, identity].drop_duplicates(
-        ["issuer_id", "decision_date"], keep="first"
+        observation_key, keep="first"
     )
     if observations.empty:
         raise ValueError("unique baseline observations required")
@@ -284,10 +286,12 @@ def freeze_pre_oos_candidate(
         )
     scores: list[dict[str, object]] = []
     numeric_scores: list[tuple[float, str]] = []
-    expected_keys: set[tuple[str, str]] | None = None
+    expected_keys: set[tuple[str, str, str, str]] | None = None
     for candidate_id, candidate_rows in data.groupby("candidate_id", sort=True):
         keys = set(zip(
             candidate_rows["issuer_id"].astype(str),
+            candidate_rows["security_code"].astype(str),
+            candidate_rows["market"].astype(str),
             candidate_rows["decision_date"].astype(str),
             strict=True,
         ))

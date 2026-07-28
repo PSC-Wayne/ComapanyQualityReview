@@ -41,7 +41,7 @@ def _rows(*, final=False):
                 ).date().isoformat()
                 records.append({
                     "candidate_id": candidate,
-                    "issuer_id": f"issuer-{sequence:04d}",
+                    "issuer_id": f"issuer-{sequence // 2:04d}",
                     "security_code": f"code-{sequence:04d}",
                     "market": "TWSE",
                     "decision_date": decision,
