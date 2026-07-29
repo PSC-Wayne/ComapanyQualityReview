@@ -13,8 +13,8 @@ import threading
 from typing import Callable, Mapping, Sequence
 import uuid
 
-from company_quality.company_analysis.evidence_bundle import (
-    collect_company_evidence_bundle,
+from company_quality.company_analysis.report_orchestrator import (
+    run_single_company_analysis,
 )
 from company_quality.identity import (
     OfficialIdentitySource,
@@ -59,7 +59,7 @@ class AnalysisJobService:
         database_path: Path,
         output_root: Path,
         identity_sources: IdentitySourceLoader = fetch_official_identity_sources,
-        analyzer: Analyzer = collect_company_evidence_bundle,
+        analyzer: Analyzer = run_single_company_analysis,
     ) -> None:
         self.database_path = database_path
         self.output_root = output_root
@@ -284,7 +284,9 @@ class AnalysisJobService:
                 requested_market=str(job["market"]),
                 as_of=str(job["as_of"]),
                 retrieved_at=str(job["as_of"]),
-                output_root=result_dir / "evidence",
+                output_root=result_dir,
+                generation_id=str(job["generation_id"]),
+                identity_sources=self._sources(),
             )
             result_path = result_dir / "result.json"
             result_path.write_text(
@@ -294,7 +296,7 @@ class AnalysisJobService:
             self._update(
                 job_id,
                 status="succeeded",
-                stage="evidence_bundle_complete",
+                stage="research_report_complete",
                 result_path=str(result_path.resolve()),
             )
         except Exception as exc:

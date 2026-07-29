@@ -71,6 +71,8 @@ def test_name_input_runs_persistent_job_and_returns_result(tmp_path: Path) -> No
     assert finished["security_code"] == "2330"
     assert finished["company_name"] == "台灣積體電路製造股份有限公司"
     assert calls[0]["identifier"] == "2330"
+    assert calls[0]["generation_id"] == created["generation_id"]
+    assert calls[0]["identity_sources"] == SOURCES
     assert calls[0]["retrieved_at"] == calls[0]["as_of"] == AS_OF
     assert service.get_result(str(created["job_id"])) == {
         "status": "available",
@@ -145,6 +147,8 @@ def test_http_dashboard_creates_polls_and_reads_job_result(tmp_path: Path) -> No
             html = response.read().decode()
         assert "輸入上市／上櫃公司股號或名稱" in html
         assert "companyQualityJobId" in html
+        assert "research_report_complete" in html
+        assert "12個月絕對正報酬" in html
 
         with urlopen(base + "/api/companies/search?q=" + quote("台積"), timeout=5) as response:
             matches = json.load(response)
@@ -167,7 +171,7 @@ def test_http_dashboard_creates_polls_and_reads_job_result(tmp_path: Path) -> No
             if job["status"] == "succeeded":
                 break
             time.sleep(0.01)
-        assert job["stage"] == "evidence_bundle_complete"
+        assert job["stage"] == "research_report_complete"
         assert "result_path" not in job
         with urlopen(base + f"/api/analyses/{job_id}/result", timeout=5) as response:
             result = json.load(response)
