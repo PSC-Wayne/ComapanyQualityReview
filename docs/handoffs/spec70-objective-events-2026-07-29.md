@@ -14,7 +14,50 @@ Updated: 2026-07-29 09:04 +08:00
 
 This was Lean research work, not a governance/admission workflow. Final OOS remains unread. No model, stars, or release candidate was frozen or published.
 
-## Owner decision now required
+## 2026-07-29 continuation outcome — CMoney industry approximation
+
+Wayne authorized a temporary same-decision-year CMoney exchange-industry approximation until qualified TEJ effective-dated history becomes available. The approximation is explicitly not exact PIT.
+
+Identity-bound exclusion:
+
+- the 18 affected `issuer_id` values were excluded as whole companies, across every security, market, and decision date;
+- excluded: 18 issuers, 24 security-market combinations, 85 pre-OOS observations;
+- retained: 1,781 issuers, 1,788 security-market combinations, 9,957 pre-OOS observations;
+- all retained observations joined to one same-year CMoney classification.
+
+Industry-route sample result:
+
+- 56 market-industry groups were observed;
+- no group reached the pre-registered 500 training-observation requirement using 2017-2020 history;
+- the largest group was TPEx industry 28 with 433 training observations;
+- therefore no formal exact-industry candidate was structurally eligible, regardless of later holdout size.
+
+A single fixed, non-tuned diagnostic added standardized market-industry one-hot features to the anchored event candidate. Common 2021-2022 holdout after the issuer exclusions: 3,436 observations.
+
+| Metric | Exclude-18 incumbent | CMoney-industry one-hot | Industry gate |
+|---|---:|---:|---|
+| MAE | `0.2939066155` | `0.3023548356` | FAIL; required `<= 0.2793760747` |
+| No-company MAE | `0.2940800786` | `0.2940800786` | baseline |
+| Spearman | `0.3295431971` | `0.1190788137` | both PASS (`>= 0.10`) |
+| Direction accuracy | `0.6245634459` | `0.5721769499` | — |
+| Naive direction accuracy | `0.5905122235` | `0.5905122235` | — |
+| Direction improvement | `3.4051 pp` | `-1.8335 pp` | both FAIL (`>= 5 pp`) |
+| Overall outperform AUC | `0.6389173164` | `0.6097166385` | industry FAIL (`>= 0.62`) |
+| TPEx AUC | `0.6669312332` | `0.6275462798` | industry PASS |
+| TWSE AUC | `0.6196281050` | `0.5947248056` | both FAIL (`>= 0.62`) |
+| p10-p90 coverage | `0.8125727590` | `0.7977299185` | both PASS (75%-85%) |
+
+The industry diagnostic was materially worse than the incumbent and failed the unchanged structural, MAE, direction, overall-AUC, and TWSE-AUC gates. Bounded research stopped without tuning. Status remains `research_only`; Final OOS remains unread; no stars were frozen or published.
+
+Research-only local artifacts:
+
+- `/tmp/spec70-post-identity-readiness/cmoney-same-year-industry-approx.parquet`
+- `/tmp/spec70-post-identity-readiness/cmoney-same-year-industry-sample-counts.csv`
+- `/tmp/spec70-post-identity-readiness/pre-oos-candidates-v8-cmoney-industry-approx.parquet`
+- `/tmp/spec70-post-identity-readiness/pre-oos-candidates-v8-cmoney-industry-approx-report.json`
+- `/tmp/spec70-cmoney-industry-approx.py`
+
+## Original owner decision at handoff time
 
 Do not continue model implementation until Wayne selects one contract:
 
