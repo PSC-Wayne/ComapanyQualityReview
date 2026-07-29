@@ -142,6 +142,27 @@ def test_report_keeps_evidence_first_downside_and_upside_cases_independent() -> 
     assert "combined_score" not in {field.name for field in fields(report)}
 
 
+def test_html_citation_uses_line_locator_without_fake_pdf_page() -> None:
+    citation = EvidenceCitation(
+        evidence_id="mops:2330:114Q4:kam:1",
+        source_id="sec:6-k:2026q2:ex99.1",
+        source_tier="official",
+        url="https://www.sec.gov/Archives/edgar/data/1046179/filing.htm",
+        content_sha256="b" * 64,
+        period="2026Q2",
+        available_at="2026-07-16T00:00:00+00:00",
+        page=None,
+        coordinate=None,
+        verbatim_excerpt="Revenue is expected to be between US$44.6 billion and US$45.8 billion.",
+        source_format="html",
+        locator="lines:13-17",
+    )
+    report = _build(citations=(citation,))
+
+    assert report.citations[0].locator == "lines:13-17"
+    assert report.citations[0].page is None
+
+
 def test_report_rejects_evidence_published_after_analysis_as_of() -> None:
     with pytest.raises(CompanyAnalysisContractError, match="after analysis as_of"):
         _build(citations=(_citation(available_at="2026-07-30T09:00:00+08:00"),))

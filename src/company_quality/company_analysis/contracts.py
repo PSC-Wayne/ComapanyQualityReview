@@ -46,9 +46,11 @@ class EvidenceCitation:
     content_sha256: str
     period: str
     available_at: str
-    page: int
-    coordinate: Coordinate
+    page: int | None
+    coordinate: Coordinate | None
     verbatim_excerpt: str
+    source_format: Literal["pdf", "html", "json"] = "pdf"
+    locator: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,13 +174,25 @@ def _validate_citations(
         _text(citation.period, "citation period", 64)
         if _instant(citation.available_at, "citation available_at") > as_of:
             raise CompanyAnalysisContractError("evidence published after analysis as_of")
-        if citation.page < 1:
-            raise CompanyAnalysisContractError("citation page must be positive")
-        x0, y0, x1, y1 = citation.coordinate
-        if any(value < 0 or value > 1 for value in citation.coordinate):
-            raise CompanyAnalysisContractError("citation coordinate must be within 0..1")
-        if x0 >= x1 or y0 >= y1:
-            raise CompanyAnalysisContractError("citation coordinate must have positive area")
+        if citation.source_format == "pdf":
+            if citation.page is None or citation.page <= 0 or citation.coordinate is None:
+                raise CompanyAnalysisContractError("PDF citation requires page and coordinate")
+            x0, y0, x1, y1 = citation.coordinate
+            if any(value < 0 or value > 1 for value in citation.coordinate):
+                raise CompanyAnalysisContractError("citation coordinate must be normalized")
+            if x0 >= x1 or y0 >= y1:
+                raise CompanyAnalysisContractError("citation coordinate must have positive area")
+        elif citation.source_format in {"html", "json"}:
+            if citation.page is not None or citation.coordinate is not None:
+                raise CompanyAnalysisContractError(
+                    "HTML/JSON citation cannot carry PDF coordinates"
+                )
+            if not citation.locator or not citation.locator.strip():
+                raise CompanyAnalysisContractError(
+                    "HTML/JSON citation requires an explicit locator"
+                )
+        else:
+            raise CompanyAnalysisContractError("unsupported citation source format")
         _text(citation.verbatim_excerpt, "verbatim excerpt", 4000)
     return ids
 
