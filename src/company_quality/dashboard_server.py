@@ -50,7 +50,7 @@ def make_server(
     service: AnalysisJobService,
     *,
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int = 8890,
 ) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
@@ -140,7 +140,7 @@ def make_server(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8890)
     parser.add_argument(
         "--data-root",
         type=Path,
