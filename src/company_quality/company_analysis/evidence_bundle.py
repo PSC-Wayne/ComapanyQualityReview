@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from http.client import HTTPException
 from pathlib import Path
 from typing import Literal, Protocol, Sequence
 from zoneinfo import ZoneInfo
@@ -193,6 +194,7 @@ def collect_company_evidence_bundle(
             SourceArtifactError,
             ArtifactConflictError,
             OSError,
+            HTTPException,
             RuntimeError,
             ValueError,
         ) as exc:
@@ -238,6 +240,7 @@ def collect_company_evidence_bundle(
             AuditSourceError,
             AuditArtifactConflictError,
             OSError,
+            HTTPException,
             RuntimeError,
             ValueError,
         ) as exc:

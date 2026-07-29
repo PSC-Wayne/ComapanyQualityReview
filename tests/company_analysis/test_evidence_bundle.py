@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from http.client import BadStatusLine
 
 import pytest
 
@@ -134,6 +135,23 @@ def test_missing_period_is_partial_with_exact_coverage_reasons(tmp_path) -> None
     assert coverage["annual_audit_pdf"].available == 4
     assert any("112Q2" in reason for reason in coverage["three_statement_html"].missing_reasons)
     assert any("113Q4" in reason for reason in coverage["annual_audit_pdf"].missing_reasons)
+
+
+def test_malformed_http_response_becomes_source_gap_not_bundle_failure(tmp_path) -> None:
+    class BadTransportFinancialCollector(FakeFinancialCollector):
+        def collect_period(self, **kwargs):
+            if kwargs["period"].key == "112Q2":
+                raise BadStatusLine("<!DOCTYPE HTML>")
+            return super().collect_period(**kwargs)
+
+    bundle = _collect(tmp_path, financial=BadTransportFinancialCollector())
+    coverage = {item.family: item for item in bundle.source_coverage}
+    assert bundle.status == "partial"
+    assert coverage["three_statement_html"].available == 57
+    assert any(
+        "112Q2:three_statement_html:BadStatusLine" in reason
+        for reason in coverage["three_statement_html"].missing_reasons
+    )
 
 
 def test_unresolved_identity_fails_before_collectors_are_called(tmp_path) -> None:
