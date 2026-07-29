@@ -14,6 +14,9 @@ import fitz
 from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.contracts import EvidenceCitation, Finding
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
+from company_quality.company_analysis.financial_anomalies import (
+    analyze_financial_anomalies,
+)
 from company_quality.sources.financial import FinancialArtifact
 
 
@@ -324,8 +327,16 @@ def _derived(
 
 def _growth(current: Decimal, prior: Decimal) -> Decimal:
     if prior == 0:
-        raise DetailedAnalysisError("cannot calculate growth from zero")
-    return ((current / prior) - 1) * 100
+        raise DetailedAnalysisError("growth denominator is zero")
+    return (current / prior - 1) * 100
+
+
+def _trend(current: Decimal, prior: Decimal) -> str:
+    if prior < 0 <= current:
+        return "由負轉正"
+    if prior > 0 >= current:
+        return "由正轉負"
+    return "年增" + _pct(_growth(current, prior))
 
 
 def _pct(value: Decimal) -> str:
@@ -413,32 +424,56 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
     prior_current_ratio = current_assets.prior / current_liabilities.prior
     debt_ratio = liabilities.current / (liabilities.current + equity.current) * 100
     prior_debt_ratio = liabilities.prior / (liabilities.prior + equity.prior) * 100
+    revenue_growth = _growth(rev.current, rev.prior)
+    receivables_growth = _growth(receivables.current, receivables.prior)
+    inventory_growth = _growth(inventory.current, inventory.prior)
+    quarter_revenue_growth = _growth(qrev.current, qrev.prior)
+    annual_improving = (
+        revenue_growth > 0
+        and net.current > net.prior
+        and gross.current_percent > gross.prior_percent
+        and operating.current_percent > operating.prior_percent
+    )
+    quarter_improving = (
+        quarter_revenue_growth > 0
+        and qnet.current > qnet.prior
+        and qgross.current_percent > qgross.prior_percent
+        and qoperating.current_percent > qoperating.prior_percent
+    )
+    working_capital_risk = (
+        receivables_growth > 0 and receivables_growth - revenue_growth >= Decimal("20")
+    ) or (
+        inventory_growth > 0 and inventory_growth - revenue_growth >= Decimal("20")
+    )
+    cash_buffer_positive = cfo.current > 0 and free_cash > 0
 
     annual_fact = _fact(
         "upside:annual-earnings-acceleration",
-        "support",
-        f"{annual}全年營收{_bn(rev.current)}、年增{_pct(_growth(rev.current, rev.prior))}；毛利率{_pct(gross.current_percent)}（年增{_pp(gross.current_percent, gross.prior_percent)}）、營業利益率{_pct(operating.current_percent)}（年增{_pp(operating.current_percent, operating.prior_percent)}），淨利年增{_pct(_growth(net.current, net.prior))}。",
+        "support" if annual_improving else "counter",
+        f"{annual}全年營收{_bn(rev.current)}、年增{_pct(revenue_growth)}；毛利率{_pct(gross.current_percent)}（年增{_pp(gross.current_percent, gross.prior_percent)}）、營業利益率{_pct(operating.current_percent)}（年增{_pp(operating.current_percent, operating.prior_percent)}），淨利{_trend(net.current, net.prior)}。",
         (rev.evidence_id, gross.evidence_id, operating.evidence_id, net.evidence_id),
         "0.90",
     )
     quarter_fact = _fact(
         "upside:latest-quarter-acceleration",
-        "support",
-        f"{interim}營收年增{_pct(_growth(qrev.current, qrev.prior))}、淨利年增{_pct(_growth(qnet.current, qnet.prior))}；毛利率由{_pct(qgross.prior_percent)}升至{_pct(qgross.current_percent)}，營業利益率由{_pct(qoperating.prior_percent)}升至{_pct(qoperating.current_percent)}，最新季度仍呈現成長與利潤率同步擴張。",
+        "support" if quarter_improving else "counter",
+        f"{interim}營收年增{_pct(quarter_revenue_growth)}、淨利{_trend(qnet.current, qnet.prior)}；毛利率由{_pct(qgross.prior_percent)}變為{_pct(qgross.current_percent)}，營業利益率由{_pct(qoperating.prior_percent)}變為{_pct(qoperating.current_percent)}。"
+        + ("最新季度呈現營收、淨利與利潤率同步改善。" if quarter_improving else "最新季度未呈現營收、淨利與利潤率同步改善。"),
         (qrev.evidence_id, qgross.evidence_id, qoperating.evidence_id, qnet.evidence_id),
         "0.95",
     )
     cash_fact = _fact(
         "shared:cash-flow-buffer",
-        "counter",
-        f"{annual}營業現金流{_bn(cfo.current)}、年增{_pct(_growth(cfo.current, cfo.prior))}；扣除取得不動產、廠房及設備現金支出後，簡化自由現金流約{_bn(free_cash)}，前期約{_bn(prior_free_cash)}。期末現金{_bn(cash.current)}，流動比率約{current_ratio.quantize(Decimal('0.01'))}倍（前期{prior_current_ratio.quantize(Decimal('0.01'))}倍），負債占資產約{_pct(debt_ratio)}（前期{_pct(prior_debt_ratio)}）。",
+        "support" if cash_buffer_positive else "counter",
+        f"{annual}營業現金流{_bn(cfo.current)}、{_trend(cfo.current, cfo.prior)}；扣除取得不動產、廠房及設備現金支出後，簡化自由現金流約{_bn(free_cash)}，前期約{_bn(prior_free_cash)}。期末現金{_bn(cash.current)}，流動比率約{current_ratio.quantize(Decimal('0.01'))}倍（前期{prior_current_ratio.quantize(Decimal('0.01'))}倍），負債占資產約{_pct(debt_ratio)}（前期{_pct(prior_debt_ratio)}）。",
         (cfo.evidence_id, capex.evidence_id, cash.evidence_id, current_assets.evidence_id, current_liabilities.evidence_id, liabilities.evidence_id, equity.evidence_id),
         "0.85",
     )
     working_capital_fact = _fact(
         "shared:working-capital-discipline",
-        "counter",
-        f"{annual}營收年增{_pct(_growth(rev.current, rev.prior))}，同期應收帳款僅年增{_pct(_growth(receivables.current, receivables.prior))}、存貨年增{_pct(_growth(inventory.current, inventory.prior))}；目前沒有應收或存貨增速超越營收的早期惡化訊號。",
+        "support" if working_capital_risk else "counter",
+        f"{annual}營收年增{_pct(revenue_growth)}，同期應收帳款年增{_pct(receivables_growth)}、存貨年增{_pct(inventory_growth)}；"
+        + ("應收或存貨增速明顯超越營收，形成營運資金與回收品質red flag。" if working_capital_risk else "目前沒有應收或存貨增速明顯超越營收的早期惡化訊號。"),
         (rev.evidence_id, receivables.evidence_id, inventory.evidence_id),
         "0.75",
     )
@@ -498,6 +533,8 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
     for citation in (concentration_receivable, concentration_revenue, commitments):
         if citation is not None:
             citations.append(citation)
+    anomalies = analyze_financial_anomalies(bundle)
+    citations.extend(anomalies.citations)
 
     downside: list[Finding] = []
     downside_cash = _fact(
@@ -509,7 +546,7 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
     )
     downside_working = _fact(
         "downside:working-capital-discipline",
-        "counter",
+        "support" if working_capital_risk else "counter",
         working_capital_fact.statement,
         working_capital_fact.evidence_ids,
         "0.75",
@@ -522,6 +559,7 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
         "0.80",
     )
     downside.extend((downside_capex, downside_cash, downside_working))
+    downside.extend(anomalies.findings)
     if len(kam_citations) >= 2:
         periods = "、".join(citation.period for citation in kam_citations)
         kam_fact = _fact(
@@ -560,14 +598,17 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
         finding.finding_id
         for finding in (downside_capex, kam_fact, concentration_fact, commitments_fact)
         if finding is not None
+    ) + ((downside_working.finding_id,) if working_capital_risk else ()) + tuple(
+        finding.finding_id for finding in anomalies.findings if finding.kind == "fact"
     )
     mechanism = _derived(
         "downside:mechanism-assessment",
         "inference",
         "support",
-        "主要下跌機制不是目前流動性不足，而是高資本支出下的折舊認列／產能利用率執行風險、客戶集中與長期採購承諾。反向證據是現金流、流動性與營運資金目前仍強。",
+        "主要下跌機制包括資產結構異常、高資本支出下的折舊／利用率風險，以及營運資金回收品質。"
+        + ("應收或存貨增速明顯高於營收，不能再視為反向證據。" if working_capital_risk else "反向證據是目前營運資金增速未明顯超越營收。"),
         support_ids,
-        (downside_cash.finding_id, downside_working.finding_id),
+        (downside_cash.finding_id,) + (() if working_capital_risk else (downside_working.finding_id,)),
         None,
         "0.85",
     )
@@ -601,18 +642,40 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
         capex_fact.evidence_ids,
         "0.80",
     )
-    upside = [annual_fact, quarter_fact, cash_fact, working_capital_fact, upside_capex]
+    upside_working = _fact(
+        "upside:working-capital",
+        "counter" if working_capital_risk else "support",
+        working_capital_fact.statement,
+        working_capital_fact.evidence_ids,
+        "0.75",
+    )
+    upside = [annual_fact, quarter_fact, cash_fact, upside_working, upside_capex]
     if upside_customer is not None:
         upside.append(upside_customer)
+    growth_transmitted = annual_improving and quarter_improving and cash_buffer_positive
+    upside_counters = tuple(
+        finding.finding_id
+        for finding in (annual_fact, quarter_fact, upside_working, upside_customer)
+        if finding is not None and finding.direction == "counter"
+    )
+    acceleration_support = tuple(
+        finding.finding_id
+        for finding in (annual_fact, quarter_fact, cash_fact)
+        if finding.direction != "counter"
+    ) or (upside_capex.finding_id,)
     acceleration = _derived(
         "upside:growth-transmission",
         "inference",
-        "support",
-        "年度與最新季度同時呈現營收、毛利率、營業利益率及淨利改善，且營業現金流與簡化自由現金流為正；目前成長已實際傳導至利潤與現金，而不只是收入擴張。",
-        (annual_fact.finding_id, quarter_fact.finding_id, cash_fact.finding_id),
-        (upside_customer.finding_id,) if upside_customer is not None else (),
-        None if upside_customer is not None else "缺少可量化客戶集中反證；保守降低信心。",
-        "0.95",
+        "support" if growth_transmitted else "context",
+        (
+            "年度與最新季度同時呈現營收、利潤率及淨利改善，且營業現金流與簡化自由現金流為正；成長已傳導至利潤與現金。"
+            if growth_transmitted
+            else "年度與最新季度未同時呈現營收、淨利與利潤率改善；即使部分利潤率或現金流改善，也不足以形成已驗證的成長傳導。"
+        ),
+        acceleration_support,
+        upside_counters,
+        None if upside_counters else "缺少可量化反證；保守降低信心。",
+        "0.95" if growth_transmitted else "0.70",
     )
     upside.append(acceleration)
     upside.append(
@@ -620,7 +683,11 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
             "upside:monitoring-judgement",
             "judgement",
             "context",
-            "上漲案例成立的必要條件是最新季度的高成長與利潤率擴張能延續，同時新增產能帶來的現金報酬高於折舊與固定承諾成本。若毛利率回落、自由現金流轉負或客戶集中惡化，應下修上漲案例；本報告尚未取得正式估值倍數，因此不能由基本面強勢直接推導價格便宜。",
+            (
+                "上漲案例成立的必要條件是營收與淨利維持正成長、利潤率改善延續，且現金報酬高於固定承諾成本。"
+                if growth_transmitted
+                else "上漲案例成立前，營收與淨利須先恢復正成長，並證明利潤率改善可持續且應收回收品質正常。"
+            ) + "若自由現金流轉負或客戶集中惡化，應下修案例；尚未取得正式估值倍數，不能直接推導價格便宜。",
             (acceleration.finding_id, upside_capex.finding_id),
             (upside_customer.finding_id,) if upside_customer is not None else (),
             None if upside_customer is not None else "正式估值與產業外部需求證據尚未接入。",
@@ -632,15 +699,25 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
         "KAM與高風險附註只涵蓋本generation成功取得且可讀取的年度PDF；未取得年度維持unknown，不視為無風險。",
         "簡化自由現金流以營業現金流減取得不動產、廠房及設備現金支出計算，未替代完整企業自由現金流口徑。",
         "本階段尚未接入公司指引、官方重大事件、產業需求與正式估值倍數，因此上下行情境維持research_only。",
+        *anomalies.limitations,
     ]
+    downside_headline = (
+        f"{anomalies.headline} "
+        if anomalies.headline is not None
+        else ""
+    ) + "財務緩衝與營運風險需合併判讀；異常不等同舞弊，但未充分說明者維持red flag。"
     return DetailedAnalysis(
         citations=tuple(citations),
         downside_findings=tuple(downside),
         upside_findings=tuple(upside),
-        downside_headline="財務緩衝仍強，但主要風險集中在高資本支出／折舊時點估計、長期承諾與客戶集中；目前是需監控的結構性風險，尚非已發生的流動性惡化。",
-        upside_headline="年度與最新季度均出現營收、利潤率、淨利及現金流同步改善，成長已傳導至獲利；但價格上漲空間仍需估值與產業需求證據確認。",
+        downside_headline=downside_headline,
+        upside_headline=(
+            "年度與最新季度出現營收、利潤率、淨利及現金流同步改善；但價格上漲空間仍需估值與產業需求證據確認。"
+            if growth_transmitted
+            else "年度與最新季度未呈現營收、淨利與利潤率同步改善；目前只能確認部分利潤率或現金流改善，上漲案例仍待營收、淨利、應收品質與估值補證。"
+        ),
         downside_confidence=Decimal("0.70") if len(kam_citations) >= 2 else Decimal("0.55"),
-        upside_confidence=Decimal("0.70"),
+        upside_confidence=Decimal("0.70") if growth_transmitted else Decimal("0.55"),
         limitations=tuple(limitations),
         available=True,
     )

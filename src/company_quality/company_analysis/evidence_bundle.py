@@ -25,6 +25,7 @@ from company_quality.identity import (
     OfficialIdentitySource,
     resolve_identity,
 )
+from company_quality.filing_store import FilingStore, FilingStoreStats
 from company_quality.sources.financial import (
     ArtifactConflictError,
     MopsFinancialCollector,
@@ -69,6 +70,7 @@ class CompanyEvidenceBundle:
     periods: tuple[PeriodEvidence, ...]
     source_coverage: tuple[SourceCoverage, ...]
     status: Literal["available", "partial", "blocked"]
+    filing_store_stats: FilingStoreStats | None = None
     schema_version: Literal["CompanyEvidenceBundle.v1"] = "CompanyEvidenceBundle.v1"
 
 
@@ -120,6 +122,7 @@ def collect_company_evidence_bundle(
     industry_type: Literal[
         "general", "financial_insurance", "other_regulated"
     ] = "general",
+    filing_store_root: Path | None = None,
 ) -> CompanyEvidenceBundle:
     """Collect 20 quarters without converting source failures into false absence."""
 
@@ -138,8 +141,11 @@ def collect_company_evidence_bundle(
         )
     identity = resolution.identity
     selected_periods = _periods(periods, identity)
-    financial_source = financial_collector or MopsFinancialCollector()
-    audit_source = audit_collector or MopsAuditInventoryCollector()
+    filing_store = FilingStore(filing_store_root) if filing_store_root is not None else None
+    financial_source = financial_collector or MopsFinancialCollector(
+        filing_store=filing_store
+    )
+    audit_source = audit_collector or MopsAuditInventoryCollector(filing_store=filing_store)
 
     collected: list[PeriodEvidence] = []
     statement_missing: list[str] = []
@@ -165,6 +171,7 @@ def collect_company_evidence_bundle(
                 period=period,
                 output_root=output_root / "financial_statements",
                 retrieved_at=retrieved,
+                as_of=decision_time.isoformat(),
             )
             reports = {artifact.report for artifact in candidate.artifacts}
             future = tuple(
@@ -219,6 +226,7 @@ def collect_company_evidence_bundle(
                         industry_type=industry_type,
                         output_root=output_root / "audit_inventory",
                         retrieved_at=retrieved,
+                        as_of=decision_time.isoformat(),
                     )
                     break
                 except (AuditSourceError, OSError, HTTPException):
@@ -312,6 +320,7 @@ def collect_company_evidence_bundle(
         periods=tuple(collected),
         source_coverage=coverage,
         status=status,
+        filing_store_stats=filing_store.stats() if filing_store is not None else None,
     )
 
 

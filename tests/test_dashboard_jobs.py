@@ -150,6 +150,8 @@ def test_http_dashboard_creates_polls_and_reads_job_result(tmp_path: Path) -> No
         assert "research_report_complete" in html
         assert "12個月絕對正報酬" in html
         assert "官方引用證據" in html
+        assert "本機財報庫" in html
+        assert "Local hits" in html
         assert "materiality" in html
 
         with urlopen(base + "/api/companies/search?q=" + quote("台積"), timeout=5) as response:

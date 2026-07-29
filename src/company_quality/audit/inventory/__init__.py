@@ -10,13 +10,15 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
+
+from company_quality.filing_store import FilingStore, StoredFiling
 
 _TAIPEI = ZoneInfo("Asia/Taipei")
 _ANNOUNCEMENT_URL = "https://mops.twse.com.tw/mops/api/t163sb01"
@@ -82,7 +84,7 @@ class AuditFilingInventory:
     auditor_report_at: None
     official_filed_at_source: Literal["official_filing_receipt"]
     opinion_type: OpinionType | None
-    auditor_firm: str
+    auditor_firm: str | None
     auditors: tuple[str, ...]
     corrected: bool
     announcement_url: str
@@ -105,6 +107,27 @@ class AuditFilingInventory:
     source_version: Literal["mops-audit-inventory.v1"] = "mops-audit-inventory.v1"
     formula_version: Literal["tw-statute-deadline.v1"] = "tw-statute-deadline.v1"
     model_version: Literal["no-rating-model.v1"] = "no-rating-model.v1"
+
+
+def _store_metadata(inventory: AuditFilingInventory) -> dict[str, object]:
+    metadata = asdict(inventory)
+    metadata.pop("pdf_path", None)
+    metadata["coverage"] = str(inventory.coverage)
+    return metadata
+
+
+def _inventory_from_store(stored: StoredFiling) -> AuditFilingInventory:
+    metadata: dict[str, Any] = dict(stored.metadata)
+    metadata["pdf_path"] = stored.path
+    metadata["pdf_sha256"] = stored.content_sha256
+    metadata["pdf_source_url"] = stored.source_url
+    metadata["coverage"] = Decimal(str(metadata["coverage"]))
+    for name in ("auditors", "evidence_ids", "mandatory_evidence_gaps"):
+        metadata[name] = tuple(metadata.get(name, ()))
+    allowed = {field.name for field in fields(AuditFilingInventory)}
+    return AuditFilingInventory(
+        **{key: value for key, value in metadata.items() if key in allowed}
+    )
 
 
 class Transport(Protocol):
@@ -289,13 +312,13 @@ def _opinion(values: list[str]) -> OpinionType:
     raise AuditSourceError("auditor opinion/conclusion is unavailable")
 
 
-def _auditors(narrative: str) -> tuple[str, tuple[str, ...]]:
+def _auditors(narrative: str) -> tuple[str | None, tuple[str, ...]]:
     match = re.search(
         r"業經([^，。]+?會計師事務所)([\u4e00-\u9fff]{2,4})及([\u4e00-\u9fff]{2,4})會計師(?:核閱|查核(?:簽證)?)竣事",
         narrative,
     )
     if match is None:
-        raise AuditSourceError("auditor firm or signing auditors are unavailable")
+        return None, ()
     return match.group(1), (match.group(2), match.group(3))
 
 
@@ -323,8 +346,13 @@ def _write_verified(destination: Path, raw: bytes) -> None:
 
 
 class MopsAuditInventoryCollector:
-    def __init__(self, transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        transport: Transport | None = None,
+        filing_store: FilingStore | None = None,
+    ) -> None:
         self.transport = transport or HttpTransport()
+        self.filing_store = filing_store
 
     def collect_period(
         self,
@@ -337,6 +365,7 @@ class MopsAuditInventoryCollector:
         industry_type: IndustryType,
         output_root: Path,
         retrieved_at: str,
+        as_of: str | None = None,
         non_business_days: set[date] | frozenset[date] = frozenset(),
         approved_extension_days: int = 0,
         extension_rule_id: str | None = None,
@@ -344,6 +373,19 @@ class MopsAuditInventoryCollector:
     ) -> AuditFilingInventory:
         if quarter not in (1, 2, 3, 4):
             raise ValueError("quarter must be 1..4")
+        fiscal_start, fiscal_end, filing_type, assurance = _period(roc_year, quarter)
+        period_key = f"{roc_year}Q{quarter}"
+        if self.filing_store is not None and as_of is not None:
+            stored = self.filing_store.lookup(
+                market=market,
+                security_code=security_code,
+                issuer_id=issuer_id,
+                period=period_key,
+                filing_type=filing_type,
+                as_of=as_of,
+            )
+            if stored is not None:
+                return _inventory_from_store(stored)
         payload: dict[str, object] = {
             "companyId": security_code,
             "dataType": "2",
@@ -391,7 +433,6 @@ class MopsAuditInventoryCollector:
             if candidate.startswith(b"%PDF") and len(candidate) == receipt.size:
                 pdf_raw = candidate
 
-        fiscal_start, fiscal_end, filing_type, assurance = _period(roc_year, quarter)
         deadline = compute_deadline(
             fiscal_end,
             filing_type,
@@ -400,7 +441,6 @@ class MopsAuditInventoryCollector:
             extension_rule_id=extension_rule_id,
             holiday_calendar_version=holiday_calendar_version,
         )
-        period_key = f"{roc_year}Q{quarter}"
         announcement_hash = hashlib.sha256(announcement_raw).hexdigest()
         receipt_hash = hashlib.sha256(receipt_raw).hexdigest()
         pdf_hash = hashlib.sha256(pdf_raw).hexdigest() if pdf_raw is not None else None
@@ -418,7 +458,7 @@ class MopsAuditInventoryCollector:
             for item in result.get("declarationOfFinancialReports", [])
             if isinstance(item, dict)
         )
-        return AuditFilingInventory(
+        inventory = AuditFilingInventory(
             security_code=security_code,
             issuer_id=issuer_id,
             market=market,
@@ -460,6 +500,30 @@ class MopsAuditInventoryCollector:
                 f"receipt:{receipt_hash}",
                 f"pdf:{pdf_hash}" if pdf_hash else None,
             ) if item is not None),
-            mandatory_evidence_gaps=() if pdf_hash else ("mandatory_audit_evidence_missing",),
+            mandatory_evidence_gaps=(
+                *(("mandatory_audit_evidence_missing",) if not pdf_hash else ()),
+                *(("auditor_metadata_unavailable",) if firm is None else ()),
+            ),
             coverage=Decimal("1") if pdf_hash else Decimal(2) / Decimal(3),
         )
+        if (
+            self.filing_store is not None
+            and pdf_raw is not None
+            and inventory.pdf_source_url is not None
+        ):
+            stored = self.filing_store.put_pdf(
+                body=pdf_raw,
+                market=inventory.market,
+                security_code=inventory.security_code,
+                issuer_id=inventory.issuer_id,
+                period=inventory.period,
+                filing_type=inventory.filing_type,
+                report_scope=inventory.report_scope,
+                official_filed_at=inventory.official_filed_at,
+                source_url=inventory.pdf_source_url,
+                retrieved_at=inventory.retrieved_at,
+                corrected=inventory.corrected,
+                metadata=_store_metadata(inventory),
+            )
+            inventory = replace(inventory, pdf_path=stored.path)
+        return inventory

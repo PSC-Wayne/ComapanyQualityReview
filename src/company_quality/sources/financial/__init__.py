@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Literal, Protocol, Sequence
 from zoneinfo import ZoneInfo
 
+from company_quality.filing_store import FilingStore, StoredStatement
+
 Market = Literal["TWSE", "TPEx"]
 Report = Literal["balance", "income", "cash_flow"]
 _TAIPEI = ZoneInfo("Asia/Taipei")
@@ -184,8 +186,36 @@ def _validate_body(
 
 
 class MopsFinancialCollector:
-    def __init__(self, transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        transport: Transport | None = None,
+        filing_store: FilingStore | None = None,
+    ) -> None:
         self.transport = transport or MopsTransport()
+        self.filing_store = filing_store
+
+    @staticmethod
+    def _stored_artifact(stored: StoredStatement) -> FinancialArtifact:
+        return FinancialArtifact(
+            artifact_id=(
+                f"{stored.market}:{stored.security_code}:{stored.period}:"
+                f"{stored.report}:{stored.content_sha256[:16]}"
+            ),
+            issuer_id=stored.issuer_id,
+            security_code=stored.security_code,
+            market=stored.market,  # type: ignore[arg-type]
+            period=stored.period,
+            report=stored.report,  # type: ignore[arg-type]
+            official_url=stored.official_url,
+            endpoint_scope="selected_company",
+            content_sha256=stored.content_sha256,
+            retrieved_at=stored.retrieved_at,
+            available_at=stored.available_at,
+            availability_basis="first_successful_retrieval",
+            official_filed_at=None,
+            mime_type="text/html",
+            path=stored.path,
+        )
 
     def collect_period(
         self,
@@ -197,6 +227,7 @@ class MopsFinancialCollector:
         period: Period,
         output_root: Path,
         retrieved_at: str | None = None,
+        as_of: str | None = None,
     ) -> PeriodCollection:
         typek = "sii" if market == "TWSE" else "otc"
         retrieved = retrieved_at or _now()
@@ -215,6 +246,36 @@ class MopsFinancialCollector:
             "year": str(period.roc_year),
             "season": f"{period.quarter:02d}",
         }
+
+        if self.filing_store is not None and as_of is not None:
+            artifacts: list[FinancialArtifact] = []
+            for report, landing, title in _REPORTS:
+                stored = self.filing_store.lookup_statement(
+                    market=market,
+                    security_code=security_code,
+                    issuer_id=issuer_id,
+                    period=period.key,
+                    report=report,
+                    as_of=as_of,
+                )
+                if stored is None:
+                    self.transport.preload(landing)
+                    endpoint = "ajax_" + landing
+                    body = self.transport.post(endpoint, payload)
+                    _validate_body(body, company_name, company_short_name, period, title)
+                    stored = self.filing_store.put_statement(
+                        body=body,
+                        market=market,
+                        security_code=security_code,
+                        issuer_id=issuer_id,
+                        period=period.key,
+                        report=report,
+                        official_url=_BASE_URL + endpoint,
+                        retrieved_at=retrieved,
+                        available_at=retrieved,
+                    )
+                artifacts.append(self._stored_artifact(stored))
+            return PeriodCollection("available", tuple(artifacts), 1.0)
 
         downloaded: list[tuple[Report, str, bytes]] = []
         for report, landing, title in _REPORTS:

@@ -287,6 +287,7 @@ class AnalysisJobService:
                 output_root=result_dir,
                 generation_id=str(job["generation_id"]),
                 identity_sources=self._sources(),
+                filing_store_root=self.output_root.parent / "filing-store",
             )
             result_path = result_dir / "result.json"
             result_path.write_text(

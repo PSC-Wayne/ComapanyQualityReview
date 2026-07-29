@@ -153,6 +153,9 @@ def _detailed_bundle(tmp_path: Path) -> CompanyEvidenceBundle:
             ("負債總額", "2,470,000", "31", "2,360,000", "35"),
             ("權益總額", "5,460,000", "69", "4,320,000", "65"),
             ("不動產、廠房及設備", "3,690,000", "47", "3,230,000", "48"),
+            ("其他非流動資產", "310,000", "4", "300,000", "4"),
+            ("非流動資產合計", "4,000,000", "50", "3,530,000", "53"),
+            ("資產總額", "7,930,000", "100", "6,680,000", "100"),
         ),
     )
     annual_cash = _table_artifact(
@@ -175,6 +178,17 @@ def _detailed_bundle(tmp_path: Path) -> CompanyEvidenceBundle:
             ("本期淨利（淨損）", "573,000", "51", "573,000", "51", "361,000", "43", "361,000", "43"),
         ),
     )
+    quarter_balance = _table_artifact(
+        tmp_path,
+        period="115Q1",
+        report="balance",
+        rows=(
+            ("不動產、廠房及設備", "3,800,000", "42", "3,690,000", "47"),
+            ("其他非流動資產", "2,200,000", "24", "310,000", "4"),
+            ("非流動資產合計", "6,000,000", "67", "4,000,000", "50"),
+            ("資產總額", "9,000,000", "100", "7,930,000", "100"),
+        ),
+    )
     return replace(
         base,
         periods=(
@@ -190,7 +204,9 @@ def _detailed_bundle(tmp_path: Path) -> CompanyEvidenceBundle:
             PeriodEvidence(
                 period="115Q1",
                 is_annual=False,
-                financial=PeriodCollection("available", (quarter_income,), 1.0),
+                financial=PeriodCollection(
+                    "available", (quarter_income, quarter_balance), 1.0
+                ),
                 audit=None,
                 missing_reasons=("115Q1:audit_or_review_pdf:missing",),
             ),
@@ -265,6 +281,8 @@ def test_builds_detailed_research_cases_from_financial_evidence(tmp_path: Path) 
     assert "營業現金流" in statements
     assert "最新季度" in statements
     assert "優先監控" in statements
+    assert "blocked_by_missing_evidence" in statements
+    assert "非流動資產" in statements
     assert any(item.kind == "judgement" for item in report.downside.findings)
     assert len(report.citations) >= 18
 

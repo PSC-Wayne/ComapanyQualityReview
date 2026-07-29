@@ -35,6 +35,7 @@ from company_quality.company_analysis.probability_provider import (
 )
 from company_quality.sources.financial import FinancialArtifact
 from company_quality.identity import CompanyIdentity, OfficialIdentitySource
+from company_quality.filing_store import FilingStoreStats
 
 
 class ReportOrchestrationError(RuntimeError):
@@ -50,6 +51,7 @@ class CompanyAnalysisResult:
     research_report: SingleCompanyResearchReport
     probability_calibration: SingleCompanyProbabilityCalibration | None
     calibration_error: str | None
+    filing_store_stats: FilingStoreStats | None = None
     status: Literal["research_only"] = "research_only"
     schema_version: Literal["DashboardCompanyAnalysisResult.v1"] = (
         "DashboardCompanyAnalysisResult.v1"
@@ -303,6 +305,7 @@ def run_single_company_analysis(
     generation_id: str,
     identity_sources: Sequence[OfficialIdentitySource] | None = None,
     calibration: SingleCompanyProbabilityCalibration | None = None,
+    filing_store_root: Path | None = None,
 ) -> CompanyAnalysisResult:
     """Collect current evidence and bind the same generation to a report."""
 
@@ -313,6 +316,7 @@ def run_single_company_analysis(
         retrieved_at=retrieved_at,
         output_root=output_root / "evidence",
         identity_sources=identity_sources,
+        filing_store_root=filing_store_root,
     )
     decision = datetime.fromisoformat(as_of)
     generated_at = datetime.now(decision.tzinfo).isoformat(timespec="seconds")
@@ -347,6 +351,7 @@ def run_single_company_analysis(
         research_report=report,
         probability_calibration=calibration,
         calibration_error=calibration_error,
+        filing_store_stats=bundle.filing_store_stats,
     )
 
 
