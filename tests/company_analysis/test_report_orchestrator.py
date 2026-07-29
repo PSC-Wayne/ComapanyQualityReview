@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
+import json
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,11 @@ from company_quality.company_analysis.material_events import (
 from company_quality.company_analysis.guidance_industry import (
     GuidanceIndustryCollector,
     GuidanceEvidenceError,
+)
+from company_quality.company_analysis.valuation import (
+    MarketValuationCollector,
+    ValuationEvidenceError,
+    build_valuation_scenarios,
 )
 import company_quality.company_analysis.guidance_industry as guidance_module
 from company_quality.company_analysis.report_orchestrator import (
@@ -444,11 +451,17 @@ def test_guidance_collector_is_pit_local_first_and_separates_source_roles(
 ) -> None:
     monkeypatch.setattr(guidance_module, "_pdf_pages", _guidance_pages)
     transport = _GuidanceTransport()
+    current_as_of = (
+        datetime.now(timezone.utc)
+        .astimezone(guidance_module._TAIPEI)
+        .replace(microsecond=0)
+        .isoformat()
+    )
     result = GuidanceIndustryCollector(transport).collect(
         market="TWSE",
         security_code="9933",
         company_name="中鼎工程股份有限公司",
-        as_of=AS_OF,
+        as_of=current_as_of,
         store_root=tmp_path,
     )
     assert result.issuer_presentation == "993320260514M001.pdf"
@@ -466,7 +479,7 @@ def test_guidance_collector_is_pit_local_first_and_separates_source_roles(
         market="TWSE",
         security_code="9933",
         company_name="中鼎工程股份有限公司",
-        as_of=AS_OF,
+        as_of=current_as_of,
         store_root=tmp_path,
     )
     assert no_network.list_calls == 0
@@ -485,3 +498,73 @@ def test_guidance_ir_exact_time_pit_and_identity_fail_closed() -> None:
     )
     with pytest.raises(GuidanceEvidenceError, match="identity mismatch"):
         guidance_module._parse_ir_list(IR_LIST.replace(b"9933", b"9999"), "9933")
+
+
+class _ValuationTransport:
+    def __init__(self, market_date: str = "1150728") -> None:
+        self.market_date = market_date
+        self.calls = 0
+
+    def get(self, *, url: str) -> bytes:
+        self.calls += 1
+        if "BWIBBU" in url:
+            rows = [
+                {"Date": self.market_date, "Code": "9933", "Name": "中鼎", "PEratio": "9.24", "DividendYield": "2.56", "PBratio": "1.69"},
+                {"Date": self.market_date, "Code": "6139", "Name": "亞翔", "PEratio": "19.54", "DividendYield": "3.27", "PBratio": "7.57"},
+                {"Date": self.market_date, "Code": "6196", "Name": "帆宣", "PEratio": "30.22", "DividendYield": "1.36", "PBratio": "5.98"},
+                {"Date": self.market_date, "Code": "6691", "Name": "洋基工程", "PEratio": "23.90", "DividendYield": "3.41", "PBratio": "13.06"},
+            ]
+        else:
+            rows = [{"Date": self.market_date, "Code": "9933", "Name": "中鼎", "ClosingPrice": "39.10"}]
+        return json.dumps(rows, ensure_ascii=False).encode()
+
+
+class _FailValuationTransport:
+    def get(self, *, url: str) -> bytes:
+        raise AssertionError(f"network called: {url}")
+
+
+def test_valuation_snapshot_is_pit_local_first_and_scenarios_are_monotonic(
+    tmp_path: Path,
+) -> None:
+    transport = _ValuationTransport()
+    snapshot = MarketValuationCollector(transport).collect(
+        market="TWSE",
+        security_code="9933",
+        company_name="中鼎工程股份有限公司",
+        as_of=AS_OF,
+        store_root=tmp_path,
+    )
+    assert transport.calls == 2
+    assert snapshot.closing_price == Decimal("39.10")
+    assert snapshot.pe_ratio == Decimal("9.24")
+    assert snapshot.peer_pe_median == Decimal("23.90")
+    cached = MarketValuationCollector(_FailValuationTransport()).collect(
+        market="TWSE",
+        security_code="9933",
+        company_name="中鼎工程股份有限公司",
+        as_of=AS_OF,
+        store_root=tmp_path,
+    )
+    assert (cached.cache_hits, cached.online_fetches) == (2, 0)
+    result = build_valuation_scenarios(
+        market=cached,
+        ttm_revenue_twd_100m=Decimal("1050"),
+        ttm_eps=Decimal("4.23"),
+        backlog_twd_100m=Decimal("4718"),
+    )
+    prices = [scenario.implied_price for scenario in result.scenarios]
+    assert prices == sorted(prices)
+    assert result.scenarios[1].name == "base"
+    assert result.scenarios[1].backlog_conversion == Decimal("0.22")
+
+
+def test_valuation_snapshot_rejects_future_market_date(tmp_path: Path) -> None:
+    with pytest.raises(ValuationEvidenceError, match="future-dated"):
+        MarketValuationCollector(_ValuationTransport("1150730")).collect(
+            market="TWSE",
+            security_code="9933",
+            company_name="中鼎工程股份有限公司",
+            as_of=AS_OF,
+            store_root=tmp_path,
+        )

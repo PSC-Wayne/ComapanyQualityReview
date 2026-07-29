@@ -28,6 +28,11 @@ from company_quality.company_analysis.material_events import (
     MaterialEventCollector,
     MaterialEventError,
 )
+from company_quality.company_analysis.valuation import (
+    MarketValuationCollector,
+    ValuationEvidenceError,
+    build_valuation_scenarios,
+)
 from company_quality.sources.financial import FinancialArtifact
 
 
@@ -126,7 +131,7 @@ def _artifact_rows(artifact: FinancialArtifact) -> dict[str, tuple[str, ...]]:
     parser.feed(body.decode("utf-8", "replace"))
     result: dict[str, tuple[str, ...]] = {}
     for row in parser.rows:
-        if row and row[0] and len(row) >= 3:
+        if row and row[0] and len(row) >= 3 and row[1].strip() not in ("", "-", "—"):
             result.setdefault(row[0], tuple(row))
     return result
 
@@ -419,6 +424,7 @@ def build_detailed_analysis(
     *,
     event_collector: MaterialEventCollector | None = None,
     guidance_collector: GuidanceIndustryCollector | None = None,
+    valuation_collector: MarketValuationCollector | None = None,
 ) -> DetailedAnalysis:
     annual, interim = _latest_periods(bundle)
     if annual is None or interim is None:
@@ -454,6 +460,11 @@ def build_detailed_analysis(
         return DetailedAnalysis((), (), (), "核心財務欄位抽取不足。", "核心財務欄位抽取不足。", Decimal("0.10"), Decimal("0.10"), ("缺少核心財務欄位：" + ", ".join(missing),), False)
     values: dict[str, _Row] = {key: row for key, row in rows.items() if row is not None}
     citations: list[EvidenceCitation] = [_html_citation(values[key]) for key in required]
+    annual_eps = _row(bundle, annual, "income", "基本每股盈餘", "annual-eps")
+    quarter_eps = _row(bundle, interim, "income", "基本每股盈餘", "quarter-eps")
+    for eps_row in (annual_eps, quarter_eps):
+        if eps_row is not None:
+            citations.append(_html_citation(eps_row))
 
     rev = values["annual_revenue"]
     gross = values["annual_gross"]
@@ -685,6 +696,95 @@ def build_detailed_analysis(
         for fact in guidance_facts
     ]
 
+    valuation_findings: list[Finding] = []
+    valuation_limitations: list[str] = []
+    backlog_fact = guidance_by_id.get("issuer:backlog")
+    backlog_match = (
+        re.search(r"增至[^；]*?([0-9][0-9,]*)億元", backlog_fact.statement)
+        if backlog_fact is not None
+        else None
+    )
+    if annual_eps is None or quarter_eps is None:
+        valuation_limitations.append("缺少可解析的年度或最新季度EPS，情境估值維持blocked。")
+    elif backlog_match is None:
+        valuation_limitations.append("缺少已驗證backlog數值，情境估值維持blocked。")
+    elif event_store_root is None:
+        valuation_limitations.append("無法定位中央 filing store，市場估值snapshot維持未接入。")
+    else:
+        try:
+            market_snapshot = (valuation_collector or MarketValuationCollector()).collect(
+                market=bundle.identity.market,
+                security_code=bundle.identity.security_code,
+                company_name=bundle.identity.company_name,
+                as_of=bundle.request.as_of,
+                store_root=event_store_root,
+            )
+            ttm_revenue = (
+                rev.current + qrev.current - qrev.prior
+            ) / Decimal("100000")
+            ttm_eps = annual_eps.current + quarter_eps.current - quarter_eps.prior
+            valuation = build_valuation_scenarios(
+                market=market_snapshot,
+                ttm_revenue_twd_100m=ttm_revenue,
+                ttm_eps=ttm_eps,
+                backlog_twd_100m=Decimal(backlog_match.group(1).replace(",", "")),
+            )
+            citations.extend(
+                (market_snapshot.quote_citation, market_snapshot.valuation_citation)
+            )
+            peer_context = (
+                f"；三家工程／廠務公司當日PE中位數{market_snapshot.peer_pe_median.quantize(Decimal('0.1'))}倍，"
+                "但僅作current context，不作正式PIT同業排名"
+                if market_snapshot.peer_pe_median is not None
+                else "；同業PE樣本不足"
+            )
+            market_finding = _fact(
+                "upside:valuation:market-snapshot",
+                "context",
+                f"TWSE {market_snapshot.market_date.isoformat()}官方收盤{market_snapshot.closing_price}元、"
+                f"PE {market_snapshot.pe_ratio}倍、PB {market_snapshot.pb_ratio}倍、殖利率{market_snapshot.dividend_yield}%"
+                + peer_context
+                + "。",
+                (
+                    market_snapshot.quote_citation.evidence_id,
+                    market_snapshot.valuation_citation.evidence_id,
+                ),
+                "0.95",
+            )
+            valuation_findings.append(market_finding)
+            scenario_names = {"downside": "保守", "base": "基準", "upside": "樂觀"}
+            for scenario in valuation.scenarios:
+                scenario_direction: Literal["support", "counter", "context"] = (
+                    "counter"
+                    if scenario.name == "downside"
+                    else "support" if scenario.name == "upside" else "context"
+                )
+                valuation_findings.append(
+                    _derived(
+                        f"upside:valuation:scenario:{scenario.name}",
+                        "judgement",
+                        scenario_direction,
+                        f"{scenario_names[scenario.name]}情境：在建工程轉換率{_pct(scenario.backlog_conversion * 100)}、"
+                        f"12個月營收{scenario.revenue_twd_100m}億元、獲利率相對TTM倍率{scenario.earnings_margin_factor}、"
+                        f"EPS {scenario.eps}元、PE {scenario.pe_ratio}倍，隱含價{scenario.implied_price}元，"
+                        f"相對官方收盤報酬{scenario.implied_return:+}%；FCF margin假設{_pct(scenario.fcf_margin * 100)}、"
+                        f"FCF約{scenario.fcf_twd_100m}億元。這是透明壓力測試，不是公司指引或正式目標價。",
+                        (
+                            market_finding.finding_id,
+                            annual_fact.finding_id,
+                            "upside:guidance:issuer:backlog",
+                        ),
+                        ("upside:guidance:issuer:revenue-conversion",),
+                        "backlog仍未充分轉為營收且應收增速偏高；倍數與獲利率不具正式校準。",
+                        "0.65",
+                    )
+                )
+            valuation_limitations.extend(valuation.limitations)
+        except ValuationEvidenceError as exc:
+            valuation_limitations.append(
+                f"官方市場估值或情境計算失敗：{type(exc).__name__}:{str(exc)[:200]}"
+            )
+
     downside: list[Finding] = []
     downside_cash = _fact(
         "downside:cash-flow-buffer",
@@ -841,6 +941,7 @@ def build_detailed_analysis(
     if upside_customer is not None:
         upside.append(upside_customer)
     upside.extend(upside_guidance_findings)
+    upside.extend(valuation_findings)
     guidance_support_ids = tuple(
         finding.finding_id
         for finding in upside_guidance_findings
@@ -893,10 +994,10 @@ def build_detailed_analysis(
                 "上漲案例成立的必要條件是營收與淨利維持正成長、利潤率改善延續，且現金報酬高於固定承諾成本。"
                 if growth_transmitted
                 else "上漲案例成立前，營收與淨利須先恢復正成長，並證明利潤率改善可持續且應收回收品質正常。"
-            ) + "並監控新簽約與在建工程是否按期轉為營收、毛利與現金。若自由現金流轉負、應收持續超越營收或客戶集中惡化，應下修案例；尚未取得正式估值倍數，不能直接推導價格便宜。",
+            ) + "並監控新簽約與在建工程是否按期轉為營收、毛利與現金。若自由現金流轉負、應收持續超越營收或客戶集中惡化，應下修案例；三情境僅為壓力測試，未正式校準前不能當目標價。",
             (acceleration.finding_id, upside_capex.finding_id),
             (upside_customer.finding_id,) if upside_customer is not None else (),
-            None if upside_customer is not None else "正式估值尚未接入。",
+            None if upside_customer is not None else "客戶集中反證尚未完整。",
             "0.90",
         )
     )
@@ -905,9 +1006,10 @@ def build_detailed_analysis(
         "KAM與高風險附註只涵蓋本generation成功取得且可讀取的年度PDF；未取得年度維持unknown，不視為無風險。",
         "簡化自由現金流以營業現金流減取得不動產、廠房及設備現金支出計算，未替代完整企業自由現金流口徑。",
         "官方重大事件採公司／年度 bounded MOPS 歷史查詢且僅作display-only context；未與同一會計科目及金額直接勾稽者，不視為異常原因。",
-        "公司指引已接MOPS法說；外部產業需求目前只完成高科技SEC切片，能源、水資源與公共工程仍為coverage gap。正式估值倍數尚未接入，因此上下行情境維持research_only。",
+        "公司指引已接MOPS法說；外部產業需求目前只完成高科技SEC切片，能源、水資源與公共工程仍為coverage gap。估值已接透明三情境，但倍數與假設未通過PIT校準，維持research_only。",
         *anomalies.limitations,
         *guidance_limitations,
+        *valuation_limitations,
     ]
     if event_limitation is not None:
         limitations.append(event_limitation)
