@@ -24,6 +24,7 @@ from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
     collect_company_evidence_bundle,
 )
+from company_quality.company_analysis.detailed_analysis import build_detailed_analysis
 from company_quality.company_analysis.probability_calibration import (
     EmpiricalProbabilityCalibration,
     SingleCompanyProbabilityCalibration,
@@ -190,12 +191,48 @@ def build_report_from_evidence(
         raise ReportOrchestrationError("invalid generated_at") from exc
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
-    citation = _citation(bundle)
     audit_available, audit_required = _coverage(bundle, "audit_or_review_pdf")
     annual_available, annual_required = _coverage(bundle, "annual_audit_pdf")
     positive, outperform = _probabilities(
         bundle, generation_id, calibration, calibration_unavailable_reason
     )
+    detailed = build_detailed_analysis(bundle)
+    if detailed.available:
+        limitations = [
+            *detailed.limitations,
+            f"查核／核閱PDF coverage為{audit_available}/{audit_required}；年度查核PDF為{annual_available}/{annual_required}。",
+        ]
+        if positive.status != "formal":
+            limitations.append("本generation沒有正式12個月報酬機率，Dashboard必須顯示unavailable。")
+        return build_single_company_research_report(
+            request=bundle.request,
+            generation_id=generation_id,
+            generated_at=generated_at,
+            citations=detailed.citations,
+            source_coverage=bundle.source_coverage,
+            downside=DownsideCase(
+                generation_id=generation_id,
+                status="research_only",
+                headline=detailed.downside_headline,
+                findings=detailed.downside_findings,
+                twelve_month_drawdown_probability=_unavailable(
+                    "未來12個月最大跌幅事件尚未正式校準。"
+                ),
+                confidence=detailed.downside_confidence,
+            ),
+            upside=UpsideCase(
+                generation_id=generation_id,
+                status="research_only",
+                headline=detailed.upside_headline,
+                findings=detailed.upside_findings,
+                positive_return_probability=positive,
+                benchmark_outperform_probability=outperform,
+                confidence=detailed.upside_confidence,
+            ),
+            limitations=tuple(limitations),
+        )
+
+    citation = _citation(bundle)
     downside_fact = Finding(
         finding_id=f"downside:{citation.evidence_id}",
         kind="fact",

@@ -149,6 +149,8 @@ def test_http_dashboard_creates_polls_and_reads_job_result(tmp_path: Path) -> No
         assert "companyQualityJobId" in html
         assert "research_report_complete" in html
         assert "12個月絕對正報酬" in html
+        assert "官方引用證據" in html
+        assert "materiality" in html
 
         with urlopen(base + "/api/companies/search?q=" + quote("台積"), timeout=5) as response:
             matches = json.load(response)

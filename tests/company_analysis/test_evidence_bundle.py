@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from http.client import BadStatusLine
 
 import pytest
+import company_quality.company_analysis.evidence_bundle as evidence_bundle_module
 
 from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundleError,
@@ -152,6 +153,30 @@ def test_malformed_http_response_becomes_source_gap_not_bundle_failure(tmp_path)
         "112Q2:three_statement_html:BadStatusLine" in reason
         for reason in coverage["three_statement_html"].missing_reasons
     )
+
+
+def test_retries_one_transient_failure_for_each_annual_audit(
+    tmp_path, monkeypatch
+) -> None:
+    class TransientAnnualAuditCollector(FakeAuditCollector):
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts: dict[str, int] = {}
+
+        def collect_period(self, **kwargs):
+            key = f"{kwargs['roc_year']}Q{kwargs['quarter']}"
+            self.attempts[key] = self.attempts.get(key, 0) + 1
+            if kwargs["quarter"] == 4 and self.attempts[key] == 1:
+                raise BadStatusLine("temporary MOPS response")
+            return super().collect_period(**kwargs)
+
+    monkeypatch.setattr(evidence_bundle_module.time, "sleep", lambda _: None)
+    audit = TransientAnnualAuditCollector()
+    bundle = _collect(tmp_path, audit=audit)
+
+    coverage = {item.family: item for item in bundle.source_coverage}
+    assert coverage["annual_audit_pdf"].available == 5
+    assert all(audit.attempts[f"{year}Q4"] == 2 for year in range(110, 115))
 
 
 def test_unresolved_identity_fails_before_collectors_are_called(tmp_path) -> None:

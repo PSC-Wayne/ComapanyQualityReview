@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from http.client import HTTPException
 from pathlib import Path
+import time
 from typing import Literal, Protocol, Sequence
 from zoneinfo import ZoneInfo
 
@@ -204,17 +205,28 @@ def collect_company_evidence_bundle(
 
         audit: AuditFilingInventory | None = None
         try:
-            candidate_audit = audit_source.collect_period(
-                security_code=identity.security_code,
-                issuer_id=identity.issuer_id,
-                market=identity.market,
-                roc_year=period.roc_year,
-                quarter=period.quarter,
-                issuer_type=issuer_type,
-                industry_type=industry_type,
-                output_root=output_root / "audit_inventory",
-                retrieved_at=retrieved,
-            )
+            attempts = 2 if period.quarter == 4 else 1
+            candidate_audit: AuditFilingInventory | None = None
+            for attempt in range(attempts):
+                try:
+                    candidate_audit = audit_source.collect_period(
+                        security_code=identity.security_code,
+                        issuer_id=identity.issuer_id,
+                        market=identity.market,
+                        roc_year=period.roc_year,
+                        quarter=period.quarter,
+                        issuer_type=issuer_type,
+                        industry_type=industry_type,
+                        output_root=output_root / "audit_inventory",
+                        retrieved_at=retrieved,
+                    )
+                    break
+                except (AuditSourceError, OSError, HTTPException):
+                    if attempt + 1 == attempts:
+                        raise
+                    time.sleep(2)
+            if candidate_audit is None:
+                raise RuntimeError("audit collector returned no result")
             if _instant(candidate_audit.available_at, "audit available_at") > decision_time:
                 reason = _coverage_reason(
                     period.key, "audit_or_review_pdf", "filing_after_as_of"

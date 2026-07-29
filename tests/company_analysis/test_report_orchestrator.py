@@ -91,6 +91,113 @@ def _metric(target: Target, point: str) -> EmpiricalProbabilityCalibration:
     )
 
 
+def _table_artifact(
+    tmp_path: Path,
+    *,
+    period: str,
+    report: str,
+    rows: tuple[tuple[str, ...], ...],
+) -> FinancialArtifact:
+    body = (
+        "<html><body><h2>綜合損益表</h2><table>"
+        + "".join(
+            "<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
+            for row in rows
+        )
+        + "</table></body></html>"
+    ).encode()
+    path = tmp_path / f"{period}-{report}.html"
+    path.write_bytes(body)
+    return FinancialArtifact(
+        artifact_id=f"TWSE:2330:{period}:{report}:fixture",
+        issuer_id="22099131",
+        security_code="2330",
+        market="TWSE",
+        period=period,
+        report=report,  # type: ignore[arg-type]
+        official_url="https://mopsov.twse.com.tw/mops/web/ajax_t164sb04",
+        endpoint_scope="selected_company",
+        content_sha256=sha256(body).hexdigest(),
+        retrieved_at=AS_OF,
+        available_at=AS_OF,
+        availability_basis="first_successful_retrieval",
+        official_filed_at=None,
+        mime_type="text/html",
+        path=path,
+    )
+
+
+def _detailed_bundle(tmp_path: Path) -> CompanyEvidenceBundle:
+    base = _bundle(tmp_path)
+    annual_income = _table_artifact(
+        tmp_path,
+        period="114Q4",
+        report="income",
+        rows=(
+            ("營業收入合計", "3,800,000", "100", "2,900,000", "100"),
+            ("營業毛利（毛損）", "2,280,000", "60", "1,624,000", "56"),
+            ("營業利益（損失）", "1,938,000", "51", "1,305,000", "45"),
+            ("本期淨利（淨損）", "1,650,000", "43", "1,150,000", "40"),
+        ),
+    )
+    annual_balance = _table_artifact(
+        tmp_path,
+        period="114Q4",
+        report="balance",
+        rows=(
+            ("現金及約當現金", "2,700,000", "34", "2,100,000", "31"),
+            ("應收帳款淨額", "279,000", "4", "270,000", "4"),
+            ("存貨", "288,000", "4", "287,000", "4"),
+            ("流動資產合計", "3,800,000", "48", "3,080,000", "46"),
+            ("流動負債合計", "1,450,000", "18", "1,260,000", "19"),
+            ("負債總額", "2,470,000", "31", "2,360,000", "35"),
+            ("權益總額", "5,460,000", "69", "4,320,000", "65"),
+            ("不動產、廠房及設備", "3,690,000", "47", "3,230,000", "48"),
+        ),
+    )
+    annual_cash = _table_artifact(
+        tmp_path,
+        period="114Q4",
+        report="cash_flow",
+        rows=(
+            ("營業活動之淨現金流入（流出）", "2,270,000", "1,820,000"),
+            ("取得不動產、廠房及設備", "-1,270,000", "-956,000"),
+        ),
+    )
+    quarter_income = _table_artifact(
+        tmp_path,
+        period="115Q1",
+        report="income",
+        rows=(
+            ("營業收入合計", "1,130,000", "100", "1,130,000", "100", "839,000", "100", "839,000", "100"),
+            ("營業毛利（毛損）", "751,000", "66", "751,000", "66", "493,000", "59", "493,000", "59"),
+            ("營業利益（損失）", "659,000", "58", "659,000", "58", "407,000", "49", "407,000", "49"),
+            ("本期淨利（淨損）", "573,000", "51", "573,000", "51", "361,000", "43", "361,000", "43"),
+        ),
+    )
+    return replace(
+        base,
+        periods=(
+            PeriodEvidence(
+                period="114Q4",
+                is_annual=True,
+                financial=PeriodCollection(
+                    "available", (annual_income, annual_balance, annual_cash), 1.0
+                ),
+                audit=None,
+                missing_reasons=("114Q4:annual_audit_pdf:missing",),
+            ),
+            PeriodEvidence(
+                period="115Q1",
+                is_annual=False,
+                financial=PeriodCollection("available", (quarter_income,), 1.0),
+                audit=None,
+                missing_reasons=("115Q1:audit_or_review_pdf:missing",),
+            ),
+        ),
+    )
+
+
 def _calibration() -> SingleCompanyProbabilityCalibration:
     return SingleCompanyProbabilityCalibration(
         issuer_id="22099131",
@@ -140,6 +247,26 @@ def test_same_generation_formal_calibration_enters_upside_probabilities(tmp_path
     assert report.upside.positive_return_probability.status == "formal"
     assert report.upside.positive_return_probability.point == Decimal("0.88")
     assert report.upside.benchmark_outperform_probability.point == Decimal("0.77")
+
+
+def test_builds_detailed_research_cases_from_financial_evidence(tmp_path: Path) -> None:
+    report = build_report_from_evidence(
+        bundle=_detailed_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        calibration=_calibration(),
+    )
+
+    assert report.downside.status == "research_only"
+    assert report.upside.status == "research_only"
+    statements = " ".join(
+        item.statement for item in (*report.downside.findings, *report.upside.findings)
+    )
+    assert "營業現金流" in statements
+    assert "最新季度" in statements
+    assert "優先監控" in statements
+    assert any(item.kind == "judgement" for item in report.downside.findings)
+    assert len(report.citations) >= 18
 
 
 def test_rejects_stale_or_wrong_company_calibration(tmp_path: Path) -> None:
