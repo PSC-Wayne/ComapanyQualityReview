@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
 from html.parser import HTMLParser
 from pathlib import Path
+import re
 from typing import Iterable, Literal
 
 import fitz
@@ -16,6 +18,11 @@ from company_quality.company_analysis.contracts import EvidenceCitation, Finding
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 from company_quality.company_analysis.financial_anomalies import (
     analyze_financial_anomalies,
+)
+from company_quality.company_analysis.material_events import (
+    MaterialEvent,
+    MaterialEventCollector,
+    MaterialEventError,
 )
 from company_quality.sources.financial import FinancialArtifact
 
@@ -359,7 +366,55 @@ def _latest_periods(bundle: CompanyEvidenceBundle) -> tuple[str | None, str | No
     return annual, interim
 
 
-def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
+def _quarter_window(period: str) -> tuple[date, date]:
+    match = re.fullmatch(r"(\d{3})Q([1-4])", period)
+    if match is None:
+        raise DetailedAnalysisError("invalid anomaly period")
+    year = int(match.group(1)) + 1911
+    quarter = int(match.group(2))
+    start_month = (quarter - 1) * 3 + 1
+    end_month = start_month + 2
+    end_day = 31 if end_month in (3, 12) else 30
+    return date(year, start_month, 1), date(year, end_month, end_day)
+
+
+def _filing_store_root(audits: Iterable[AuditFilingInventory]) -> Path | None:
+    for audit in audits:
+        if audit.pdf_path is None:
+            continue
+        path = Path(audit.pdf_path)
+        if len(path.parents) >= 3 and path.parents[1].name == "blobs":
+            return path.parents[2]
+    return None
+
+
+def _event_summary(event: MaterialEvent) -> str:
+    sections = [
+        " ".join(part.split())
+        for part in re.split(r"(?=\d+\.)", event.description)
+        if part.strip()
+    ]
+    priorities = (
+        ("營業價值", "資產金額", "交易總金額", "全案發行總金額"),
+        ("資金用途", "本次新增資金貸與之金額", "本次新增背書保證之金額"),
+        ("發生緣由", "因應措施"),
+        ("交易相對人", "併購目的"),
+    )
+    selected: list[str] = []
+    for terms in priorities:
+        for section in sections:
+            if section not in selected and any(term in section for term in terms):
+                selected.append(section)
+                break
+    excerpt = " ".join(selected[:4])[:900] or event.description[:900]
+    return f"{event.announced_at[:10]}：{event.title}；官方說明摘錄：{excerpt}"
+
+
+def build_detailed_analysis(
+    bundle: CompanyEvidenceBundle,
+    *,
+    event_collector: MaterialEventCollector | None = None,
+) -> DetailedAnalysis:
     annual, interim = _latest_periods(bundle)
     if annual is None or interim is None:
         return DetailedAnalysis((), (), (), "財務趨勢證據不足。", "財務趨勢證據不足。", Decimal("0.10"), Decimal("0.10"), ("缺少年度或最新季度財務表。",), False)
@@ -535,6 +590,60 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
             citations.append(citation)
     anomalies = analyze_financial_anomalies(bundle)
     citations.extend(anomalies.citations)
+    event_periods = tuple(
+        sorted(
+            {
+                match.group(1)
+                for finding in anomalies.findings
+                if finding.kind == "fact"
+                for match in [
+                    re.search(r"noncurrent-anomaly:(\d{3}Q[1-4])-", finding.finding_id)
+                ]
+                if match is not None
+            }
+        )
+    )
+    event_evidence: list[MaterialEvent] = []
+    event_limitation: str | None = None
+    event_store_root = _filing_store_root(audits)
+    if event_periods and event_store_root is not None:
+        source = event_collector or MaterialEventCollector()
+        try:
+            for event_period in event_periods:
+                start_date, end_date = _quarter_window(event_period)
+                collected_events = source.collect(
+                    market=bundle.identity.market,
+                    security_code=bundle.identity.security_code,
+                    company_name=bundle.identity.company_name,
+                    roc_year=int(event_period[:3]),
+                    start_date=start_date,
+                    end_date=end_date,
+                    as_of=bundle.request.as_of,
+                    store_root=event_store_root,
+                )
+                event_evidence.extend(collected_events.events)
+        except MaterialEventError as exc:
+            event_limitation = f"官方重大事件查詢失敗：{type(exc).__name__}:{str(exc)[:200]}"
+    elif event_periods:
+        event_limitation = "本generation無法定位中央 filing store，官方重大事件維持未接入。"
+    event_evidence = list(
+        {
+            event.event_id: event for event in event_evidence
+        }.values()
+    )
+    event_findings: list[Finding] = []
+    for event in event_evidence:
+        citation = event.citation()
+        citations.append(citation)
+        event_findings.append(
+            _fact(
+                f"downside:official-event:{event.event_id}",
+                "context",
+                _event_summary(event),
+                (citation.evidence_id,),
+                "0.90",
+            )
+        )
 
     downside: list[Finding] = []
     downside_cash = _fact(
@@ -560,6 +669,27 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
     )
     downside.extend((downside_capex, downside_cash, downside_working))
     downside.extend(anomalies.findings)
+    downside.extend(event_findings)
+    if event_findings:
+        anomaly_fact_ids = tuple(
+            finding.finding_id
+            for finding in anomalies.findings
+            if finding.kind == "fact"
+        )
+        event_link = _derived(
+            "downside:official-event-anomaly-link",
+            "inference",
+            "context",
+            f"異常季度同期間查得{len(event_findings)}件資產移轉、增資、履約爭議或融資支援相關官方重大訊息；"
+            "但目前事件全文沒有直接以『其他非流動資產』科目及同額變動完成會計勾稽，因此只能作背景context，不能把異常升級為explained。",
+            anomaly_fact_ids + tuple(finding.finding_id for finding in event_findings),
+            (),
+            "官方事件未提供同科目、同期間、同金額的直接勾稽。",
+            "0.90",
+        )
+        downside.append(event_link)
+    else:
+        event_link = None
     if len(kam_citations) >= 2:
         periods = "、".join(citation.period for citation in kam_citations)
         kam_fact = _fact(
@@ -698,12 +828,19 @@ def build_detailed_analysis(bundle: CompanyEvidenceBundle) -> DetailedAnalysis:
     limitations = [
         "KAM與高風險附註只涵蓋本generation成功取得且可讀取的年度PDF；未取得年度維持unknown，不視為無風險。",
         "簡化自由現金流以營業現金流減取得不動產、廠房及設備現金支出計算，未替代完整企業自由現金流口徑。",
-        "本階段尚未接入公司指引、官方重大事件、產業需求與正式估值倍數，因此上下行情境維持research_only。",
+        "官方重大事件採公司／年度 bounded MOPS 歷史查詢且僅作display-only context；未與同一會計科目及金額直接勾稽者，不視為異常原因。",
+        "本階段尚未接入公司指引、產業需求與正式估值倍數，因此上下行情境維持research_only。",
         *anomalies.limitations,
     ]
+    if event_limitation is not None:
+        limitations.append(event_limitation)
     downside_headline = (
         f"{anomalies.headline} "
         if anomalies.headline is not None
+        else ""
+    ) + (
+        f"已勾稽同期間{len(event_findings)}件官方重大訊息，但未找到同科目同金額的直接解釋。 "
+        if event_findings
         else ""
     ) + "財務緩衝與營運風險需合併判讀；異常不等同舞弊，但未充分說明者維持red flag。"
     return DetailedAnalysis(

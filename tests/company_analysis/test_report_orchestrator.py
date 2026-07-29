@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -12,6 +13,10 @@ from company_quality.company_analysis.probability_calibration import (
     EmpiricalProbabilityCalibration,
     SingleCompanyProbabilityCalibration,
     Target,
+)
+from company_quality.company_analysis.material_events import (
+    MaterialEventCollector,
+    MaterialEventError,
 )
 from company_quality.company_analysis.report_orchestrator import (
     ReportOrchestrationError,
@@ -302,3 +307,82 @@ def test_rejects_stale_or_wrong_company_calibration(tmp_path: Path) -> None:
             generated_at=GENERATED_AT,
             calibration=replace(_calibration(), security_code="2454"),
         )
+
+
+EVENT_LIST = """<html><body><table>
+<tr><th>公司代號</th><th>公司名稱</th><th>發言日期</th><th>發言時間</th><th>主旨</th><th></th></tr>
+<tr><td>9933</td><td>中鼎</td><td>113/08/02</td><td>09:01:53</td><td>法人說明會</td>
+<td><input value="詳細資料" onclick="document.t05st01_fm.seq_no.value='1';document.t05st01_fm.spoke_time.value='90153';document.t05st01_fm.spoke_date.value='20240802';document.t05st01_fm.co_id.value='9933';document.t05st01_fm.TYPEK.value='sii';"></td></tr>
+<tr><td>9933</td><td>中鼎</td><td>113/12/13</td><td>17:11:15</td>
+<td>中鼎公告董事會決議將南科再生水廠資產分割讓與子公司案</td>
+<td><input value="詳細資料" onclick="document.t05st01_fm.seq_no.value='4';document.t05st01_fm.spoke_time.value='171115';document.t05st01_fm.spoke_date.value='20241213';document.t05st01_fm.co_id.value='9933';document.t05st01_fm.TYPEK.value='sii';"></td></tr>
+</table></body></html>""".encode()
+
+EVENT_DETAIL = """<html><body><table>
+<tr><td>序號</td><td>4</td><td>發言日期</td><td>113/12/13</td><td>發言時間</td><td>17:11:15</td></tr>
+<tr><td>主旨</td><td>中鼎公告董事會決議將南科再生水廠資產分割讓與子公司案</td></tr>
+<tr><td>符合條款</td><td>第 11 款</td><td>事實發生日</td><td>113/12/13</td></tr>
+<tr><td>說明</td><td>1.併購種類:分割 2.交易係集團組織調整 3.營業價值新台幣2,434,594仟元</td></tr>
+</table></body></html>""".encode()
+
+
+class _EventTransport:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.list_calls = 0
+        self.detail_calls = 0
+        self.fail = fail
+
+    def list_year(self, **_: object) -> bytes:
+        self.list_calls += 1
+        if self.fail:
+            raise MaterialEventError("official source unavailable")
+        return EVENT_LIST
+
+    def detail(self, **_: object) -> bytes:
+        self.detail_calls += 1
+        return EVENT_DETAIL
+
+
+def _collect_events(tmp_path: Path, transport: _EventTransport, as_of: str):
+    return MaterialEventCollector(transport).collect(
+        market="TWSE",
+        security_code="9933",
+        company_name="中鼎工程股份有限公司",
+        roc_year=113,
+        start_date=date(2024, 10, 1),
+        end_date=date(2024, 12, 31),
+        as_of=as_of,
+        store_root=tmp_path,
+    )
+
+
+def test_material_event_collector_is_pit_local_first_and_display_only(tmp_path: Path) -> None:
+    transport = _EventTransport()
+    result = _collect_events(tmp_path, transport, "2024-12-14T00:00:00+08:00")
+    assert (transport.list_calls, transport.detail_calls) == (1, 1)
+    assert result.online_fetches == 2
+    assert result.events[0].disposition == "display_only"
+    assert result.events[0].announced_at == "2024-12-13T17:11:15+08:00"
+    assert result.events[0].effective_at == "2024-12-13"
+
+    no_network = _EventTransport(fail=True)
+    cached = _collect_events(tmp_path, no_network, AS_OF)
+    assert (no_network.list_calls, no_network.detail_calls) == (0, 0)
+    assert cached.cache_hits == 2
+
+    before = _collect_events(tmp_path, no_network, "2024-12-13T17:11:14+08:00")
+    assert before.events == ()
+
+
+def test_material_event_source_failure_is_not_reported_as_zero(tmp_path: Path) -> None:
+    with pytest.raises(MaterialEventError, match="official source unavailable"):
+        _collect_events(tmp_path, _EventTransport(fail=True), AS_OF)
+
+
+def test_material_event_identity_mismatch_fails_closed(tmp_path: Path) -> None:
+    class WrongIdentity(_EventTransport):
+        def list_year(self, **_: object) -> bytes:
+            return EVENT_LIST.replace(b"9933", b"9999")
+
+    with pytest.raises(MaterialEventError, match="identity mismatch"):
+        _collect_events(tmp_path, WrongIdentity(), AS_OF)
