@@ -102,11 +102,15 @@ class MopsTransport:
             "User-Agent": "CompanyQualityResearch/0.1",
             "Referer": _BASE_URL,
         }
+        self._preloaded: set[str] = set()
 
     def preload(self, endpoint: str) -> None:
+        if endpoint in self._preloaded:
+            return
         request = urllib.request.Request(_BASE_URL + endpoint, headers=self.headers)
         with self.opener.open(request, timeout=30) as response:
             response.read()
+        self._preloaded.add(endpoint)
 
     def post(self, endpoint: str, payload: dict[str, str]) -> bytes:
         request = urllib.request.Request(

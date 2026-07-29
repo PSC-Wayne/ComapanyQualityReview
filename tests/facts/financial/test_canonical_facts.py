@@ -134,6 +134,50 @@ def test_uses_target_quarter_column_not_ytd_or_comparative_column(tmp_path) -> N
     assert result.fact_coverage == Decimal("0.2")
 
 
+@pytest.mark.parametrize(
+    ("period", "header", "period_start", "period_end"),
+    (
+        ("115Q1", "115年01月01日至115年03月31日", "2026-01-01", "2026-03-31"),
+        ("114Q4", "114年度", "2025-01-01", "2025-12-31"),
+    ),
+)
+def test_income_q1_and_annual_use_official_year_to_date_headers(
+    tmp_path, period, header, period_start, period_end
+) -> None:
+    source = artifact(
+        tmp_path,
+        "income",
+        table(header, [("營業收入合計", "900")]),
+    )
+    object.__setattr__(source, "period", period)
+
+    result = FinancialFactParser().parse((source,))
+
+    revenue = next(f for f in result.facts if f.concept_id == "income.revenue")
+    assert revenue.value == Decimal("900")
+    assert revenue.period_start == period_start
+    assert revenue.period_end == period_end
+
+
+def test_cash_flow_annual_uses_official_annual_header(tmp_path) -> None:
+    source = artifact(
+        tmp_path,
+        "cash_flow",
+        table("114年度", [("營業活動之淨現金流入（流出）", "350")]),
+    )
+    object.__setattr__(source, "period", "114Q4")
+
+    result = FinancialFactParser().parse((source,))
+
+    operating_cash = next(
+        fact for fact in result.facts
+        if fact.concept_id == "cash_flow.operating_cash_flow"
+    )
+    assert operating_cash.value == Decimal("350")
+    assert operating_cash.period_start == "2025-01-01"
+    assert operating_cash.period_end == "2025-12-31"
+
+
 def test_missing_concepts_are_explicit_and_not_filled_with_zero(tmp_path) -> None:
     result = FinancialFactParser().parse(
         (artifact(tmp_path, "balance", table("115年06月30日", [("資產總額", "2,000")])),)

@@ -122,6 +122,7 @@ class HttpTransport:
             urllib.request.HTTPCookieProcessor(jar)
         )
         self.headers = {"User-Agent": "CompanyQualityResearch/0.1"}
+        self._listing_cache: dict[str, bytes] = {}
 
     def post_json(self, url: str, payload: dict[str, object]) -> bytes:
         headers = {**self.headers, "Content-Type": "application/json"}
@@ -132,9 +133,14 @@ class HttpTransport:
             return response.read()
 
     def get(self, url: str) -> bytes:
+        if url in self._listing_cache:
+            return self._listing_cache[url]
         request = urllib.request.Request(url, headers=self.headers)
         with self.opener.open(request, timeout=60) as response:
-            return response.read()
+            raw = response.read()
+        if url.startswith(_DOCUMENT_URL) and "step=1" in url:
+            self._listing_cache[url] = raw
+        return raw
 
     def post_form(self, url: str, payload: dict[str, str]) -> bytes:
         headers = {**self.headers, "Referer": url}
@@ -285,7 +291,7 @@ def _opinion(values: list[str]) -> OpinionType:
 
 def _auditors(narrative: str) -> tuple[str, tuple[str, ...]]:
     match = re.search(
-        r"業經([^，。]+?會計師事務所)([\u4e00-\u9fff]{2,4})及([\u4e00-\u9fff]{2,4})會計師(?:核閱|查核簽證)竣事",
+        r"業經([^，。]+?會計師事務所)([\u4e00-\u9fff]{2,4})及([\u4e00-\u9fff]{2,4})會計師(?:核閱|查核(?:簽證)?)竣事",
         narrative,
     )
     if match is None:
