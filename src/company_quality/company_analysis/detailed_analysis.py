@@ -19,6 +19,10 @@ from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBund
 from company_quality.company_analysis.financial_anomalies import (
     analyze_financial_anomalies,
 )
+from company_quality.company_analysis.guidance_industry import (
+    GuidanceEvidenceError,
+    GuidanceIndustryCollector,
+)
 from company_quality.company_analysis.material_events import (
     MaterialEvent,
     MaterialEventCollector,
@@ -356,7 +360,7 @@ def _pp(current: Decimal, prior: Decimal) -> str:
 
 
 def _bn(value: Decimal) -> str:
-    return f"{(value / Decimal('1000000')).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)}億元"
+    return f"{(value / Decimal('100000')).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)}億元"
 
 
 def _latest_periods(bundle: CompanyEvidenceBundle) -> tuple[str | None, str | None]:
@@ -414,6 +418,7 @@ def build_detailed_analysis(
     bundle: CompanyEvidenceBundle,
     *,
     event_collector: MaterialEventCollector | None = None,
+    guidance_collector: GuidanceIndustryCollector | None = None,
 ) -> DetailedAnalysis:
     annual, interim = _latest_periods(bundle)
     if annual is None or interim is None:
@@ -645,6 +650,41 @@ def build_detailed_analysis(
             )
         )
 
+    guidance_facts = []
+    guidance_limitations: list[str] = []
+    guidance_limitation: str | None = None
+    if event_store_root is not None:
+        source = guidance_collector or GuidanceIndustryCollector()
+        try:
+            guidance = source.collect(
+                market=bundle.identity.market,
+                security_code=bundle.identity.security_code,
+                company_name=bundle.identity.company_name,
+                as_of=bundle.request.as_of,
+                store_root=event_store_root,
+            )
+            guidance_facts = list(guidance.facts)
+            citations.extend(fact.citation for fact in guidance_facts)
+            guidance_limitations.extend(guidance.limitations)
+        except GuidanceEvidenceError as exc:
+            guidance_limitation = (
+                f"公司指引／產業需求查詢失敗：{type(exc).__name__}:{str(exc)[:200]}"
+            )
+    else:
+        guidance_limitation = "本generation無法定位中央 filing store，公司指引與產業需求維持未接入。"
+
+    guidance_by_id = {fact.fact_id: fact for fact in guidance_facts}
+    upside_guidance_findings = [
+        _fact(
+            f"upside:guidance:{fact.fact_id}",
+            fact.direction,
+            fact.statement,
+            (fact.citation.evidence_id,),
+            str(fact.confidence),
+        )
+        for fact in guidance_facts
+    ]
+
     downside: list[Finding] = []
     downside_cash = _fact(
         "downside:cash-flow-buffer",
@@ -668,6 +708,18 @@ def build_detailed_analysis(
         "0.80",
     )
     downside.extend((downside_capex, downside_cash, downside_working))
+    guidance_revenue = guidance_by_id.get("issuer:revenue-conversion")
+    if guidance_revenue is not None:
+        downside_guidance_revenue = _fact(
+            "downside:guidance:backlog-conversion",
+            "support",
+            guidance_revenue.statement,
+            (guidance_revenue.citation.evidence_id,),
+            str(guidance_revenue.confidence),
+        )
+        downside.append(downside_guidance_revenue)
+    else:
+        downside_guidance_revenue = None
     downside.extend(anomalies.findings)
     downside.extend(event_findings)
     if event_findings:
@@ -726,7 +778,13 @@ def build_detailed_analysis(
         commitments_fact = None
     support_ids = tuple(
         finding.finding_id
-        for finding in (downside_capex, kam_fact, concentration_fact, commitments_fact)
+        for finding in (
+            downside_capex,
+            downside_guidance_revenue,
+            kam_fact,
+            concentration_fact,
+            commitments_fact,
+        )
         if finding is not None
     ) + ((downside_working.finding_id,) if working_capital_risk else ()) + tuple(
         finding.finding_id for finding in anomalies.findings if finding.kind == "fact"
@@ -735,7 +793,7 @@ def build_detailed_analysis(
         "downside:mechanism-assessment",
         "inference",
         "support",
-        "主要下跌機制包括資產結構異常、高資本支出下的折舊／利用率風險，以及營運資金回收品質。"
+        "主要下跌機制包括資產結構異常、高資本支出下的折舊／利用率風險、在建工程轉營收的時程／執行風險，以及營運資金回收品質。"
         + ("應收或存貨增速明顯高於營收，不能再視為反向證據。" if working_capital_risk else "反向證據是目前營運資金增速未明顯超越營收。"),
         support_ids,
         (downside_cash.finding_id,) + (() if working_capital_risk else (downside_working.finding_id,)),
@@ -748,7 +806,7 @@ def build_detailed_analysis(
             "downside:monitoring-judgement",
             "judgement",
             "context",
-            "未來應優先監控：季度毛利率與營業利益率是否反轉、資本支出增速是否持續高於營業現金流、存貨／應收增速是否超越營收、KAM是否新增或擴張，以及主要客戶占比是否再上升。任兩項同時惡化，將提高永久性損害與大幅回撤風險。",
+            "未來應優先監控：在建工程轉營收速度、新簽約額與組合、季度毛利率與營業利益率、存貨／應收增速是否超越營收、KAM是否新增或擴張，以及主要客戶占比。backlog維持高檔但營收／現金轉換持續惡化時，將提高執行與回收風險。",
             (mechanism.finding_id,),
             (downside_cash.finding_id,),
             None,
@@ -782,6 +840,18 @@ def build_detailed_analysis(
     upside = [annual_fact, quarter_fact, cash_fact, upside_working, upside_capex]
     if upside_customer is not None:
         upside.append(upside_customer)
+    upside.extend(upside_guidance_findings)
+    guidance_support_ids = tuple(
+        finding.finding_id
+        for finding in upside_guidance_findings
+        if finding.direction == "support"
+    )
+    guidance_counter_ids = tuple(
+        finding.finding_id
+        for finding in upside_guidance_findings
+        if finding.direction == "counter"
+    )
+    issuer_demand_visible = bool(guidance_support_ids)
     growth_transmitted = annual_improving and quarter_improving and cash_buffer_positive
     upside_counters = tuple(
         finding.finding_id
@@ -800,11 +870,17 @@ def build_detailed_analysis(
         (
             "年度與最新季度同時呈現營收、利潤率及淨利改善，且營業現金流與簡化自由現金流為正；成長已傳導至利潤與現金。"
             if growth_transmitted
-            else "年度與最新季度未同時呈現營收、淨利與利潤率改善；即使部分利潤率或現金流改善，也不足以形成已驗證的成長傳導。"
+            else (
+                "新簽約、在建工程與外部高科技需求提供需求面支持，但年度與最新季度尚未同時呈現營收、淨利與利潤率改善；需求尚未充分傳導至財務結果。"
+                if issuer_demand_visible
+                else "年度與最新季度未同時呈現營收、淨利與利潤率改善；即使部分利潤率或現金流改善，也不足以形成已驗證的成長傳導。"
+            )
         ),
-        acceleration_support,
-        upside_counters,
-        None if upside_counters else "缺少可量化反證；保守降低信心。",
+        acceleration_support + guidance_support_ids,
+        upside_counters + guidance_counter_ids,
+        None
+        if upside_counters or guidance_counter_ids
+        else "缺少可量化反證；保守降低信心。",
         "0.95" if growth_transmitted else "0.70",
     )
     upside.append(acceleration)
@@ -817,10 +893,10 @@ def build_detailed_analysis(
                 "上漲案例成立的必要條件是營收與淨利維持正成長、利潤率改善延續，且現金報酬高於固定承諾成本。"
                 if growth_transmitted
                 else "上漲案例成立前，營收與淨利須先恢復正成長，並證明利潤率改善可持續且應收回收品質正常。"
-            ) + "若自由現金流轉負或客戶集中惡化，應下修案例；尚未取得正式估值倍數，不能直接推導價格便宜。",
+            ) + "並監控新簽約與在建工程是否按期轉為營收、毛利與現金。若自由現金流轉負、應收持續超越營收或客戶集中惡化，應下修案例；尚未取得正式估值倍數，不能直接推導價格便宜。",
             (acceleration.finding_id, upside_capex.finding_id),
             (upside_customer.finding_id,) if upside_customer is not None else (),
-            None if upside_customer is not None else "正式估值與產業外部需求證據尚未接入。",
+            None if upside_customer is not None else "正式估值尚未接入。",
             "0.90",
         )
     )
@@ -829,11 +905,14 @@ def build_detailed_analysis(
         "KAM與高風險附註只涵蓋本generation成功取得且可讀取的年度PDF；未取得年度維持unknown，不視為無風險。",
         "簡化自由現金流以營業現金流減取得不動產、廠房及設備現金支出計算，未替代完整企業自由現金流口徑。",
         "官方重大事件採公司／年度 bounded MOPS 歷史查詢且僅作display-only context；未與同一會計科目及金額直接勾稽者，不視為異常原因。",
-        "本階段尚未接入公司指引、產業需求與正式估值倍數，因此上下行情境維持research_only。",
+        "公司指引已接MOPS法說；外部產業需求目前只完成高科技SEC切片，能源、水資源與公共工程仍為coverage gap。正式估值倍數尚未接入，因此上下行情境維持research_only。",
         *anomalies.limitations,
+        *guidance_limitations,
     ]
     if event_limitation is not None:
         limitations.append(event_limitation)
+    if guidance_limitation is not None:
+        limitations.append(guidance_limitation)
     downside_headline = (
         f"{anomalies.headline} "
         if anomalies.headline is not None
@@ -841,6 +920,10 @@ def build_detailed_analysis(
     ) + (
         f"已勾稽同期間{len(event_findings)}件官方重大訊息，但未找到同科目同金額的直接解釋。 "
         if event_findings
+        else ""
+    ) + (
+        "在建工程規模創高但尚未轉為營收成長，執行與回收品質仍需驗證。 "
+        if guidance_revenue is not None
         else ""
     ) + "財務緩衝與營運風險需合併判讀；異常不等同舞弊，但未充分說明者維持red flag。"
     return DetailedAnalysis(
@@ -851,10 +934,18 @@ def build_detailed_analysis(
         upside_headline=(
             "年度與最新季度出現營收、利潤率、淨利及現金流同步改善；但價格上漲空間仍需估值與產業需求證據確認。"
             if growth_transmitted
-            else "年度與最新季度未呈現營收、淨利與利潤率同步改善；目前只能確認部分利潤率或現金流改善，上漲案例仍待營收、淨利、應收品質與估值補證。"
+            else (
+                "新簽約與在建工程創高，且外部高科技資本支出提供需求支持；但營收仍衰退、應收增速偏高，需求尚未充分轉為營收、獲利與現金，上漲案例仍待轉換效率與估值補證。"
+                if issuer_demand_visible
+                else "年度與最新季度未呈現營收、淨利與利潤率同步改善；目前只能確認部分利潤率或現金流改善，上漲案例仍待營收、淨利、應收品質與估值補證。"
+            )
         ),
         downside_confidence=Decimal("0.70") if len(kam_citations) >= 2 else Decimal("0.55"),
-        upside_confidence=Decimal("0.70") if growth_transmitted else Decimal("0.55"),
+        upside_confidence=(
+            Decimal("0.70")
+            if growth_transmitted
+            else Decimal("0.65") if issuer_demand_visible else Decimal("0.55")
+        ),
         limitations=tuple(limitations),
         available=True,
     )

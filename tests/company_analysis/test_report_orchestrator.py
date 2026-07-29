@@ -18,6 +18,11 @@ from company_quality.company_analysis.material_events import (
     MaterialEventCollector,
     MaterialEventError,
 )
+from company_quality.company_analysis.guidance_industry import (
+    GuidanceIndustryCollector,
+    GuidanceEvidenceError,
+)
+import company_quality.company_analysis.guidance_industry as guidance_module
 from company_quality.company_analysis.report_orchestrator import (
     ReportOrchestrationError,
     build_report_from_evidence,
@@ -386,3 +391,97 @@ def test_material_event_identity_mismatch_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(MaterialEventError, match="identity mismatch"):
         _collect_events(tmp_path, WrongIdentity(), AS_OF)
+
+
+IR_LIST = """<html><body><table>
+<tr><td>9933</td><td>中鼎</td><td>115/03/11</td><td>14:30</td><td>線上法說</td><td>2025年營運回顧與展望</td><td>993320260311M001.pdf</td><td>993320260311E001.pdf</td></tr>
+<tr><td>9933</td><td>中鼎</td><td>115/05/14</td><td>14:30</td><td>線上法說</td><td>2026年至今營運回顧與展望</td><td>993320260514M001.pdf</td><td>993320260514E001.pdf</td></tr>
+</table></body></html>""".encode()
+
+SEC_DEMAND = b"<html><body><p>strong demand for our leading-edge process technologies</p></body></html>"
+SEC_CAPEX = b"<html><body><p>Capital expenditures (496.00) (350.76) (297.22)</p></body></html>"
+
+
+class _GuidanceTransport:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.list_calls = 0
+        self.pdf_calls: list[str] = []
+        self.get_calls: list[str] = []
+
+    def ir_list(self, *, roc_year: int, **_: object) -> bytes:
+        self.list_calls += 1
+        if self.fail:
+            raise GuidanceEvidenceError("network list called")
+        return IR_LIST if roc_year == 115 else "<html><body>查無資料</body></html>".encode()
+
+    def ir_pdf(self, *, filename: str) -> bytes:
+        self.pdf_calls.append(filename)
+        if self.fail:
+            raise GuidanceEvidenceError("network PDF called")
+        return b"%PDF-test-fixture"
+
+    def get(self, *, url: str) -> bytes:
+        self.get_calls.append(url)
+        if self.fail:
+            raise GuidanceEvidenceError("network SEC called")
+        return SEC_CAPEX if "presentation" in url else SEC_DEMAND
+
+
+def _guidance_pages(_: bytes) -> tuple[str, ...]:
+    return (
+        "新簽約額及分布 1,025 1,118 1,256 1,813 388 截至2026/05/04 累計簽約金額已達新台幣734.46億 高科技41% 能資源循環28% 水資源及環境20%",
+        "在建工程及分布 3,289 3,469 3,334 4,504 4,718",
+        "合併營收及分布 951 1,035 1,199 918 172",
+        "未來12個月全球潛在商機 9,760億",
+        "高科技及AI商機 (1/2) 半導體 數據中心",
+        "ESG商機 – 燃氣電廠 潛在商機約新台幣4,000億元 國內天然氣電廠市占率達70%",
+    )
+
+
+def test_guidance_collector_is_pit_local_first_and_separates_source_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(guidance_module, "_pdf_pages", _guidance_pages)
+    transport = _GuidanceTransport()
+    result = GuidanceIndustryCollector(transport).collect(
+        market="TWSE",
+        security_code="9933",
+        company_name="中鼎工程股份有限公司",
+        as_of=AS_OF,
+        store_root=tmp_path,
+    )
+    assert result.issuer_presentation == "993320260514M001.pdf"
+    assert len(result.facts) == 8
+    assert transport.pdf_calls == ["993320260514M001.pdf"]
+    assert len(transport.get_calls) == 2
+    assert {fact.citation.source_tier for fact in result.facts} == {
+        "issuer_primary",
+        "official",
+    }
+    assert next(fact for fact in result.facts if fact.fact_id == "issuer:opportunity-pipeline").direction == "context"
+
+    no_network = _GuidanceTransport(fail=True)
+    cached = GuidanceIndustryCollector(no_network).collect(
+        market="TWSE",
+        security_code="9933",
+        company_name="中鼎工程股份有限公司",
+        as_of=AS_OF,
+        store_root=tmp_path,
+    )
+    assert no_network.list_calls == 0
+    assert no_network.pdf_calls == []
+    assert no_network.get_calls == []
+    assert cached.cache_hits == 5
+    assert cached.online_fetches == 0
+
+
+def test_guidance_ir_exact_time_pit_and_identity_fail_closed() -> None:
+    records = guidance_module._parse_ir_list(IR_LIST, "9933")
+    latest = max(records, key=lambda record: record.event_date)
+    assert guidance_module._ir_available_at(latest).isoformat() == "2026-05-14T14:30:00+08:00"
+    assert guidance_module._ir_available_at(latest) > guidance_module._instant(
+        "2026-05-14T14:29:59+08:00", "as_of"
+    )
+    with pytest.raises(GuidanceEvidenceError, match="identity mismatch"):
+        guidance_module._parse_ir_list(IR_LIST.replace(b"9933", b"9999"), "9933")
