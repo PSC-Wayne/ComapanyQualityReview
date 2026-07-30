@@ -1235,6 +1235,12 @@ def _with_hermes_candidates(
                 status="partial",
                 partial_reason="hermes_synthesis_not_admitted",
             )
+        elif financial_deterioration.partial_reason == "hermes_not_configured":
+            financial_deterioration = replace(
+                financial_deterioration,
+                status="available",
+                partial_reason=None,
+            )
     return build_single_company_research_report(
         request=report.request,
         generation_id=report.generation_id,

@@ -970,14 +970,6 @@ def test_hermes_synthesis_can_only_annotate_locked_financial_values(tmp_path: Pa
 def test_empty_hermes_candidates_preserve_deterministic_financial_section(
     tmp_path: Path,
 ) -> None:
-    baseline = cast(
-        Any,
-        build_report_from_evidence(
-            bundle=_financial_trend_bundle(tmp_path),
-            generation_id=GENERATION,
-            generated_at=GENERATED_AT,
-        ),
-    )
     report = cast(
         Any,
         build_report_from_evidence(
@@ -988,11 +980,8 @@ def test_empty_hermes_candidates_preserve_deterministic_financial_section(
         ),
     )
 
-    assert report.financial_deterioration.status == baseline.financial_deterioration.status
-    assert (
-        report.financial_deterioration.partial_reason
-        == baseline.financial_deterioration.partial_reason
-    )
+    assert report.financial_deterioration.status == "available"
+    assert report.financial_deterioration.partial_reason is None
 
 
 @pytest.mark.parametrize(
