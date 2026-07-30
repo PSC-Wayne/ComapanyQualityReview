@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable, Literal, Sequence
 
+from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.contracts import (
     CaseProbability,
     DownsideCase,
@@ -23,6 +24,7 @@ from company_quality.company_analysis.contracts import (
 from company_quality.company_analysis.candidate_admission import (
     HermesApiCandidateAdapter,
     HermesCandidateAdapter,
+    admit_kam_judgement,
     admit_hermes_candidates,
 )
 from company_quality.company_analysis.evidence_bundle import (
@@ -48,11 +50,42 @@ class ReportOrchestrationError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class KamAnnualTimeline:
+    period: str
+    citation: EvidenceCitation
+    kam_present: bool
+    opinion_type: str | None
+    modified_opinion: bool | None
+    going_concern: bool
+    emphasis_matter: bool
+    auditor_change: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class KamJudgement:
+    generation_id: str
+    status: Literal["available", "partial"]
+    coverage: SourceCoverage
+    years: tuple[KamAnnualTimeline, ...]
+    missing_year_reasons: tuple[str, ...]
+    change_summary: str | None
+    risk_mechanism: str | None
+    counterevidence: str | None
+    severity: Literal["none", "low", "medium", "high", "critical"] | None
+    confidence: Decimal | None
+    monitoring: str | None
+    invalidation: str | None
+    rejection_reasons: tuple[str, ...]
+    schema_version: Literal["KamJudgement.v1"] = "KamJudgement.v1"
+
+
+@dataclass(frozen=True, slots=True)
 class CompanyAnalysisResult:
     generation_id: str
     identity: CompanyIdentity
     evidence_status: Literal["available", "partial", "blocked"]
     source_coverage: tuple[SourceCoverage, ...]
+    kam_judgement: KamJudgement
     research_report: SingleCompanyResearchReport
     probability_calibration: SingleCompanyProbabilityCalibration | None
     calibration_error: str | None
@@ -180,6 +213,172 @@ def _probabilities(
 def _coverage(bundle: CompanyEvidenceBundle, family: str) -> tuple[int, int]:
     item = next((row for row in bundle.source_coverage if row.family == family), None)
     return (item.available, item.required) if item is not None else (0, 0)
+
+
+def _pdf_pages(path: Path) -> tuple[str, ...]:
+    from pypdf import PdfReader
+
+    return tuple((page.extract_text() or "") for page in PdfReader(path).pages)
+
+
+def _kam_excerpt(pages: Sequence[str]) -> tuple[int, str] | None:
+    marker = "關鍵查核事項"
+    for page_number, raw in enumerate(pages, start=1):
+        text = " ".join(raw.replace("\xa0", " ").split())
+        index = text.find(marker)
+        if index < 0:
+            continue
+        excerpt = text[index : index + 3900].strip()
+        if len(excerpt) > len(marker) + 8:
+            return page_number, excerpt
+    return None
+
+
+def build_kam_judgement(
+    *,
+    bundle: CompanyEvidenceBundle,
+    generation_id: str,
+    candidate_adapter: HermesCandidateAdapter | None,
+) -> KamJudgement:
+    """Build the latest-three available annual KAM timeline and admit Hermes judgement."""
+
+    decision = datetime.fromisoformat(bundle.request.as_of.replace("Z", "+00:00"))
+    rows: list[tuple[AuditFilingInventory, EvidenceCitation, tuple[str, ...]]] = []
+    missing: list[str] = []
+    annuals = sorted(
+        (item for item in bundle.periods if item.is_annual),
+        key=lambda item: item.period,
+        reverse=True,
+    )
+    for period in annuals:
+        audit = period.audit
+        if audit is None:
+            missing.append(f"{period.period}:annual_audit_pdf:missing")
+            continue
+        if audit.issuer_id != bundle.request.issuer_id:
+            missing.append(f"{period.period}:kam:wrong_issuer")
+            continue
+        available = datetime.fromisoformat(audit.available_at.replace("Z", "+00:00"))
+        if available > decision:
+            missing.append(f"{period.period}:kam:after_as_of")
+            continue
+        if (
+            audit.pdf_path is None
+            or audit.pdf_sha256 is None
+            or audit.pdf_source_url is None
+            or not audit.pdf_path.is_file()
+        ):
+            missing.append(f"{period.period}:kam:pdf_missing")
+            continue
+        body = audit.pdf_path.read_bytes()
+        if sha256(body).hexdigest() != audit.pdf_sha256:
+            missing.append(f"{period.period}:kam:content_hash_mismatch")
+            continue
+        try:
+            pages = _pdf_pages(audit.pdf_path)
+        except Exception:
+            missing.append(f"{period.period}:kam:pdf_parse_failed")
+            continue
+        located = _kam_excerpt(pages)
+        if located is None:
+            missing.append(f"{period.period}:kam:original_text_missing")
+            continue
+        page, excerpt = located
+        citation = EvidenceCitation(
+            evidence_id=f"kam:{audit.period}:{audit.pdf_sha256}",
+            source_id=f"annual-audit:{audit.period}",
+            source_tier="official",
+            url=audit.pdf_source_url,
+            content_sha256=audit.pdf_sha256,
+            period=audit.period,
+            available_at=audit.available_at,
+            page=page,
+            coordinate=(Decimal("0"), Decimal("0"), Decimal("1"), Decimal("1")),
+            verbatim_excerpt=excerpt,
+        )
+        rows.append((audit, citation, pages))
+        if len(rows) == 3:
+            break
+
+    if len(rows) < 3:
+        annual_coverage = next(
+            (item for item in bundle.source_coverage if item.family == "annual_audit_pdf"),
+            None,
+        )
+        if annual_coverage is not None:
+            missing.extend(annual_coverage.missing_reasons)
+        if not missing:
+            missing.append(f"kam_annual_comparison:only_{len(rows)}_available")
+    missing_reasons = tuple(dict.fromkeys(missing))
+    years: list[KamAnnualTimeline] = []
+    for index, (audit, citation, pages) in enumerate(rows):
+        older = rows[index + 1][0] if index + 1 < len(rows) else None
+        current_auditor = (audit.auditor_firm, audit.auditors)
+        older_auditor = (
+            (older.auditor_firm, older.auditors)
+            if older is not None
+            else None
+        )
+        full_text = " ".join(pages)
+        opinion = audit.opinion_type
+        years.append(
+            KamAnnualTimeline(
+                period=citation.period,
+                citation=citation,
+                kam_present=True,
+                opinion_type=opinion,
+                modified_opinion=None if opinion is None else opinion != "unmodified",
+                going_concern="繼續經營有關之重大不確定性" in full_text,
+                emphasis_matter="強調事項" in full_text,
+                auditor_change=(
+                    current_auditor != older_auditor if older_auditor is not None else None
+                ),
+            )
+        )
+
+    admitted = None
+    rejection_reasons: tuple[str, ...]
+    citations = tuple(item.citation for item in years)
+    if not citations:
+        rejection_reasons = ("kam_timeline_unavailable",)
+    elif candidate_adapter is None:
+        rejection_reasons = ("hermes_not_configured",)
+    else:
+        try:
+            candidate = candidate_adapter.judge_kam(
+                issuer_id=bundle.request.issuer_id,
+                as_of=bundle.request.as_of,
+                generation_id=generation_id,
+                citations=citations,
+            )
+            admitted, rejection_reasons = admit_kam_judgement(
+                candidate=candidate,
+                issuer_id=bundle.request.issuer_id,
+                citations=citations,
+            )
+        except Exception:
+            rejection_reasons = ("hermes_unavailable",)
+    complete = len(years) == 3 and admitted is not None
+    return KamJudgement(
+        generation_id=generation_id,
+        status="available" if complete else "partial",
+        coverage=SourceCoverage(
+            family="kam_annual_comparison",
+            required=3,
+            available=len(years),
+            missing_reasons=missing_reasons,
+        ),
+        years=tuple(years),
+        missing_year_reasons=missing_reasons,
+        change_summary=admitted.change_summary if admitted else None,
+        risk_mechanism=admitted.risk_mechanism if admitted else None,
+        counterevidence=admitted.counterevidence if admitted else None,
+        severity=admitted.severity if admitted else None,
+        confidence=admitted.confidence if admitted else None,
+        monitoring=admitted.monitoring if admitted else None,
+        invalidation=admitted.invalidation if admitted else None,
+        rejection_reasons=rejection_reasons,
+    )
 
 
 def _with_hermes_candidates(
@@ -412,19 +611,26 @@ def run_single_company_analysis(
                 calibration_error = "目前只支援TWSE官方benchmark校準。"
         except ProbabilitySourceError as exc:
             calibration_error = str(exc)
+    candidate_adapter = HermesApiCandidateAdapter.from_environment(generation_id)
     report = build_report_from_evidence(
         bundle=bundle,
         generation_id=generation_id,
         generated_at=generated_at,
         calibration=calibration,
         calibration_unavailable_reason=calibration_error,
-        candidate_adapter=HermesApiCandidateAdapter.from_environment(generation_id),
+        candidate_adapter=candidate_adapter,
+    )
+    kam_judgement = build_kam_judgement(
+        bundle=bundle,
+        generation_id=generation_id,
+        candidate_adapter=candidate_adapter,
     )
     return CompanyAnalysisResult(
         generation_id=generation_id,
         identity=bundle.identity,
         evidence_status=bundle.status,
         source_coverage=bundle.source_coverage,
+        kam_judgement=kam_judgement,
         research_report=report,
         probability_calibration=calibration,
         calibration_error=calibration_error,
@@ -435,8 +641,11 @@ def run_single_company_analysis(
 __all__ = [
     "CompanyAnalysisResult",
     "HermesApiCandidateAdapter",
+    "KamAnnualTimeline",
+    "KamJudgement",
     "ReportOrchestrationError",
     "admit_hermes_candidates",
     "build_report_from_evidence",
+    "build_kam_judgement",
     "run_single_company_analysis",
 ]
