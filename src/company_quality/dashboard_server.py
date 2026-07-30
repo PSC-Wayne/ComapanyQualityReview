@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
+from company_quality.dashboard_frontend import INDEX_HTML
 from company_quality.dashboard_jobs import AnalysisJobService, DashboardJobError
 
 
@@ -96,7 +97,7 @@ def make_server(
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/":
-                body = _INDEX.encode("utf-8")
+                body = INDEX_HTML.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
