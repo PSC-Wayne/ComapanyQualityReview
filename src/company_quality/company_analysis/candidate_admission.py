@@ -73,10 +73,12 @@ Do not use tools, external knowledge, memory, or other sources.
 Return exactly one JSON object with a candidates array and no markdown.
 Each candidate must contain only these string fields: candidate_id, issuer_id,
 statement, verbatim_quote, value, unit, period, evidence_id, citation_locator.
-Copy verbatim_quote, value, unit, period, evidence_id, and citation_locator exactly
-from supplied evidence. Deterministic locked_values are authoritative and must never
-be rewritten. Financial-deterioration synthesis must be qualitative, contain no
-numbers, and use candidate_id hermes:financial-deterioration:synthesis. If no fully
+Copy verbatim_quote, unit, period, evidence_id, and citation_locator exactly from one
+supplied evidence item. value must be a numeric string copied exactly from that same
+verbatim_quote; never use a direction label as value. Deterministic locked_values are
+authoritative and must never be rewritten. Financial-deterioration statement must be
+qualitative, contain no numbers, and use candidate_id
+hermes:financial-deterioration:synthesis. If no fully
 supported candidate exists, return {\"candidates\": []}."""
 _KAM_SYSTEM_PROMPT = """Judge the substance of the supplied annual key audit matters only.
 KAM existence is not itself adverse proof. Do not merge KAM with modified opinion,
@@ -98,7 +100,7 @@ class HermesApiCandidateAdapter:
         base_url: str,
         api_key: str,
         session_id: str,
-        timeout: float = 30.0,
+        timeout: float = 90.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key

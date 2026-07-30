@@ -1229,7 +1229,7 @@ def _with_hermes_candidates(
                 items=(first_item, *financial_deterioration.items[1:]),
                 partial_reason=None,
             )
-        else:
+        elif candidates:
             financial_deterioration = replace(
                 financial_deterioration,
                 status="partial",

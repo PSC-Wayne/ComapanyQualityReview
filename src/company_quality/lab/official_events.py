@@ -317,7 +317,21 @@ def validate_downside_event_challenger(
     event_ids = sorted(
         item for item in event_matrix.columns if item not in {"issuer_id", "decision_date"}
     )
-    base_matrix, base_ids = _base_matrix(base_features)
+    completed_base = base_features.copy()
+    missing_identity = [
+        column for column in ("security_code", "market") if column not in completed_base
+    ]
+    if missing_identity:
+        identity = admitted_labels[
+            ["issuer_id", "decision_date", *missing_identity]
+        ].drop_duplicates()
+        completed_base = completed_base.merge(
+            identity,
+            on=["issuer_id", "decision_date"],
+            how="left",
+            validate="many_to_one",
+        )
+    base_matrix, base_ids = _base_matrix(completed_base)
     data = admitted_labels.merge(
         base_matrix,
         on=["issuer_id", "decision_date"],

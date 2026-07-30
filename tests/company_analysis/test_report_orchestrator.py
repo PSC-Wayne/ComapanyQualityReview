@@ -7,6 +7,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -966,6 +967,34 @@ def test_hermes_synthesis_can_only_annotate_locked_financial_values(tmp_path: Pa
     assert latest["revenue"].absolute_value == Decimal("260")
 
 
+def test_empty_hermes_candidates_preserve_deterministic_financial_section(
+    tmp_path: Path,
+) -> None:
+    baseline = cast(
+        Any,
+        build_report_from_evidence(
+            bundle=_financial_trend_bundle(tmp_path),
+            generation_id=GENERATION,
+            generated_at=GENERATED_AT,
+        ),
+    )
+    report = cast(
+        Any,
+        build_report_from_evidence(
+            bundle=_financial_trend_bundle(tmp_path),
+            generation_id=GENERATION,
+            generated_at=GENERATED_AT,
+            candidate_adapter=cast(Any, _FakeHermesAdapter()),
+        ),
+    )
+
+    assert report.financial_deterioration.status == baseline.financial_deterioration.status
+    assert (
+        report.financial_deterioration.partial_reason
+        == baseline.financial_deterioration.partial_reason
+    )
+
+
 @pytest.mark.parametrize(
     ("overrides", "reason"),
     [
@@ -1066,6 +1095,8 @@ def test_http_adapter_uses_openai_endpoint_and_dedicated_session(
     assert captured["body"]["model"] == "hermes-agent"
     assert captured["body"]["stream"] is False
     assert captured["body"]["tools"] == []
+    assert captured["timeout"] == 90.0
+    assert "value must be a numeric string" in json.dumps(captured["body"])
 
 
 class _NewsTransport:
