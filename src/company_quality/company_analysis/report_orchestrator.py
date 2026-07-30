@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from hashlib import sha256
@@ -19,6 +19,11 @@ from company_quality.company_analysis.contracts import (
     SourceCoverage,
     UpsideCase,
     build_single_company_research_report,
+)
+from company_quality.company_analysis.candidate_admission import (
+    HermesApiCandidateAdapter,
+    HermesCandidateAdapter,
+    admit_hermes_candidates,
 )
 from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
@@ -177,6 +182,72 @@ def _coverage(bundle: CompanyEvidenceBundle, family: str) -> tuple[int, int]:
     return (item.available, item.required) if item is not None else (0, 0)
 
 
+def _with_hermes_candidates(
+    *,
+    report: SingleCompanyResearchReport,
+    candidate_adapter: HermesCandidateAdapter | None,
+) -> SingleCompanyResearchReport:
+    if candidate_adapter is None:
+        return replace(
+            report,
+            limitations=(
+                *report.limitations,
+                "Hermes候選抽取：partial (hermes_not_configured)。",
+            ),
+        )
+    try:
+        candidates = candidate_adapter.extract_candidates(
+            issuer_id=report.request.issuer_id,
+            as_of=report.request.as_of,
+            generation_id=report.generation_id,
+            citations=report.citations,
+        )
+        admission = admit_hermes_candidates(
+            candidates=candidates,
+            issuer_id=report.request.issuer_id,
+            as_of=report.request.as_of,
+            citations=report.citations,
+        )
+    except Exception:
+        return replace(
+            report,
+            limitations=(
+                *report.limitations,
+                "Hermes候選抽取：partial (hermes_unavailable)。",
+            ),
+        )
+    findings = tuple(
+        Finding(
+            finding_id=item.candidate_id,
+            kind="fact",
+            direction="context",
+            statement=item.statement,
+            materiality=Decimal("0"),
+            evidence_ids=(item.evidence_id,),
+            supporting_finding_ids=(),
+            counter_finding_ids=(),
+            counter_evidence_reason=None,
+        )
+        for item in admission.admitted
+    )
+    rejected = ",".join(item.reason for item in admission.rejected)
+    status = "available" if not admission.rejected else "partial"
+    detail = f"；typed_rejections={rejected}" if rejected else ""
+    return build_single_company_research_report(
+        request=report.request,
+        generation_id=report.generation_id,
+        generated_at=report.generated_at,
+        citations=report.citations,
+        source_coverage=report.source_coverage,
+        downside=replace(report.downside, findings=(*report.downside.findings, *findings)),
+        upside=report.upside,
+        limitations=(
+            *report.limitations,
+            f"Hermes候選抽取：{status}{detail}。",
+        ),
+    )
+
+
 def build_report_from_evidence(
     *,
     bundle: CompanyEvidenceBundle,
@@ -184,6 +255,7 @@ def build_report_from_evidence(
     generated_at: str,
     calibration: SingleCompanyProbabilityCalibration | None = None,
     calibration_unavailable_reason: str | None = None,
+    candidate_adapter: HermesCandidateAdapter | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -206,7 +278,7 @@ def build_report_from_evidence(
         ]
         if positive.status != "formal":
             limitations.append("本generation沒有正式12個月報酬機率，Dashboard必須顯示unavailable。")
-        return build_single_company_research_report(
+        report = build_single_company_research_report(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
@@ -232,6 +304,9 @@ def build_report_from_evidence(
                 confidence=detailed.upside_confidence,
             ),
             limitations=tuple(limitations),
+        )
+        return _with_hermes_candidates(
+            report=report, candidate_adapter=candidate_adapter
         )
 
     citation = _citation(bundle)
@@ -263,7 +338,7 @@ def build_report_from_evidence(
     ]
     if positive.status != "formal":
         limitations.append("本generation沒有正式12個月報酬機率，Dashboard必須顯示unavailable。")
-    return build_single_company_research_report(
+    report = build_single_company_research_report(
         request=bundle.request,
         generation_id=generation_id,
         generated_at=generated_at,
@@ -293,6 +368,7 @@ def build_report_from_evidence(
         ),
         limitations=tuple(limitations),
     )
+    return _with_hermes_candidates(report=report, candidate_adapter=candidate_adapter)
 
 
 def run_single_company_analysis(
@@ -342,6 +418,7 @@ def run_single_company_analysis(
         generated_at=generated_at,
         calibration=calibration,
         calibration_unavailable_reason=calibration_error,
+        candidate_adapter=HermesApiCandidateAdapter.from_environment(generation_id),
     )
     return CompanyAnalysisResult(
         generation_id=generation_id,
@@ -357,7 +434,9 @@ def run_single_company_analysis(
 
 __all__ = [
     "CompanyAnalysisResult",
+    "HermesApiCandidateAdapter",
     "ReportOrchestrationError",
+    "admit_hermes_candidates",
     "build_report_from_evidence",
     "run_single_company_analysis",
 ]

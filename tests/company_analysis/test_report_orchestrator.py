@@ -31,7 +31,9 @@ from company_quality.company_analysis.valuation import (
 )
 import company_quality.company_analysis.guidance_industry as guidance_module
 from company_quality.company_analysis.report_orchestrator import (
+    HermesApiCandidateAdapter,
     ReportOrchestrationError,
+    admit_hermes_candidates,
     build_report_from_evidence,
 )
 from company_quality.company_analysis.contracts import CompanyAnalysisRequest, SourceCoverage
@@ -568,3 +570,148 @@ def test_valuation_snapshot_rejects_future_market_date(tmp_path: Path) -> None:
             as_of=AS_OF,
             store_root=tmp_path,
         )
+
+
+class _FakeHermesAdapter:
+    def __init__(self, candidates: list[dict[str, str]] | None = None, *, fail: bool = False) -> None:
+        self.candidates = candidates or []
+        self.fail = fail
+        self.calls: list[dict[str, object]] = []
+
+    def extract_candidates(self, **kwargs: object) -> list[dict[str, str]]:
+        self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("Hermes API unavailable")
+        return self.candidates
+
+
+def _candidate(**overrides: str) -> dict[str, str]:
+    candidate = {
+        "candidate_id": "hermes:income-statement",
+        "issuer_id": "22099131",
+        "statement": "官方來源包含115Q1綜合損益表。",
+        "verbatim_quote": "民國115年第1季 綜合損益表",
+        "value": "115",
+        "unit": "第1季",
+        "period": "115Q1",
+        "evidence_id": "TWSE:2330:115Q1:income:abc",
+        "citation_locator": "document-text:contains(綜合損益表)",
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+def test_fixed_hermes_candidate_enters_same_generation_report(tmp_path: Path) -> None:
+    adapter = _FakeHermesAdapter([_candidate()])
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        candidate_adapter=adapter,
+    )
+
+    assert adapter.calls[0]["generation_id"] == GENERATION
+    assert any(item.finding_id == "hermes:income-statement" for item in report.downside.findings)
+    assert "Hermes候選抽取：available" in " ".join(report.limitations)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"issuer_id": "wrong-issuer"}, "issuer_identity_mismatch"),
+        ({"value": "999"}, "numeric_value_mismatch"),
+        ({"verbatim_quote": "不存在的原文 115 第1季"}, "original_text_missing"),
+        ({"unit": "億元"}, "unit_mismatch"),
+        ({"period": "114Q4"}, "period_mismatch"),
+        ({"citation_locator": ""}, "citation_locator_missing"),
+    ],
+)
+def test_candidate_admission_returns_typed_rejections(
+    tmp_path: Path, overrides: dict[str, str], reason: str
+) -> None:
+    base = build_report_from_evidence(
+        bundle=_bundle(tmp_path), generation_id=GENERATION, generated_at=GENERATED_AT
+    )
+    result = admit_hermes_candidates(
+        candidates=[_candidate(**overrides)],
+        issuer_id="22099131",
+        as_of=AS_OF,
+        citations=base.citations,
+    )
+
+    assert result.admitted == ()
+    assert result.rejected[0].reason == reason
+
+
+def test_candidate_admission_rejects_future_source(tmp_path: Path) -> None:
+    base = build_report_from_evidence(
+        bundle=_bundle(tmp_path), generation_id=GENERATION, generated_at=GENERATED_AT
+    )
+    future = replace(base.citations[0], available_at="2026-07-30T00:00:00+08:00")
+    result = admit_hermes_candidates(
+        candidates=[_candidate()],
+        issuer_id="22099131",
+        as_of=AS_OF,
+        citations=(future,),
+    )
+
+    assert result.rejected[0].reason == "pit_violation"
+
+
+def test_hermes_failure_only_marks_llm_dependent_report_slice_partial(tmp_path: Path) -> None:
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        candidate_adapter=_FakeHermesAdapter(fail=True),
+    )
+
+    assert report.citations
+    assert report.downside.findings
+    assert "Hermes候選抽取：partial (hermes_unavailable)" in " ".join(report.limitations)
+
+
+def test_http_adapter_uses_openai_endpoint_and_dedicated_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            content = json.dumps({"candidates": [_candidate()]})
+            return json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+
+    def fake_urlopen(request, timeout: float):
+        captured.update(
+            url=request.full_url,
+            headers=dict(request.headers),
+            body=json.loads(request.data),
+            timeout=timeout,
+        )
+        return _Response()
+
+    monkeypatch.setattr("company_quality.company_analysis.candidate_admission.urlopen", fake_urlopen)
+    adapter = HermesApiCandidateAdapter(
+        base_url="http://127.0.0.1:8642/v1",
+        api_key="test-only",
+        session_id="company-quality-generation-1",
+    )
+    candidates = adapter.extract_candidates(
+        issuer_id="22099131",
+        as_of=AS_OF,
+        generation_id=GENERATION,
+        citations=(),
+    )
+
+    assert candidates == [_candidate()]
+    assert captured["url"] == "http://127.0.0.1:8642/v1/chat/completions"
+    assert captured["headers"]["X-hermes-session-id"] == "company-quality-generation-1"
+    assert captured["body"]["model"] == "hermes-agent"
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["tools"] == []
