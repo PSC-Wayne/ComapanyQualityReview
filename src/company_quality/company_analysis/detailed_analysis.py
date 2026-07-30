@@ -14,7 +14,14 @@ from typing import Iterable, Literal
 import fitz
 
 from company_quality.audit.inventory import AuditFilingInventory
-from company_quality.company_analysis.contracts import EvidenceCitation, Finding
+from company_quality.company_analysis.contracts import (
+    EvidenceCitation,
+    FinancialDeteriorationItem,
+    FinancialDeteriorationSection,
+    FinancialTrendMetric,
+    FinancialTrendPeriod,
+    Finding,
+)
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 from company_quality.company_analysis.financial_anomalies import (
     analyze_financial_anomalies,
@@ -417,6 +424,360 @@ def _event_summary(event: MaterialEvent) -> str:
                 break
     excerpt = " ".join(selected[:4])[:900] or event.description[:900]
     return f"{event.announced_at[:10]}：{event.title}；官方說明摘錄：{excerpt}"
+
+
+_TREND_ROWS = {
+    "revenue": ("income", "營業收入合計", "營收"),
+    "gross_profit": ("income", "營業毛利（毛損）", "毛利／率"),
+    "operating_profit": ("income", "營業利益（損失）", "營益／率"),
+    "net_income": ("income", "本期淨利（淨損）", "淨利"),
+    "operating_cash_flow": (
+        "cash_flow", "營業活動之淨現金流入（流出）", "營業現金流"
+    ),
+    "capex": ("cash_flow", "取得不動產、廠房及設備", "資本支出"),
+    "receivables": ("balance", "應收帳款淨額", "應收帳款"),
+    "inventory": ("balance", "存貨", "存貨"),
+    "current_assets": ("balance", "流動資產合計", "流動資產"),
+    "current_liabilities": ("balance", "流動負債合計", "流動負債"),
+    "liabilities": ("balance", "負債總額", "負債"),
+    "equity": ("balance", "權益總額", "權益"),
+}
+
+
+def _change(current: Decimal, prior: Decimal) -> Decimal | None:
+    return None if prior == 0 else (current - prior) / abs(prior)
+
+
+def _safe_ratio(numerator: Decimal, denominator: Decimal) -> Decimal | None:
+    return None if denominator == 0 else numerator / denominator
+
+
+def _period_before(period: str) -> str:
+    year = int(period[:3])
+    quarter = int(period[-1])
+    return f"{year - 1}Q4" if quarter == 1 else f"{year}Q{quarter - 1}"
+
+
+def _same_quarter_prior_year(period: str) -> str:
+    return f"{int(period[:3]) - 1}Q{period[-1]}"
+
+
+def _metric_direction(
+    absolute_change: Decimal | None,
+    ratio_change: Decimal | None,
+    *,
+    lower_is_better: bool,
+) -> Literal["improving", "deteriorating", "flat", "mixed"]:
+    changes = [item for item in (absolute_change, ratio_change) if item is not None]
+    if not changes or all(item == 0 for item in changes):
+        return "flat"
+    signs = {1 if item > 0 else -1 if item < 0 else 0 for item in changes}
+    signs.discard(0)
+    if len(signs) > 1:
+        return "mixed"
+    increased = next(iter(signs)) > 0
+    adverse = increased if lower_is_better else not increased
+    return "deteriorating" if adverse else "improving"
+
+
+def _trend_rows(
+    bundle: CompanyEvidenceBundle, period: str
+) -> dict[str, _Row] | None:
+    rows: dict[str, _Row] = {}
+    for metric_id, (report, label, _) in _TREND_ROWS.items():
+        row = _row(bundle, period, report, label, f"trend-{metric_id}")
+        if row is None:
+            return None
+        rows[metric_id] = row
+    return rows
+
+
+def _trend_period(
+    bundle: CompanyEvidenceBundle,
+    period: str,
+    *,
+    basis: Literal["annual", "interim"],
+) -> tuple[FinancialTrendPeriod, tuple[EvidenceCitation, ...]] | None:
+    rows = _trend_rows(bundle, period)
+    if rows is None:
+        return None
+    revenue = rows["revenue"]
+    previous_balance_rows: dict[str, _Row] | None = None
+    if basis == "interim":
+        previous_balance_rows = _trend_rows(bundle, _period_before(period))
+    prior_year_rows = (
+        _trend_rows(bundle, _same_quarter_prior_year(period))
+        if basis == "interim"
+        else None
+    )
+
+    current_values = {key: row.current for key, row in rows.items()}
+    prior_values = {key: row.prior for key, row in rows.items()}
+    if prior_year_rows is not None:
+        for key in ("receivables", "inventory", "current_assets", "current_liabilities", "liabilities", "equity"):
+            prior_values[key] = prior_year_rows[key].current
+
+    values = {
+        "revenue": current_values["revenue"],
+        "gross_profit": current_values["gross_profit"],
+        "operating_profit": current_values["operating_profit"],
+        "net_income": current_values["net_income"],
+        "operating_cash_flow": current_values["operating_cash_flow"],
+        "simplified_free_cash_flow": (
+            current_values["operating_cash_flow"] + current_values["capex"]
+        ),
+        "receivables": current_values["receivables"],
+        "inventory": current_values["inventory"],
+        "liquidity": current_values["current_assets"] - current_values["current_liabilities"],
+        "liabilities": current_values["liabilities"],
+    }
+    prior = {
+        "revenue": prior_values["revenue"],
+        "gross_profit": prior_values["gross_profit"],
+        "operating_profit": prior_values["operating_profit"],
+        "net_income": prior_values["net_income"],
+        "operating_cash_flow": prior_values["operating_cash_flow"],
+        "simplified_free_cash_flow": (
+            prior_values["operating_cash_flow"] + prior_values["capex"]
+        ),
+        "receivables": prior_values["receivables"],
+        "inventory": prior_values["inventory"],
+        "liquidity": prior_values["current_assets"] - prior_values["current_liabilities"],
+        "liabilities": prior_values["liabilities"],
+    }
+    ratios = {
+        "revenue": None,
+        "gross_profit": _safe_ratio(values["gross_profit"], values["revenue"]),
+        "operating_profit": _safe_ratio(values["operating_profit"], values["revenue"]),
+        "net_income": _safe_ratio(values["net_income"], values["revenue"]),
+        "operating_cash_flow": _safe_ratio(values["operating_cash_flow"], values["revenue"]),
+        "simplified_free_cash_flow": _safe_ratio(
+            values["simplified_free_cash_flow"], values["revenue"]
+        ),
+        "receivables": _safe_ratio(values["receivables"], values["revenue"]),
+        "inventory": _safe_ratio(values["inventory"], values["revenue"]),
+        "liquidity": _safe_ratio(
+            current_values["current_assets"], current_values["current_liabilities"]
+        ),
+        "liabilities": _safe_ratio(
+            current_values["liabilities"],
+            current_values["liabilities"] + current_values["equity"],
+        ),
+    }
+    prior_ratios = {
+        "revenue": None,
+        "gross_profit": _safe_ratio(prior["gross_profit"], prior["revenue"]),
+        "operating_profit": _safe_ratio(prior["operating_profit"], prior["revenue"]),
+        "net_income": _safe_ratio(prior["net_income"], prior["revenue"]),
+        "operating_cash_flow": _safe_ratio(prior["operating_cash_flow"], prior["revenue"]),
+        "simplified_free_cash_flow": _safe_ratio(
+            prior["simplified_free_cash_flow"], prior["revenue"]
+        ),
+        "receivables": _safe_ratio(prior["receivables"], prior["revenue"]),
+        "inventory": _safe_ratio(prior["inventory"], prior["revenue"]),
+        "liquidity": _safe_ratio(prior_values["current_assets"], prior_values["current_liabilities"]),
+        "liabilities": _safe_ratio(
+            prior_values["liabilities"], prior_values["liabilities"] + prior_values["equity"]
+        ),
+    }
+    labels = {
+        "revenue": "營收", "gross_profit": "毛利／率", "operating_profit": "營益／率",
+        "net_income": "淨利", "operating_cash_flow": "營業現金流",
+        "simplified_free_cash_flow": "簡化自由現金流", "receivables": "應收帳款",
+        "inventory": "存貨", "liquidity": "流動性", "liabilities": "負債",
+    }
+    evidence = {
+        "revenue": (revenue.evidence_id,),
+        "gross_profit": (rows["gross_profit"].evidence_id, revenue.evidence_id),
+        "operating_profit": (rows["operating_profit"].evidence_id, revenue.evidence_id),
+        "net_income": (rows["net_income"].evidence_id, revenue.evidence_id),
+        "operating_cash_flow": (rows["operating_cash_flow"].evidence_id, revenue.evidence_id),
+        "simplified_free_cash_flow": (
+            rows["operating_cash_flow"].evidence_id, rows["capex"].evidence_id, revenue.evidence_id
+        ),
+        "receivables": (rows["receivables"].evidence_id, revenue.evidence_id),
+        "inventory": (rows["inventory"].evidence_id, revenue.evidence_id),
+        "liquidity": (rows["current_assets"].evidence_id, rows["current_liabilities"].evidence_id),
+        "liabilities": (rows["liabilities"].evidence_id, rows["equity"].evidence_id),
+    }
+    if prior_year_rows is not None:
+        for metric_id in ("receivables", "inventory"):
+            evidence[metric_id] = (
+                *evidence[metric_id],
+                prior_year_rows[metric_id].evidence_id,
+            )
+        evidence["liquidity"] = (
+            *evidence["liquidity"],
+            prior_year_rows["current_assets"].evidence_id,
+            prior_year_rows["current_liabilities"].evidence_id,
+        )
+        evidence["liabilities"] = (
+            *evidence["liabilities"],
+            prior_year_rows["liabilities"].evidence_id,
+            prior_year_rows["equity"].evidence_id,
+        )
+    sequential_values: dict[str, Decimal] = {}
+    sequential_ratios: dict[str, Decimal | None] = {}
+    if basis == "interim" and previous_balance_rows is not None:
+        previous_revenue = previous_balance_rows["revenue"].current
+        for key in ("receivables", "inventory", "liabilities"):
+            sequential_values[key] = previous_balance_rows[key].current
+            sequential_ratios[key] = _safe_ratio(
+                previous_balance_rows[key].current, previous_revenue
+            )
+        sequential_values["liquidity"] = (
+            previous_balance_rows["current_assets"].current
+            - previous_balance_rows["current_liabilities"].current
+        )
+        sequential_ratios["liquidity"] = _safe_ratio(
+            previous_balance_rows["current_assets"].current,
+            previous_balance_rows["current_liabilities"].current,
+        )
+        sequential_ratios["liabilities"] = _safe_ratio(
+            previous_balance_rows["liabilities"].current,
+            previous_balance_rows["liabilities"].current
+            + previous_balance_rows["equity"].current,
+        )
+        for metric_id in ("receivables", "inventory"):
+            evidence[metric_id] = (
+                *evidence[metric_id],
+                previous_balance_rows[metric_id].evidence_id,
+            )
+        evidence["liquidity"] = (
+            *evidence["liquidity"],
+            previous_balance_rows["current_assets"].evidence_id,
+            previous_balance_rows["current_liabilities"].evidence_id,
+        )
+        evidence["liabilities"] = (
+            *evidence["liabilities"],
+            previous_balance_rows["liabilities"].evidence_id,
+            previous_balance_rows["equity"].evidence_id,
+        )
+
+    metrics: list[FinancialTrendMetric] = []
+    for metric_id in labels:
+        absolute_change = _change(values[metric_id], prior[metric_id])
+        ratio_change = (
+            ratios[metric_id] - prior_ratios[metric_id]
+            if ratios[metric_id] is not None and prior_ratios[metric_id] is not None
+            else None
+        )
+        sequential_change = (
+            _change(values[metric_id], sequential_values[metric_id])
+            if metric_id in sequential_values
+            else None
+        )
+        sequential_ratio_change = (
+            ratios[metric_id] - sequential_ratios[metric_id]
+            if metric_id in sequential_ratios
+            and ratios[metric_id] is not None
+            and sequential_ratios[metric_id] is not None
+            else None
+        )
+        metrics.append(
+            FinancialTrendMetric(
+                metric_id=metric_id,
+                label=labels[metric_id],
+                absolute_value=values[metric_id],
+                ratio=ratios[metric_id],
+                yoy_change=absolute_change,
+                ratio_yoy_change=ratio_change,
+                sequential_change=sequential_change,
+                ratio_sequential_change=sequential_ratio_change,
+                direction=_metric_direction(
+                    absolute_change,
+                    ratio_change,
+                    lower_is_better=metric_id in {"receivables", "inventory", "liabilities"},
+                ),
+                evidence_ids=evidence[metric_id],
+            )
+        )
+    citation_rows = [*rows.values()]
+    if prior_year_rows is not None:
+        citation_rows.extend(prior_year_rows.values())
+    if previous_balance_rows is not None:
+        citation_rows.extend(previous_balance_rows.values())
+    citations = tuple(
+        {
+            row.evidence_id: _html_citation(row)
+            for row in citation_rows
+        }.values()
+    )
+    return FinancialTrendPeriod(period, basis, tuple(metrics)), citations
+
+
+def build_financial_deterioration(
+    bundle: CompanyEvidenceBundle, generation_id: str
+) -> tuple[FinancialDeteriorationSection | None, tuple[EvidenceCitation, ...]]:
+    annual_periods = sorted(
+        (item.period for item in bundle.periods if item.is_annual and item.financial is not None)
+    )[-5:]
+    interim = max(
+        (item.period for item in bundle.periods if not item.is_annual and item.financial is not None),
+        default=None,
+    )
+    if len(annual_periods) != 5 or interim is None:
+        return None, ()
+    built = [
+        _trend_period(bundle, period, basis="annual") for period in annual_periods
+    ]
+    built.append(_trend_period(bundle, interim, basis="interim"))
+    if any(item is None for item in built):
+        return None, ()
+    complete = [item for item in built if item is not None]
+    periods = tuple(item[0] for item in complete)
+    citations_by_id = {
+        citation.evidence_id: citation
+        for item in complete
+        for citation in item[1]
+    }
+    latest = periods[-1]
+    adverse = tuple(metric for metric in latest.metrics if metric.direction == "deteriorating")
+    improving = tuple(metric for metric in latest.metrics if metric.direction == "improving")
+    if len(adverse) == 1:
+        severity: Literal["low", "moderate", "high"] = "low"
+        summary = "目前只有單一指標惡化，不足以形成財報惡化定罪；維持監測。"
+    elif len(adverse) >= 5:
+        severity = "high"
+        summary = "多項獲利、現金流、營運資金或財務結構指標同步惡化。"
+    elif len(adverse) >= 2:
+        severity = "moderate"
+        summary = "多項財務指標同時惡化，但仍須結合反證與後續期間確認持續性。"
+    else:
+        severity = "low"
+        summary = "最新interim未見多指標同步惡化，現階段不形成財報惡化結論。"
+    evidence_text = tuple(
+        f"{latest.period} {metric.label}同比方向為惡化。" for metric in adverse[:4]
+    ) or (f"{latest.period}未見同比惡化指標。",)
+    counter_text = tuple(
+        f"{latest.period} {metric.label}同比方向改善。" for metric in improving[:4]
+    ) or ("目前沒有足以抵銷惡化訊號的改善指標。",)
+    evidence_ids = tuple(
+        dict.fromkeys(
+            evidence_id for metric in latest.metrics for evidence_id in metric.evidence_ids
+        )
+    )
+    item = FinancialDeteriorationItem(
+        item_id="financial-deterioration:integrated-trend",
+        severity=severity,
+        confidence=Decimal("0.80"),
+        summary=summary,
+        evidence=evidence_text,
+        counterevidence=counter_text,
+        monitoring=("追蹤下期營收、利潤率、OCF／簡化FCF及營運資金是否同向延續。",),
+        invalidation=("若後續期間多數惡化指標反轉且現金流與流動性同步改善，則失效。",),
+        evidence_ids=evidence_ids,
+    )
+    return (
+        FinancialDeteriorationSection(
+            generation_id=generation_id,
+            status="partial",
+            periods=periods,
+            items=(item,),
+            partial_reason="hermes_not_configured",
+        ),
+        tuple(citations_by_id.values()),
+    )
 
 
 def build_detailed_analysis(
@@ -1053,4 +1414,9 @@ def build_detailed_analysis(
     )
 
 
-__all__ = ["DetailedAnalysis", "DetailedAnalysisError", "build_detailed_analysis"]
+__all__ = [
+    "DetailedAnalysis",
+    "DetailedAnalysisError",
+    "build_detailed_analysis",
+    "build_financial_deterioration",
+]

@@ -42,6 +42,7 @@ from company_quality.company_analysis.report_orchestrator import (
     build_report_from_evidence,
 )
 from company_quality.company_analysis.contracts import CompanyAnalysisRequest, SourceCoverage
+from company_quality.dashboard_server import _INDEX
 from company_quality.identity import CompanyIdentity
 from company_quality.sources.financial import FinancialArtifact, PeriodCollection
 
@@ -238,6 +239,104 @@ def _detailed_bundle(tmp_path: Path) -> CompanyEvidenceBundle:
     )
 
 
+def _financial_trend_bundle(
+    tmp_path: Path, *, isolated_revenue_decline: bool = False
+) -> CompanyEvidenceBundle:
+    base = _bundle(tmp_path)
+    annual_values = {
+        "110Q4": (1000, 400, 200, 150, 180, -80, 100, 120, 500, 250, 400, 600),
+        "111Q4": (1100, 451, 231, 170, 200, -85, 108, 125, 540, 260, 420, 640),
+        "112Q4": (1200, 504, 264, 190, 220, -90, 118, 132, 580, 270, 440, 700),
+        "113Q4": (1300, 559, 299, 220, 250, -95, 130, 140, 620, 280, 460, 760),
+        "114Q4": (1200, 420, 150, 100, 90, -100, 180, 200, 520, 320, 550, 650),
+    }
+    periods: list[PeriodEvidence] = []
+    previous = (900, 342, 171, 120, 150, -70, 95, 110, 470, 240, 380, 560)
+    for period, current in annual_values.items():
+        (
+            revenue, gross, operating, net, ocf, capex, receivables, inventory,
+            current_assets, current_liabilities, liabilities, equity,
+        ) = current
+        (
+            prior_revenue, prior_gross, prior_operating, prior_net, prior_ocf,
+            prior_capex, prior_receivables, prior_inventory, prior_current_assets,
+            prior_current_liabilities, prior_liabilities, prior_equity,
+        ) = previous
+        artifacts = (
+            _table_artifact(
+                tmp_path, period=period, report="income",
+                rows=(
+                    ("營業收入合計", str(revenue), "100", str(prior_revenue), "100"),
+                    ("營業毛利（毛損）", str(gross), str(gross * 100 / revenue), str(prior_gross), str(prior_gross * 100 / prior_revenue)),
+                    ("營業利益（損失）", str(operating), str(operating * 100 / revenue), str(prior_operating), str(prior_operating * 100 / prior_revenue)),
+                    ("本期淨利（淨損）", str(net), str(net * 100 / revenue), str(prior_net), str(prior_net * 100 / prior_revenue)),
+                ),
+            ),
+            _table_artifact(
+                tmp_path, period=period, report="balance",
+                rows=(
+                    ("應收帳款淨額", str(receivables), "0", str(prior_receivables), "0"),
+                    ("存貨", str(inventory), "0", str(prior_inventory), "0"),
+                    ("流動資產合計", str(current_assets), "0", str(prior_current_assets), "0"),
+                    ("流動負債合計", str(current_liabilities), "0", str(prior_current_liabilities), "0"),
+                    ("負債總額", str(liabilities), "0", str(prior_liabilities), "0"),
+                    ("權益總額", str(equity), "0", str(prior_equity), "0"),
+                ),
+            ),
+            _table_artifact(
+                tmp_path, period=period, report="cash_flow",
+                rows=(
+                    ("營業活動之淨現金流入（流出）", str(ocf), str(prior_ocf)),
+                    ("取得不動產、廠房及設備", str(capex), str(prior_capex)),
+                ),
+            ),
+        )
+        periods.append(
+            PeriodEvidence(period, True, PeriodCollection("available", artifacts, 1.0), None, ())
+        )
+        previous = current
+
+    interim = (
+        (290, 130, 60, 45, 35, -20, 170, 190, 540, 300, 530, 670)
+        if isolated_revenue_decline
+        else (260, 80, 20, 10, 15, -30, 190, 210, 500, 350, 600, 650)
+    )
+    revenue, gross, operating, net, ocf, capex, receivables, inventory, current_assets, current_liabilities, liabilities, equity = interim
+    interim_artifacts = (
+        _table_artifact(
+            tmp_path, period="115Q1", report="income",
+            rows=(
+                ("營業收入合計", str(revenue), "100", str(revenue), "100", "300", "100", "300", "100"),
+                ("營業毛利（毛損）", str(gross), str(gross * 100 / revenue), str(gross), str(gross * 100 / revenue), "120", "40", "120", "40"),
+                ("營業利益（損失）", str(operating), str(operating * 100 / revenue), str(operating), str(operating * 100 / revenue), "50", "16.667", "50", "16.667"),
+                ("本期淨利（淨損）", str(net), str(net * 100 / revenue), str(net), str(net * 100 / revenue), "40", "13.333", "40", "13.333"),
+            ),
+        ),
+        _table_artifact(
+            tmp_path, period="115Q1", report="balance",
+            rows=(
+                ("應收帳款淨額", str(receivables), "0", "180", "0"),
+                ("存貨", str(inventory), "0", "200", "0"),
+                ("流動資產合計", str(current_assets), "0", "520", "0"),
+                ("流動負債合計", str(current_liabilities), "0", "320", "0"),
+                ("負債總額", str(liabilities), "0", "550", "0"),
+                ("權益總額", str(equity), "0", "650", "0"),
+            ),
+        ),
+        _table_artifact(
+            tmp_path, period="115Q1", report="cash_flow",
+            rows=(
+                ("營業活動之淨現金流入（流出）", str(ocf), "30"),
+                ("取得不動產、廠房及設備", str(capex), "-20"),
+            ),
+        ),
+    )
+    periods.append(
+        PeriodEvidence("115Q1", False, PeriodCollection("available", interim_artifacts, 1.0), None, ())
+    )
+    return replace(base, periods=tuple(periods))
+
+
 def _calibration() -> SingleCompanyProbabilityCalibration:
     return SingleCompanyProbabilityCalibration(
         issuer_id="22099131",
@@ -267,7 +366,7 @@ def test_builds_valid_blocked_report_without_inventing_narrative(tmp_path: Path)
         generated_at=GENERATED_AT,
     )
 
-    assert report.schema_version == "SingleCompanyResearchReport.v2"
+    assert report.schema_version == "SingleCompanyResearchReport.v3"
     assert report.downside.status == "blocked"
     assert report.upside.status == "blocked"
     assert report.upside.positive_return_probability.status == "unavailable"
@@ -453,6 +552,76 @@ def test_anomaly_candidate_families_remain_independent_without_composite_score()
 
     assert tuple(item.family for item in result) == families
     assert all(not hasattr(item, "score") for item in result)
+
+
+def test_financial_deterioration_locks_five_years_and_latest_interim(
+    tmp_path: Path,
+) -> None:
+    report = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+    )
+
+    section = report.financial_deterioration
+    assert section is not None
+    assert section.generation_id == GENERATION
+    assert [item.period for item in section.periods] == [
+        "110Q4", "111Q4", "112Q4", "113Q4", "114Q4", "115Q1"
+    ]
+    assert {metric.metric_id for metric in section.periods[-1].metrics} == {
+        "revenue", "gross_profit", "operating_profit", "net_income",
+        "operating_cash_flow", "simplified_free_cash_flow", "receivables",
+        "inventory", "liquidity", "liabilities",
+    }
+    latest = {metric.metric_id: metric for metric in section.periods[-1].metrics}
+    assert latest["revenue"].absolute_value == Decimal("260")
+    assert latest["revenue"].yoy_change == Decimal("-0.1333333333333333333333333333")
+    assert latest["gross_profit"].ratio == Decimal("80") / Decimal("260")
+    assert latest["simplified_free_cash_flow"].absolute_value == Decimal("-15")
+    assert latest["liquidity"].sequential_change is not None
+    assert "combined_score" not in asdict(section)
+
+
+def test_one_deteriorating_metric_is_monitoring_not_conviction(tmp_path: Path) -> None:
+    report = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path, isolated_revenue_decline=True),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+    )
+
+    item = report.financial_deterioration.items[0]
+    assert item.severity == "low"
+    assert "單一指標" in item.summary
+    assert item.counterevidence
+    assert item.monitoring
+    assert item.invalidation
+
+
+def test_financial_deterioration_is_partial_without_hermes_and_visible_in_dashboard_json(
+    tmp_path: Path,
+) -> None:
+    report = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+    )
+
+    assert report.financial_deterioration.status == "partial"
+    assert report.financial_deterioration.partial_reason == "hermes_not_configured"
+    unavailable = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        candidate_adapter=_FakeHermesAdapter(fail=True),
+    )
+    assert unavailable.financial_deterioration is not None
+    assert unavailable.financial_deterioration.status == "partial"
+    assert unavailable.financial_deterioration.partial_reason == "hermes_unavailable"
+    assert unavailable.financial_deterioration.periods
+    assert "financial_deterioration" in asdict(report)
+    assert "財報惡化" in _INDEX
+    assert "financial_deterioration" in _INDEX
 
 
 def test_rejects_stale_or_wrong_company_calibration(tmp_path: Path) -> None:
@@ -762,6 +931,32 @@ def test_fixed_hermes_candidate_enters_same_generation_report(tmp_path: Path) ->
     assert adapter.calls[0]["generation_id"] == GENERATION
     assert any(item.finding_id == "hermes:income-statement" for item in report.downside.findings)
     assert "Hermes候選抽取：available" in " ".join(report.limitations)
+
+
+def test_hermes_synthesis_can_only_annotate_locked_financial_values(tmp_path: Path) -> None:
+    candidate = _candidate(
+        candidate_id="hermes:financial-deterioration:synthesis",
+        statement="多項獲利與現金流指標同步惡化，應持續監測。",
+        verbatim_quote="營業收入合計 | 260 | 100 | 260 | 100 | 300 | 100 | 300 | 100",
+        value="260",
+        unit="營業收入合計",
+        evidence_id="TWSE:2330:115Q1:income:fixture:row:trend-revenue",
+        citation_locator="table-row:營業收入合計",
+    )
+    adapter = _FakeHermesAdapter([candidate])
+    report = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        candidate_adapter=adapter,
+    )
+
+    section = report.financial_deterioration
+    assert section.status == "available"
+    assert section.items[0].summary == candidate["statement"]
+    assert adapter.calls[0]["locked_values"]
+    latest = {metric.metric_id: metric for metric in section.periods[-1].metrics}
+    assert latest["revenue"].absolute_value == Decimal("260")
 
 
 @pytest.mark.parametrize(

@@ -55,6 +55,7 @@ class HermesCandidateAdapter(Protocol):
         as_of: str,
         generation_id: str,
         citations: Sequence[EvidenceCitation],
+        locked_values: Sequence[Mapping[str, object]] = (),
     ) -> Sequence[Mapping[str, object]]: ...
 
     def judge_kam(
@@ -73,7 +74,10 @@ Return exactly one JSON object with a candidates array and no markdown.
 Each candidate must contain only these string fields: candidate_id, issuer_id,
 statement, verbatim_quote, value, unit, period, evidence_id, citation_locator.
 Copy verbatim_quote, value, unit, period, evidence_id, and citation_locator exactly
-from supplied evidence. If no fully supported candidate exists, return {\"candidates\": []}."""
+from supplied evidence. Deterministic locked_values are authoritative and must never
+be rewritten. Financial-deterioration synthesis must be qualitative, contain no
+numbers, and use candidate_id hermes:financial-deterioration:synthesis. If no fully
+supported candidate exists, return {\"candidates\": []}."""
 _KAM_SYSTEM_PROMPT = """Judge the substance of the supplied annual key audit matters only.
 KAM existence is not itself adverse proof. Do not merge KAM with modified opinion,
 going concern, emphasis of matter, or auditor change. Return exactly one JSON object
@@ -126,6 +130,7 @@ class HermesApiCandidateAdapter:
         as_of: str,
         generation_id: str,
         citations: Sequence[EvidenceCitation],
+        locked_values: Sequence[Mapping[str, object]] = (),
     ) -> Sequence[Mapping[str, object]]:
         evidence = [
             {
@@ -145,6 +150,7 @@ class HermesApiCandidateAdapter:
                 "as_of": as_of,
                 "generation_id": generation_id,
                 "evidence": evidence,
+                "locked_values": list(locked_values),
             },
         )
         candidates = decoded.get("candidates")

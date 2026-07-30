@@ -20,6 +20,8 @@ FindingKind = Literal["fact", "inference", "judgement"]
 FindingDirection = Literal["support", "counter", "context"]
 CaseStatus = Literal["research_only", "available", "blocked"]
 ProbabilityStatus = Literal["formal", "research_only", "unavailable"]
+FinancialTrendDirection = Literal["improving", "deteriorating", "flat", "mixed"]
+FinancialDeteriorationStatus = Literal["available", "partial"]
 Coordinate = tuple[Decimal, Decimal, Decimal, Decimal]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -107,6 +109,49 @@ class UpsideCase:
 
 
 @dataclass(frozen=True, slots=True)
+class FinancialTrendMetric:
+    metric_id: str
+    label: str
+    absolute_value: Decimal
+    ratio: Decimal | None
+    yoy_change: Decimal | None
+    ratio_yoy_change: Decimal | None
+    sequential_change: Decimal | None
+    ratio_sequential_change: Decimal | None
+    direction: FinancialTrendDirection
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialTrendPeriod:
+    period: str
+    basis: Literal["annual", "interim"]
+    metrics: tuple[FinancialTrendMetric, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialDeteriorationItem:
+    item_id: str
+    severity: Literal["low", "moderate", "high"]
+    confidence: Decimal
+    summary: str
+    evidence: tuple[str, ...]
+    counterevidence: tuple[str, ...]
+    monitoring: tuple[str, ...]
+    invalidation: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialDeteriorationSection:
+    generation_id: str
+    status: FinancialDeteriorationStatus
+    periods: tuple[FinancialTrendPeriod, ...]
+    items: tuple[FinancialDeteriorationItem, ...]
+    partial_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class SingleCompanyResearchReport:
     request: CompanyAnalysisRequest
     generation_id: str
@@ -116,9 +161,10 @@ class SingleCompanyResearchReport:
     downside: DownsideCase
     upside: UpsideCase
     limitations: tuple[str, ...]
+    financial_deterioration: FinancialDeteriorationSection | None = None
     status: Literal["research_only"] = "research_only"
-    schema_version: Literal["SingleCompanyResearchReport.v2"] = (
-        "SingleCompanyResearchReport.v2"
+    schema_version: Literal["SingleCompanyResearchReport.v3"] = (
+        "SingleCompanyResearchReport.v3"
     )
 
 
@@ -313,6 +359,88 @@ def _validate_case_common(
     _validate_findings(findings, evidence_ids, case_name)
 
 
+def _validate_financial_deterioration(
+    section: FinancialDeteriorationSection | None,
+    *,
+    expected_generation: str,
+    evidence_ids: set[str],
+) -> None:
+    if section is None:
+        return
+    if section.generation_id != expected_generation:
+        raise CompanyAnalysisContractError("financial deterioration generation mismatch")
+    if section.status not in ("available", "partial"):
+        raise CompanyAnalysisContractError("invalid financial deterioration status")
+    if section.status == "partial":
+        _text(section.partial_reason, "financial deterioration partial reason", 256)
+    elif section.partial_reason is not None:
+        raise CompanyAnalysisContractError(
+            "available financial deterioration cannot carry a partial reason"
+        )
+    if section.periods:
+        annual = tuple(item for item in section.periods if item.basis == "annual")
+        interim = tuple(item for item in section.periods if item.basis == "interim")
+        if len(section.periods) != 6 or len(annual) != 5 or len(interim) != 1:
+            raise CompanyAnalysisContractError(
+                "financial deterioration requires five annual periods and one interim"
+            )
+        expected_metrics = {
+            "revenue",
+            "gross_profit",
+            "operating_profit",
+            "net_income",
+            "operating_cash_flow",
+            "simplified_free_cash_flow",
+            "receivables",
+            "inventory",
+            "liquidity",
+            "liabilities",
+        }
+        for period in section.periods:
+            _text(period.period, "financial trend period", 32)
+            by_metric = {metric.metric_id: metric for metric in period.metrics}
+            if set(by_metric) != expected_metrics or len(by_metric) != len(period.metrics):
+                raise CompanyAnalysisContractError(
+                    "financial trend period has incomplete or duplicate metrics"
+                )
+            for metric in period.metrics:
+                _text(metric.label, "financial trend label", 64)
+                if metric.direction not in (
+                    "improving", "deteriorating", "flat", "mixed"
+                ):
+                    raise CompanyAnalysisContractError("invalid financial trend direction")
+                if not metric.evidence_ids or not set(metric.evidence_ids).issubset(
+                    evidence_ids
+                ):
+                    raise CompanyAnalysisContractError(
+                        "financial trend metric cites unknown evidence"
+                    )
+    if not section.items:
+        raise CompanyAnalysisContractError("financial deterioration item is required")
+    for item in section.items:
+        _text(item.item_id, "financial deterioration item_id", 128)
+        if item.severity not in ("low", "moderate", "high"):
+            raise CompanyAnalysisContractError("invalid financial deterioration severity")
+        _ratio(item.confidence, "financial deterioration confidence")
+        _text(item.summary, "financial deterioration summary", 2000)
+        for field, values in (
+            ("evidence", item.evidence),
+            ("counterevidence", item.counterevidence),
+            ("monitoring", item.monitoring),
+            ("invalidation", item.invalidation),
+        ):
+            if not values:
+                raise CompanyAnalysisContractError(
+                    f"financial deterioration {field} is required"
+                )
+            for value in values:
+                _text(value, f"financial deterioration {field}", 1000)
+        if not item.evidence_ids or not set(item.evidence_ids).issubset(evidence_ids):
+            raise CompanyAnalysisContractError(
+                "financial deterioration item cites unknown evidence"
+            )
+
+
 def build_single_company_research_report(
     *,
     request: CompanyAnalysisRequest,
@@ -323,6 +451,7 @@ def build_single_company_research_report(
     downside: DownsideCase,
     upside: UpsideCase,
     limitations: Sequence[str] = (),
+    financial_deterioration: FinancialDeteriorationSection | None = None,
 ) -> SingleCompanyResearchReport:
     """Validate and bind one evidence-first report without blending its cases."""
 
@@ -362,6 +491,11 @@ def build_single_company_research_report(
         upside.benchmark_outperform_probability,
         "benchmark-outperform probability",
     )
+    _validate_financial_deterioration(
+        financial_deterioration,
+        expected_generation=generation,
+        evidence_ids=evidence_ids,
+    )
     normalized_limitations = tuple(
         _text(item, "limitation", 1000) for item in limitations
     )
@@ -374,6 +508,7 @@ def build_single_company_research_report(
         downside=downside,
         upside=upside,
         limitations=normalized_limitations,
+        financial_deterioration=financial_deterioration,
     )
 
 
@@ -383,6 +518,10 @@ __all__ = [
     "CompanyAnalysisRequest",
     "DownsideCase",
     "EvidenceCitation",
+    "FinancialDeteriorationItem",
+    "FinancialDeteriorationSection",
+    "FinancialTrendMetric",
+    "FinancialTrendPeriod",
     "Finding",
     "SingleCompanyResearchReport",
     "SourceCoverage",

@@ -31,7 +31,10 @@ from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
     collect_company_evidence_bundle,
 )
-from company_quality.company_analysis.detailed_analysis import build_detailed_analysis
+from company_quality.company_analysis.detailed_analysis import (
+    build_detailed_analysis,
+    build_financial_deterioration,
+)
 from company_quality.company_analysis.probability_calibration import (
     EmpiricalProbabilityCalibration,
     SingleCompanyProbabilityCalibration,
@@ -381,6 +384,12 @@ def build_kam_judgement(
     )
 
 
+def _unique_citations(
+    citations: Iterable[EvidenceCitation],
+) -> tuple[EvidenceCitation, ...]:
+    return tuple({item.evidence_id: item for item in citations}.values())
+
+
 def _with_hermes_candidates(
     *,
     report: SingleCompanyResearchReport,
@@ -395,11 +404,53 @@ def _with_hermes_candidates(
             ),
         )
     try:
+        locked_values = (
+            tuple(
+                {
+                    "period": period.period,
+                    "basis": period.basis,
+                    "metrics": tuple(
+                        {
+                            "metric_id": metric.metric_id,
+                            "absolute_value": str(metric.absolute_value),
+                            "ratio": str(metric.ratio) if metric.ratio is not None else None,
+                            "yoy_change": (
+                                str(metric.yoy_change)
+                                if metric.yoy_change is not None
+                                else None
+                            ),
+                            "ratio_yoy_change": (
+                                str(metric.ratio_yoy_change)
+                                if metric.ratio_yoy_change is not None
+                                else None
+                            ),
+                            "sequential_change": (
+                                str(metric.sequential_change)
+                                if metric.sequential_change is not None
+                                else None
+                            ),
+                            "ratio_sequential_change": (
+                                str(metric.ratio_sequential_change)
+                                if metric.ratio_sequential_change is not None
+                                else None
+                            ),
+                            "direction": metric.direction,
+                            "evidence_ids": metric.evidence_ids,
+                        }
+                        for metric in period.metrics
+                    ),
+                }
+                for period in report.financial_deterioration.periods
+            )
+            if report.financial_deterioration is not None
+            else ()
+        )
         candidates = candidate_adapter.extract_candidates(
             issuer_id=report.request.issuer_id,
             as_of=report.request.as_of,
             generation_id=report.generation_id,
             citations=report.citations,
+            locked_values=locked_values,
         )
         admission = admit_hermes_candidates(
             candidates=candidates,
@@ -408,12 +459,22 @@ def _with_hermes_candidates(
             citations=report.citations,
         )
     except Exception:
+        financial_deterioration = (
+            replace(
+                report.financial_deterioration,
+                status="partial",
+                partial_reason="hermes_unavailable",
+            )
+            if report.financial_deterioration is not None
+            else None
+        )
         return replace(
             report,
             limitations=(
                 *report.limitations,
                 "Hermes候選抽取：partial (hermes_unavailable)。",
             ),
+            financial_deterioration=financial_deterioration,
         )
     findings = tuple(
         Finding(
@@ -428,10 +489,46 @@ def _with_hermes_candidates(
             counter_evidence_reason=None,
         )
         for item in admission.admitted
+        if item.candidate_id != "hermes:financial-deterioration:synthesis"
     )
     rejected = ",".join(item.reason for item in admission.rejected)
     status = "available" if not admission.rejected else "partial"
     detail = f"；typed_rejections={rejected}" if rejected else ""
+    financial_deterioration = report.financial_deterioration
+    financial_evidence_ids = (
+        {
+            evidence_id
+            for period in financial_deterioration.periods
+            for metric in period.metrics
+            for evidence_id in metric.evidence_ids
+        }
+        if financial_deterioration is not None
+        else set()
+    )
+    syntheses = tuple(
+        item
+        for item in admission.admitted
+        if item.candidate_id == "hermes:financial-deterioration:synthesis"
+        and item.evidence_id in financial_evidence_ids
+        and not any(character.isdigit() for character in item.statement)
+    )
+    if financial_deterioration is not None:
+        if syntheses:
+            first_item = replace(
+                financial_deterioration.items[0], summary=syntheses[0].statement
+            )
+            financial_deterioration = replace(
+                financial_deterioration,
+                status="available",
+                items=(first_item, *financial_deterioration.items[1:]),
+                partial_reason=None,
+            )
+        else:
+            financial_deterioration = replace(
+                financial_deterioration,
+                status="partial",
+                partial_reason="hermes_synthesis_not_admitted",
+            )
     return build_single_company_research_report(
         request=report.request,
         generation_id=report.generation_id,
@@ -444,6 +541,7 @@ def _with_hermes_candidates(
             *report.limitations,
             f"Hermes候選抽取：{status}{detail}。",
         ),
+        financial_deterioration=financial_deterioration,
     )
 
 
@@ -469,6 +567,9 @@ def build_report_from_evidence(
     positive, outperform = _probabilities(
         bundle, generation_id, calibration, calibration_unavailable_reason
     )
+    financial_deterioration, financial_citations = build_financial_deterioration(
+        bundle, generation_id
+    )
     detailed = build_detailed_analysis(bundle)
     if detailed.available:
         limitations = [
@@ -481,7 +582,7 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=detailed.citations,
+            citations=_unique_citations((*detailed.citations, *financial_citations)),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -503,6 +604,7 @@ def build_report_from_evidence(
                 confidence=detailed.upside_confidence,
             ),
             limitations=tuple(limitations),
+            financial_deterioration=financial_deterioration,
         )
         return _with_hermes_candidates(
             report=report, candidate_adapter=candidate_adapter
@@ -541,7 +643,7 @@ def build_report_from_evidence(
         request=bundle.request,
         generation_id=generation_id,
         generated_at=generated_at,
-        citations=(citation,),
+        citations=_unique_citations((citation, *financial_citations)),
         source_coverage=bundle.source_coverage,
         downside=DownsideCase(
             generation_id=generation_id,
@@ -566,6 +668,7 @@ def build_report_from_evidence(
             confidence=Decimal("0.10"),
         ),
         limitations=tuple(limitations),
+        financial_deterioration=financial_deterioration,
     )
     return _with_hermes_candidates(report=report, candidate_adapter=candidate_adapter)
 
