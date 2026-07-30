@@ -80,6 +80,17 @@ class ValuationScenarios:
     limitations: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class EarningsValuationScenario:
+    name: str
+    eps_growth: Decimal
+    pe_factor: Decimal
+    forward_eps: Decimal
+    pe_ratio: Decimal
+    implied_price: Decimal
+    implied_return: Decimal
+
+
 def _instant(value: str) -> datetime:
     result = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if result.tzinfo is None:
@@ -246,7 +257,9 @@ class MarketValuationCollector:
         quote_rows = _rows(quote_body)
         valuation_row = _issuer_row(valuation_rows, security_code)
         quote_row = _issuer_row(quote_rows, security_code)
-        if str(valuation_row.get("Name", "")) not in company_name or str(quote_row.get("Name", "")) not in company_name:
+        valuation_name = str(valuation_row.get("Name", "")).strip()
+        quote_name = str(quote_row.get("Name", "")).strip()
+        if not valuation_name or valuation_name != quote_name:
             raise ValuationEvidenceError("TWSE valuation company-name mismatch")
         valuation_date = _roc_date(str(valuation_row.get("Date", "")))
         quote_date = _roc_date(str(quote_row.get("Date", "")))
@@ -257,7 +270,8 @@ class MarketValuationCollector:
             raise ValuationEvidenceError("TWSE valuation snapshot is future-dated")
 
         peer_values = []
-        for code in _CTCI_PEER_CODES:
+        peer_codes = _CTCI_PEER_CODES if security_code == "9933" else ()
+        for code in peer_codes:
             matches = [row for row in valuation_rows if str(row.get("Code", "")) == code]
             if len(matches) == 1 and str(matches[0].get("Date", "")) == str(valuation_row.get("Date", "")):
                 try:
@@ -338,3 +352,37 @@ def build_valuation_scenarios(
             "同業PE僅為當日current context；缺乏PIT產業分類與可比性校準，未用於正式同業排名或倍數決定。",
         ),
     )
+
+
+def build_earnings_valuation_scenarios(
+    *, market: MarketValuationSnapshot, ttm_eps: Decimal
+) -> tuple[EarningsValuationScenario, ...]:
+    """Transparent generic EPS×PE stress cases for issuers without backlog evidence."""
+
+    if ttm_eps <= 0:
+        raise ValuationEvidenceError("generic valuation requires positive TTM EPS")
+    assumptions = (
+        ("downside", Decimal("-0.10"), Decimal("0.85")),
+        ("base", Decimal("0.00"), Decimal("1.00")),
+        ("upside", Decimal("0.10"), Decimal("1.15")),
+    )
+    scenarios: list[EarningsValuationScenario] = []
+    anchor_pe = market.closing_price / ttm_eps
+    for name, eps_growth, pe_factor in assumptions:
+        forward_eps = ttm_eps * (Decimal("1") + eps_growth)
+        pe = anchor_pe * pe_factor
+        price = forward_eps * pe
+        scenarios.append(
+            EarningsValuationScenario(
+                name=name,
+                eps_growth=eps_growth,
+                pe_factor=pe_factor,
+                forward_eps=forward_eps.quantize(_Q_PRICE, rounding=ROUND_HALF_UP),
+                pe_ratio=pe.quantize(_Q_RATIO, rounding=ROUND_HALF_UP),
+                implied_price=price.quantize(_Q_PRICE, rounding=ROUND_HALF_UP),
+                implied_return=((price / market.closing_price - 1) * 100).quantize(
+                    _Q_RATIO, rounding=ROUND_HALF_UP
+                ),
+            )
+        )
+    return tuple(scenarios)
