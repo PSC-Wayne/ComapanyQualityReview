@@ -45,6 +45,10 @@ class FakeFinancialCollector:
             artifacts=tuple(
                 SimpleNamespace(
                     report=report,
+                    market=kwargs["market"],
+                    security_code=kwargs["security_code"],
+                    issuer_id=kwargs["issuer_id"],
+                    official_url="https://mops.twse.com.tw/official-statement",
                     available_at=kwargs["retrieved_at"],
                     path=Path(kwargs["output_root"]) / period.key / f"{report}.html",
                 )
@@ -64,6 +68,10 @@ class FakeAuditCollector:
         self.calls.append((kwargs["roc_year"], kwargs["quarter"]))
         missing = key in self.missing_pdf
         return SimpleNamespace(
+            market=kwargs["market"],
+            security_code=kwargs["security_code"],
+            issuer_id=kwargs["issuer_id"],
+            receipt_url="https://mops.twse.com.tw/official-receipt",
             period=key,
             filing_type="annual_audit" if kwargs["quarter"] == 4 else "q1_review",
             official_filed_at="2026-03-10T17:00:00+08:00",
@@ -198,3 +206,25 @@ def test_unresolved_identity_fails_before_collectors_are_called(tmp_path) -> Non
 
     assert financial.calls == []
     assert audit.calls == []
+
+
+def test_wrong_issuer_artifact_is_a_typed_gap_and_never_enters_period_facts(
+    tmp_path,
+) -> None:
+    class WrongIssuerFinancialCollector(FakeFinancialCollector):
+        def collect_period(self, **kwargs):
+            result = super().collect_period(**kwargs)
+            for artifact in result.artifacts:
+                artifact.issuer_id = "12345678"
+            return result
+
+    bundle = _collect(tmp_path, financial=WrongIssuerFinancialCollector())
+    coverage = {item.family: item for item in bundle.source_coverage}
+
+    assert bundle.status == "partial"
+    assert coverage["three_statement_html"].available == 0
+    assert all(period.financial is None for period in bundle.periods)
+    assert all(
+        "wrong_issuer_candidate" in reason
+        for reason in coverage["three_statement_html"].missing_reasons
+    )

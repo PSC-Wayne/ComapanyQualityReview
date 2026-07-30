@@ -23,6 +23,7 @@ from company_quality.company_analysis.contracts import (
 from company_quality.identity import (
     CompanyIdentity,
     OfficialIdentitySource,
+    admit_artifact_identity,
     resolve_identity,
 )
 from company_quality.filing_store import FilingStore, FilingStoreStats
@@ -174,13 +175,32 @@ def collect_company_evidence_bundle(
                 as_of=decision_time.isoformat(),
             )
             reports = {artifact.report for artifact in candidate.artifacts}
+            admissions = tuple(
+                admit_artifact_identity(
+                    identity,
+                    artifact_market=artifact.market,
+                    artifact_security_code=artifact.security_code,
+                    artifact_issuer_id=artifact.issuer_id,
+                    identity_evidence_url=artifact.official_url,
+                )
+                for artifact in candidate.artifacts
+            )
+            rejected = tuple(item for item in admissions if item.status == "rejected")
             future = tuple(
                 artifact
                 for artifact in candidate.artifacts
                 if _instant(artifact.available_at, "financial artifact available_at")
                 > decision_time
             )
-            if future:
+            if rejected:
+                reason = _coverage_reason(
+                    period.key,
+                    "three_statement_html",
+                    rejected[0].reason,
+                )
+                statement_missing.append(reason)
+                reasons.append(reason)
+            elif future:
                 reason = _coverage_reason(
                     period.key, "three_statement_html", "artifact_after_as_of"
                 )
@@ -235,7 +255,24 @@ def collect_company_evidence_bundle(
                     time.sleep(2)
             if candidate_audit is None:
                 raise RuntimeError("audit collector returned no result")
-            if _instant(candidate_audit.available_at, "audit available_at") > decision_time:
+            audit_admission = admit_artifact_identity(
+                identity,
+                artifact_market=candidate_audit.market,
+                artifact_security_code=candidate_audit.security_code,
+                artifact_issuer_id=candidate_audit.issuer_id,
+                identity_evidence_url=candidate_audit.receipt_url,
+            )
+            if audit_admission.status == "rejected":
+                reason = _coverage_reason(
+                    period.key,
+                    "audit_or_review_pdf",
+                    audit_admission.reason,
+                )
+                audit_missing.append(reason)
+                reasons.append(reason)
+                if period.quarter == 4:
+                    annual_missing.append(reason)
+            elif _instant(candidate_audit.available_at, "audit available_at") > decision_time:
                 reason = _coverage_reason(
                     period.key, "audit_or_review_pdf", "filing_after_as_of"
                 )

@@ -29,7 +29,24 @@ _TERMINAL = frozenset({"succeeded", "failed"})
 
 
 class DashboardJobError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        candidates: Sequence[object] = (),
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.candidates = tuple(candidates)
+
+    def payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {"error": str(self)}
+        if self.reason is not None:
+            payload["reason"] = self.reason
+        if self.candidates:
+            payload["candidates"] = _jsonable(self.candidates)
+        return payload
 
 
 def _now() -> str:
@@ -153,7 +170,11 @@ class AnalysisJobService:
         sources = self._sources()
         resolution = resolve_identity(needle, requested_market, as_of, sources=sources)
         if resolution.status != "resolved" or resolution.identity is None:
-            raise DashboardJobError(f"identity resolution failed: {resolution.status}")
+            raise DashboardJobError(
+                f"identity resolution failed: {resolution.status}",
+                reason=resolution.reason,
+                candidates=resolution.candidates,
+            )
         identity = resolution.identity
 
         with self._connect() as connection:
@@ -234,6 +255,9 @@ class AnalysisJobService:
                             "company_name": values[1],
                             "short_name": values[2],
                             "market": source.market,
+                            "issuer_id": str(row["issuer_id"]),
+                            "identity_status": "official_candidate",
+                            "identity_evidence_url": source.url,
                         }
                     )
                 if len(matches) >= limit:

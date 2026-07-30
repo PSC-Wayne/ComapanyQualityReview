@@ -32,7 +32,7 @@ _INDEX = r"""<!doctype html>
 const form=document.querySelector('#analysis-form'),identifier=document.querySelector('#identifier'),market=document.querySelector('#market'),submit=document.querySelector('#submit'),suggestions=document.querySelector('#suggestions'),formError=document.querySelector('#form-error'),jobPanel=document.querySelector('#job-panel'),resultPanel=document.querySelector('#result-panel');let pollTimer=null,searchTimer=null;
 const showError=(el,msg)=>{el.textContent=msg;el.classList.toggle('hidden',!msg)};
 const stageOrder=['queued','collecting_official_evidence','research_report_complete'];
-function renderJob(job){jobPanel.classList.remove('hidden');document.querySelector('#company').textContent=`${job.security_code} ${job.company_name}`;document.querySelector('#status').textContent=job.status;document.querySelector('#generation').textContent=job.generation_id;document.querySelectorAll('.timeline li').forEach((li,i)=>{const current=Math.max(0,stageOrder.indexOf(job.stage));li.classList.toggle('done',job.status==='succeeded'||i<current);li.classList.toggle('active',job.status!=='failed'&&i===current)});showError(document.querySelector('#job-error'),job.error||'')}
+function renderJob(job){jobPanel.classList.remove('hidden');document.querySelector('#company').textContent=`${job.security_code} ${job.company_name} · ${job.market} · issuer ${job.issuer_id}`;document.querySelector('#status').textContent=job.status;document.querySelector('#generation').textContent=job.generation_id;document.querySelectorAll('.timeline li').forEach((li,i)=>{const current=Math.max(0,stageOrder.indexOf(job.stage));li.classList.toggle('done',job.status==='succeeded'||i<current);li.classList.toggle('active',job.status!=='failed'&&i===current)});showError(document.querySelector('#job-error'),job.error||'')}
 function probabilityCard(label,value){const item=value||{status:'unavailable'};const formal=item.status==='formal';const point=formal?`${(Number(item.point)*100).toFixed(1)}%`:'Unavailable';const interval=formal?`90%區間 ${(Number(item.lower)*100).toFixed(1)}%–${(Number(item.upper)*100).toFixed(1)}%`:escapeHtml(item.reason||'尚未正式校準');return `<div class="metric"><span class="muted">${escapeHtml(label)} · ${escapeHtml(item.status)}</span><strong class="${formal?'coverage-ok':'coverage-gap'}">${point}</strong><span class="muted">${interval}</span></div>`}
 function caseCard(label,value){if(!value)return '';const findings=(value.findings||[]).map(item=>{const materiality=item.materiality==null?'':` · materiality ${(Number(item.materiality)*100).toFixed(0)}%`;return `<li style="margin-bottom:10px"><span class="muted">${escapeHtml(item.kind)} / ${escapeHtml(item.direction)}${materiality}</span><br>${escapeHtml(item.statement)}</li>`}).join('');return `<div class="metric"><span class="muted">${escapeHtml(label)} · ${escapeHtml(value.status)} · confidence ${(Number(value.confidence)*100).toFixed(0)}%</span><strong>${escapeHtml(value.headline)}</strong><ul>${findings}</ul></div>`}
 function citationCard(item){const location=item.source_format==='pdf'?`第 ${item.page} 頁 · bbox ${(item.coordinate||[]).join(', ')}`:item.locator;return `<details style="margin:8px 0;padding:10px;border:1px solid var(--line);border-radius:10px;background:white"><summary>${escapeHtml(item.period)} · ${escapeHtml(item.source_id)} · ${escapeHtml(location||'')}</summary><p>${escapeHtml(item.verbatim_excerpt)}</p><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">開啟官方來源</a></details>`}
@@ -133,7 +133,10 @@ def make_server(
                 )
                 self._send_json(202, _public_job(job))
             except (DashboardJobError, ValueError, TypeError) as exc:
-                self._error(400, str(exc))
+                if isinstance(exc, DashboardJobError):
+                    self._send_json(400, exc.payload())
+                else:
+                    self._error(400, str(exc))
             except Exception as exc:
                 self._error(503, f"analysis service unavailable: {exc}")
 
