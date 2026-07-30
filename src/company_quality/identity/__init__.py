@@ -19,6 +19,14 @@ Status = Literal[
     "historical_identity_unresolved",
     "invalid_decision_time",
 ]
+ResolutionReason = Literal[
+    "official_identity_confirmed",
+    "no_official_candidate",
+    "preferred_market_candidate_not_found",
+    "ambiguous_official_candidates",
+    "historical_identity_snapshot_unavailable",
+    "invalid_decision_time",
+]
 
 TWSE_IDENTITY_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
 TPEX_IDENTITY_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
@@ -49,6 +57,16 @@ class CompanyIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class OfficialIdentityCandidate:
+    security_code: str
+    issuer_id: str
+    company_name: str
+    short_name: str
+    market: Market
+    evidence_url: str
+
+
+@dataclass(frozen=True, slots=True)
 class IdentityResolution:
     identifier: str
     requested_market: Market | None
@@ -56,8 +74,77 @@ class IdentityResolution:
     status: Status
     identity: CompanyIdentity | None
     evidence_urls: tuple[str, ...]
+    candidates: tuple[OfficialIdentityCandidate, ...] = ()
+    reason: ResolutionReason = "no_official_candidate"
     rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
         "NO_RATING_NOT_APPLICABLE"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactIdentityAdmission:
+    status: Literal["admitted", "rejected"]
+    reason: Literal[
+        "official_issuer_identity_match",
+        "official_issuer_identity_unconfirmed",
+        "wrong_issuer_candidate",
+    ]
+    resolved_issuer_id: str
+    artifact_issuer_id: str | None
+    artifact_security_code: str
+    artifact_market: Market
+    identity_evidence_url: str | None
+
+
+def admit_artifact_identity(
+    identity: CompanyIdentity,
+    *,
+    artifact_market: Market,
+    artifact_security_code: str,
+    artifact_issuer_id: str | None,
+    identity_evidence_url: str | None,
+) -> ArtifactIdentityAdmission:
+    """Admit an artifact only through an official same-issuer identity chain."""
+
+    confirmed = bool(
+        artifact_issuer_id
+        and identity_evidence_url
+        and identity_evidence_url.startswith("https://")
+    )
+    if not confirmed:
+        status: Literal["admitted", "rejected"] = "rejected"
+        reason: Literal[
+            "official_issuer_identity_match",
+            "official_issuer_identity_unconfirmed",
+            "wrong_issuer_candidate",
+        ] = "official_issuer_identity_unconfirmed"
+    elif artifact_issuer_id != identity.issuer_id:
+        status = "rejected"
+        reason = "wrong_issuer_candidate"
+    else:
+        status = "admitted"
+        reason = "official_issuer_identity_match"
+    return ArtifactIdentityAdmission(
+        status=status,
+        reason=reason,
+        resolved_issuer_id=identity.issuer_id,
+        artifact_issuer_id=artifact_issuer_id,
+        artifact_security_code=artifact_security_code,
+        artifact_market=artifact_market,
+        identity_evidence_url=identity_evidence_url,
+    )
+
+
+def _candidate(
+    source: OfficialIdentitySource, row: Mapping[str, str]
+) -> OfficialIdentityCandidate:
+    return OfficialIdentityCandidate(
+        security_code=row["security_code"].strip(),
+        issuer_id=row["issuer_id"].strip(),
+        company_name=row["company_name"].strip(),
+        short_name=row["short_name"].strip(),
+        market=source.market,
+        evidence_url=source.url,
     )
 
 
@@ -157,7 +244,13 @@ def resolve_identity(
     parsed_time = _parse_instant(decision_time)
     if parsed_time is None:
         return IdentityResolution(
-            identifier, market, decision_time, "invalid_decision_time", None, ()
+            identifier,
+            market,
+            decision_time,
+            "invalid_decision_time",
+            None,
+            (),
+            reason="invalid_decision_time",
         )
 
     normalized_time = parsed_time.isoformat(
@@ -175,18 +268,25 @@ def resolve_identity(
             "historical_identity_unresolved",
             None,
             tuple(source.url for source in relevant),
+            reason="historical_identity_snapshot_unavailable",
         )
 
     needle = identifier.strip()
-    matches: list[tuple[OfficialIdentitySource, Mapping[str, str]]] = []
-    for source in relevant:
+    all_matches: list[tuple[OfficialIdentitySource, Mapping[str, str]]] = []
+    for source in source_set:
+        if parsed_time < _available_instant(source.available_at):
+            continue
         for row in source.rows:
             if needle in {
                 row["security_code"].strip(),
                 row["company_name"].strip(),
                 row["short_name"].strip(),
             }:
-                matches.append((source, row))
+                all_matches.append((source, row))
+    matches = [
+        item for item in all_matches if market is None or item[0].market == market
+    ]
+    candidates = tuple(_candidate(source, row) for source, row in all_matches)
 
     if len(matches) > 1:
         return IdentityResolution(
@@ -196,22 +296,11 @@ def resolve_identity(
             "ambiguous_identity",
             None,
             tuple(sorted({source.url for source, _ in matches})),
+            candidates=candidates,
+            reason="ambiguous_official_candidates",
         )
     if not matches:
-        other_market_match = False
-        if market is not None:
-            other_market_match = any(
-                needle
-                in {
-                    row["security_code"].strip(),
-                    row["company_name"].strip(),
-                    row["short_name"].strip(),
-                }
-                for source in source_set
-                if source.market != market
-                and parsed_time >= _available_instant(source.available_at)
-                for row in source.rows
-            )
+        other_market_match = market is not None and bool(all_matches)
         return IdentityResolution(
             identifier,
             market,
@@ -219,6 +308,12 @@ def resolve_identity(
             "not_found_in_requested_market" if other_market_match else "not_found",
             None,
             tuple(source.url for source in relevant),
+            candidates=candidates,
+            reason=(
+                "preferred_market_candidate_not_found"
+                if other_market_match
+                else "no_official_candidate"
+            ),
         )
 
     source, row = matches[0]
@@ -238,4 +333,20 @@ def resolve_identity(
         "resolved",
         identity,
         (source.url,),
+        candidates=candidates,
+        reason="official_identity_confirmed",
     )
+
+
+__all__ = [
+    "ArtifactIdentityAdmission",
+    "CompanyIdentity",
+    "IdentityResolution",
+    "OfficialIdentityCandidate",
+    "OfficialIdentitySource",
+    "TPEX_IDENTITY_URL",
+    "TWSE_IDENTITY_URL",
+    "admit_artifact_identity",
+    "fetch_official_identity_sources",
+    "resolve_identity",
+]

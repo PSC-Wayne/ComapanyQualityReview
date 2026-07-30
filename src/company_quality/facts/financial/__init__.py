@@ -161,7 +161,13 @@ def _target_header(report: Report, roc_year: int, quarter: int) -> str:
     if report == "balance":
         return f"{roc_year}年{end_month:02d}月{end_day:02d}日"
     if report == "income":
+        if quarter == 1:
+            return f"{roc_year}年01月01日至{roc_year}年03月31日"
+        if quarter == 4:
+            return f"{roc_year}年度"
         return f"{roc_year}年第{quarter}季"
+    if quarter == 4:
+        return f"{roc_year}年度"
     return f"{roc_year}年01月01日至{roc_year}年{end_month:02d}月{end_day:02d}日"
 
 
@@ -171,7 +177,11 @@ def _dates(report: Report, roc_year: int, quarter: int) -> tuple[str | None, str
     end = f"{year:04d}-{end_month:02d}-{calendar.monthrange(year, end_month)[1]:02d}"
     if report == "balance":
         return None, end
-    start_month = 1 if report == "cash_flow" else (quarter - 1) * 3 + 1
+    start_month = (
+        1
+        if report == "cash_flow" or (report == "income" and quarter in (1, 4))
+        else (quarter - 1) * 3 + 1
+    )
     return f"{year:04d}-{start_month:02d}-01", end
 
 

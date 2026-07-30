@@ -49,6 +49,24 @@ def announcement() -> bytes:
     }""".encode()
 
 
+def annual_announcement() -> bytes:
+    return """{
+      "code": 200,
+      "message": "查詢成功",
+      "result": {
+        "reportType": "合併",
+        "marketName": "上市公司",
+        "year": "114",
+        "seasonName": "第４季",
+        "companyAbbreviation": "台積電",
+        "IFRSAccountantReports": ["合併財務報告-意見種類：無保留意見--"],
+        "declarationOfFinancialReports": [{"title":"合併財務報告更(補)正：", "url":[]}],
+        "illustrate": [{"content":"本公司及子公司民國一百一十四年度合併財務報告，業經勤業眾信聯合會計師事務所吳世宗及林尚志會計師查核竣事，並出具無保留意見之查核報告在案。", "url":[]}]
+      },
+      "datetime": "115/02/26 17:23:30"
+    }""".encode()
+
+
 def listing(pdf_size: int) -> bytes:
     html = f"""
     <html><body><table>
@@ -58,6 +76,13 @@ def listing(pdf_size: int) -> bytes:
     </table></body></html>
     """
     return html.encode("big5", errors="xmlcharrefreplace")
+
+
+def annual_listing(pdf_size: int) -> bytes:
+    return listing(pdf_size).replace(
+        "115 年 第一季".encode("big5"),
+        "114 年 第四季".encode("big5"),
+    ).replace(b"202601_2330_AI1.pdf", b"202504_2330_AI1.pdf")
 
 
 def collector(pdf=b"%PDF-1.7 fake audit report"):
@@ -127,6 +152,28 @@ def test_collects_review_inventory_with_official_receipt_and_pdf(tmp_path) -> No
     assert result.announcement_sha256 != result.receipt_sha256
     assert result.rating_disposition == "NO_RATING_NOT_APPLICABLE"
     assert result.schema_version == "AuditFilingInventory.v1"
+
+
+def test_collects_annual_inventory_when_official_narrative_says_audited(tmp_path) -> None:
+    pdf = b"%PDF-1.7 annual audit report"
+    transport = FakeTransport(
+        annual_announcement(),
+        annual_listing(len(pdf)),
+        b"<html><a href='/pdf/annual-report.pdf'>report</a></html>",
+        pdf,
+    )
+
+    result = MopsAuditInventoryCollector(transport).collect_period(
+        "2330", "22099131", "TWSE", 114, 4,
+        "domestic_general", "general", tmp_path,
+        "2026-07-29T12:00:00+08:00",
+    )
+
+    assert result.filing_type == "annual_audit"
+    assert result.assurance_type == "audit"
+    assert result.opinion_type == "unmodified"
+    assert result.auditor_firm == "勤業眾信聯合會計師事務所"
+    assert result.auditors == ("吳世宗", "林尚志")
 
 
 def test_announcement_query_time_is_not_used_as_filing_time(tmp_path) -> None:
