@@ -38,6 +38,7 @@ from company_quality.company_analysis.material_events import (
 from company_quality.company_analysis.valuation import (
     MarketValuationCollector,
     ValuationEvidenceError,
+    build_earnings_valuation_scenarios,
     build_valuation_scenarios,
 )
 from company_quality.sources.financial import FinancialArtifact
@@ -706,6 +707,46 @@ def _trend_period(
     return FinancialTrendPeriod(period, basis, tuple(metrics)), citations
 
 
+def _trend_metric_text(metric: FinancialTrendMetric, period: FinancialTrendPeriod) -> str:
+    yoy = _pct(metric.yoy_change * 100) if metric.yoy_change is not None else "無法計算YoY"
+    amount = _bn(metric.absolute_value)
+    if metric.metric_id in {"gross_profit", "operating_profit", "net_income"} and metric.ratio is not None and metric.ratio_yoy_change is not None:
+        prior_ratio = metric.ratio - metric.ratio_yoy_change
+        return (
+            f"{metric.label}：{amount}（{yoy}），占營收比由"
+            f"{_pct(prior_ratio * 100)}變為{_pct(metric.ratio * 100)}。"
+        )
+    if metric.metric_id in {"receivables", "inventory"} and metric.ratio is not None and metric.ratio_yoy_change is not None:
+        prior_ratio = metric.ratio - metric.ratio_yoy_change
+        if metric.metric_id == "receivables":
+            days = Decimal("365") if period.basis == "annual" else {
+                "1": Decimal("90"), "2": Decimal("181"), "3": Decimal("273")
+            }[period.period[-1]]
+            return (
+                f"應收帳款：{amount}（{yoy}），占營收比由"
+                f"{_pct(prior_ratio * 100)}升至{_pct(metric.ratio * 100)}；"
+                f"以本期天數近似DSO由{(prior_ratio * days).quantize(Decimal('0.1'))}天"
+                f"增至{(metric.ratio * days).quantize(Decimal('0.1'))}天。"
+            )
+        return (
+            f"存貨：{amount}（{yoy}），占營收比由"
+            f"{_pct(prior_ratio * 100)}變為{_pct(metric.ratio * 100)}。"
+        )
+    if metric.metric_id == "liquidity" and metric.ratio is not None and metric.ratio_yoy_change is not None:
+        prior_ratio = metric.ratio - metric.ratio_yoy_change
+        return f"流動比率：由{prior_ratio.quantize(Decimal('0.01'))}倍升至{metric.ratio.quantize(Decimal('0.01'))}倍。"
+    if metric.metric_id == "liabilities" and metric.ratio is not None and metric.ratio_yoy_change is not None:
+        prior_ratio = metric.ratio - metric.ratio_yoy_change
+        return f"負債比率：由{_pct(prior_ratio * 100)}降至{_pct(metric.ratio * 100)}，負債{amount}（{yoy}）。"
+    if metric.ratio is not None and metric.ratio_yoy_change is not None:
+        prior_ratio = metric.ratio - metric.ratio_yoy_change
+        return (
+            f"{metric.label}：{amount}（{yoy}），占營收比由"
+            f"{_pct(prior_ratio * 100)}變為{_pct(metric.ratio * 100)}。"
+        )
+    return f"{metric.label}：{amount}（{yoy}）。"
+
+
 def build_financial_deterioration(
     bundle: CompanyEvidenceBundle, generation_id: str
 ) -> tuple[FinancialDeteriorationSection | None, tuple[EvidenceCitation, ...]]:
@@ -734,9 +775,21 @@ def build_financial_deterioration(
     latest = periods[-1]
     adverse = tuple(metric for metric in latest.metrics if metric.direction == "deteriorating")
     improving = tuple(metric for metric in latest.metrics if metric.direction == "improving")
+    mixed = tuple(metric for metric in latest.metrics if metric.direction == "mixed")
+    core_ids = {"revenue", "gross_profit", "operating_profit", "net_income"}
+    core_improving = sum(
+        metric.direction == "improving"
+        for metric in latest.metrics
+        if metric.metric_id in core_ids
+    )
     if len(adverse) == 1:
         severity: Literal["low", "moderate", "high"] = "low"
-        summary = "目前只有單一指標惡化，不足以形成財報惡化定罪；維持監測。"
+        summary = (
+            "整體財務表現明顯改善；營收、毛利率、營業利益率與淨利四項核心指標均改善。"
+            "唯一明確較差項目為應收帳款回收速度，屬需注意但尚未抵銷整體改善。"
+            if core_improving == 4 and adverse[0].metric_id == "receivables"
+            else "整體以改善為主，僅單一指標明確轉差。"
+        )
     elif len(adverse) >= 5:
         severity = "high"
         summary = "多項獲利、現金流、營運資金或財務結構指標同步惡化。"
@@ -746,12 +799,22 @@ def build_financial_deterioration(
     else:
         severity = "low"
         summary = "最新interim未見多指標同步惡化，現階段不形成財報惡化結論。"
+    mixed_attention = tuple(
+        metric
+        for metric in mixed
+        if not (
+            metric.metric_id in {"inventory", "liabilities"}
+            and metric.ratio_yoy_change is not None
+            and metric.ratio_yoy_change < 0
+        )
+    )
+    mixed_positive = tuple(metric for metric in mixed if metric not in mixed_attention)
     evidence_text = tuple(
-        f"{latest.period} {metric.label}同比方向為惡化。" for metric in adverse[:4]
-    ) or (f"{latest.period}未見同比惡化指標。",)
+        _trend_metric_text(metric, latest) for metric in (*adverse, *mixed_attention)
+    ) or (f"{latest.period}未見明確較差或混合指標。",)
     counter_text = tuple(
-        f"{latest.period} {metric.label}同比方向改善。" for metric in improving[:4]
-    ) or ("目前沒有足以抵銷惡化訊號的改善指標。",)
+        _trend_metric_text(metric, latest) for metric in (*improving, *mixed_positive)
+    ) or ("本期未見明確改善指標。",)
     evidence_ids = tuple(
         dict.fromkeys(
             evidence_id for metric in latest.metrics for evidence_id in metric.evidence_ids
@@ -1067,8 +1130,6 @@ def build_detailed_analysis(
     )
     if annual_eps is None or quarter_eps is None:
         valuation_limitations.append("缺少可解析的年度或最新季度EPS，情境估值維持blocked。")
-    elif backlog_match is None:
-        valuation_limitations.append("缺少已驗證backlog數值，情境估值維持blocked。")
     elif event_store_root is None:
         valuation_limitations.append("無法定位中央 filing store，市場估值snapshot維持未接入。")
     else:
@@ -1080,16 +1141,10 @@ def build_detailed_analysis(
                 as_of=bundle.request.as_of,
                 store_root=event_store_root,
             )
+            ttm_eps = annual_eps.current + quarter_eps.current - quarter_eps.prior
             ttm_revenue = (
                 rev.current + qrev.current - qrev.prior
             ) / Decimal("100000")
-            ttm_eps = annual_eps.current + quarter_eps.current - quarter_eps.prior
-            valuation = build_valuation_scenarios(
-                market=market_snapshot,
-                ttm_revenue_twd_100m=ttm_revenue,
-                ttm_eps=ttm_eps,
-                backlog_twd_100m=Decimal(backlog_match.group(1).replace(",", "")),
-            )
             citations.extend(
                 (market_snapshot.quote_citation, market_snapshot.valuation_citation)
             )
@@ -1097,13 +1152,15 @@ def build_detailed_analysis(
                 f"；三家工程／廠務公司當日PE中位數{market_snapshot.peer_pe_median.quantize(Decimal('0.1'))}倍，"
                 "但僅作current context，不作正式PIT同業排名"
                 if market_snapshot.peer_pe_median is not None
-                else "；同業PE樣本不足"
+                else ""
             )
             market_finding = _fact(
                 "upside:valuation:market-snapshot",
                 "context",
                 f"TWSE {market_snapshot.market_date.isoformat()}官方收盤{market_snapshot.closing_price}元、"
-                f"PE {market_snapshot.pe_ratio}倍、PB {market_snapshot.pb_ratio}倍、殖利率{market_snapshot.dividend_yield}%"
+                f"TTM EPS {ttm_eps.quantize(Decimal('0.01'))}元、PE {market_snapshot.pe_ratio}倍、"
+                f"以本報告TTM EPS換算PE {(market_snapshot.closing_price / ttm_eps).quantize(Decimal('0.1'))}倍、"
+                f"PB {market_snapshot.pb_ratio}倍、殖利率{market_snapshot.dividend_yield}%"
                 + peer_context
                 + "。",
                 (
@@ -1114,33 +1171,60 @@ def build_detailed_analysis(
             )
             valuation_findings.append(market_finding)
             scenario_names = {"downside": "保守", "base": "基準", "upside": "樂觀"}
-            for scenario in valuation.scenarios:
-                scenario_direction: Literal["support", "counter", "context"] = (
-                    "counter"
-                    if scenario.name == "downside"
-                    else "support" if scenario.name == "upside" else "context"
+            if backlog_match is not None:
+                valuation = build_valuation_scenarios(
+                    market=market_snapshot,
+                    ttm_revenue_twd_100m=ttm_revenue,
+                    ttm_eps=ttm_eps,
+                    backlog_twd_100m=Decimal(backlog_match.group(1).replace(",", "")),
                 )
-                valuation_findings.append(
-                    _derived(
-                        f"upside:valuation:scenario:{scenario.name}",
-                        "judgement",
-                        scenario_direction,
-                        f"{scenario_names[scenario.name]}情境：在建工程轉換率{_pct(scenario.backlog_conversion * 100)}、"
-                        f"12個月營收{scenario.revenue_twd_100m}億元、獲利率相對TTM倍率{scenario.earnings_margin_factor}、"
-                        f"EPS {scenario.eps}元、PE {scenario.pe_ratio}倍，隱含價{scenario.implied_price}元，"
-                        f"相對官方收盤報酬{scenario.implied_return:+}%；FCF margin假設{_pct(scenario.fcf_margin * 100)}、"
-                        f"FCF約{scenario.fcf_twd_100m}億元。這是透明壓力測試，不是公司指引或正式目標價。",
-                        (
-                            market_finding.finding_id,
-                            annual_fact.finding_id,
-                            "upside:guidance:issuer:backlog",
-                        ),
-                        ("upside:guidance:issuer:revenue-conversion",),
-                        "backlog仍未充分轉為營收且應收增速偏高；倍數與獲利率不具正式校準。",
-                        "0.65",
+                for scenario in valuation.scenarios:
+                    scenario_direction: Literal["support", "counter", "context"] = (
+                        "counter" if scenario.name == "downside" else "support" if scenario.name == "upside" else "context"
                     )
+                    valuation_findings.append(
+                        _derived(
+                            f"upside:valuation:scenario:{scenario.name}",
+                            "judgement",
+                            scenario_direction,
+                            f"{scenario_names[scenario.name]}情境：在建工程轉換率{_pct(scenario.backlog_conversion * 100)}、"
+                            f"12個月營收{scenario.revenue_twd_100m}億元、獲利率相對TTM倍率{scenario.earnings_margin_factor}、"
+                            f"EPS {scenario.eps}元、PE {scenario.pe_ratio}倍，隱含價{scenario.implied_price}元，"
+                            f"相對官方收盤報酬{scenario.implied_return:+}%；FCF margin假設{_pct(scenario.fcf_margin * 100)}、"
+                            f"FCF約{scenario.fcf_twd_100m}億元。這是透明壓力測試，不是公司指引或正式目標價。",
+                            (market_finding.finding_id, annual_fact.finding_id, "upside:guidance:issuer:backlog"),
+                            ("upside:guidance:issuer:revenue-conversion",),
+                            "backlog仍未充分轉為營收且應收增速偏高；倍數與獲利率不具正式校準。",
+                            "0.65",
+                        )
+                    )
+                valuation_limitations.extend(valuation.limitations)
+            else:
+                for scenario in build_earnings_valuation_scenarios(
+                    market=market_snapshot, ttm_eps=ttm_eps
+                ):
+                    scenario_direction = (
+                        "counter" if scenario.name == "downside" else "support" if scenario.name == "upside" else "context"
+                    )
+                    valuation_findings.append(
+                        _derived(
+                            f"upside:valuation:scenario:{scenario.name}",
+                            "judgement",
+                            scenario_direction,
+                            f"{scenario_names[scenario.name]}情境：TTM EPS成長假設{scenario.eps_growth * 100:+}%、"
+                            f"PE採『官方收盤÷本報告TTM EPS』錨定倍數的{scenario.pe_factor}倍，推估EPS {scenario.forward_eps}元、"
+                            f"PE {scenario.pe_ratio}倍、隱含價{scenario.implied_price}元，"
+                            f"相對官方收盤報酬{scenario.implied_return:+}%。這是透明EPS×PE壓力測試，"
+                            "不是公司指引或正式目標價。",
+                            (market_finding.finding_id, annual_fact.finding_id),
+                            (),
+                            "EPS成長與PE倍率未經公司特定PIT校準。",
+                            "0.55",
+                        )
+                    )
+                valuation_limitations.append(
+                    "公司沒有已驗證backlog數值，改用透明EPS×PE壓力測試；保守／基準／樂觀假設未經公司特定PIT校準。"
                 )
-            valuation_limitations.extend(valuation.limitations)
         except ValuationEvidenceError as exc:
             valuation_limitations.append(
                 f"官方市場估值或情境計算失敗：{type(exc).__name__}:{str(exc)[:200]}"
