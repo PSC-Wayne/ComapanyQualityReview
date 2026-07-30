@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime
+import calendar
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from html.parser import HTMLParser
+import json
+import os
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+import re
+from typing import Iterable, Literal, Mapping, Protocol, Sequence
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
 
 from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.contracts import (
@@ -52,6 +58,703 @@ class ReportOrchestrationError(RuntimeError):
     """Raised when current-generation evidence cannot safely form a report."""
 
 
+class NewsSourceError(RuntimeError):
+    """Raised when discovery or original-source materialization is unavailable."""
+
+
+NewsSourceRole = Literal[
+    "regulator",
+    "court",
+    "authority",
+    "issuer",
+    "mainstream_media",
+    "social",
+    "forum",
+    "anonymous",
+]
+NewsCategory = Literal[
+    "litigation_penalty",
+    "project_performance",
+    "safety_environment",
+    "financial_credit",
+    "governance_audit",
+    "customer_supply_chain",
+    "cybersecurity",
+    "operational_interruption",
+]
+_NEWS_CATEGORIES = frozenset(
+    {
+        "litigation_penalty",
+        "project_performance",
+        "safety_environment",
+        "financial_credit",
+        "governance_audit",
+        "customer_supply_chain",
+        "cybersecurity",
+        "operational_interruption",
+    }
+)
+_EXTENDED_NEWS_CATEGORIES = frozenset(
+    {"litigation_penalty", "project_performance", "safety_environment"}
+)
+_UNVERIFIED_ROLES = frozenset({"social", "forum", "anonymous"})
+_SOURCE_PRECEDENCE = {
+    "regulator": 0,
+    "court": 0,
+    "authority": 0,
+    "issuer": 1,
+    "mainstream_media": 2,
+    "social": 3,
+    "forum": 3,
+    "anonymous": 3,
+}
+_MAINSTREAM_DOMAINS = (
+    "cna.com.tw",
+    "udn.com",
+    "ltn.com.tw",
+    "chinatimes.com",
+    "ctee.com.tw",
+    "ettoday.net",
+    "tw.stock.yahoo.com",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class NewsDiscoveryCandidate:
+    """Discovery metadata only; never report evidence by itself."""
+
+    discovery_id: str
+    url: str
+    publisher: str
+    source_role: NewsSourceRole
+    title: str
+    publication_at: str
+    available_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class _MaterializedNewsSource:
+    evidence_id: str
+    discovery_id: str
+    issuer_id: str
+    security_code: str
+    company_name: str
+    url: str
+    publisher: str
+    source_role: NewsSourceRole
+    title: str
+    publication_at: str
+    available_at: str
+    retrieved_at: str
+    content_sha256: str
+    artifact_path: Path
+    text: str
+    citation_locator: str
+
+
+@dataclass(frozen=True, slots=True)
+class RecentNegativeNewsEvent:
+    event_id: str
+    evidence_id: str
+    issuer_id: str
+    security_code: str
+    company_name: str
+    category: NewsCategory
+    status: Literal["resolved", "unresolved", "ongoing"]
+    event_date: str
+    publication_at: str
+    available_at: str
+    retrieved_at: str
+    publisher: str
+    source_url: str
+    source_role: NewsSourceRole
+    citation_locator: str
+    content_sha256: str
+    artifact_path: Path
+    verbatim_excerpt: str
+    affected_account: str
+    cash_flow: str
+    impact: Literal["realised", "hypothetical"]
+    severity: Literal["low", "medium", "high"]
+    confidence: Literal["low", "medium", "high"]
+    counterevidence: str
+    monitoring: str
+    invalidation: str
+    duplicate_cluster: str
+    duplicate_source_ids: tuple[str, ...]
+    verification_status: Literal["verified", "unverified"]
+    affects_downside: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RecentNegativeNewsFinding(Finding):
+    category: NewsCategory
+    status: Literal["resolved", "unresolved", "ongoing"]
+    affected_account: str
+    cash_flow: str
+    impact: Literal["realised", "hypothetical"]
+    severity: Literal["low", "medium", "high"]
+    confidence: Literal["low", "medium", "high"]
+    counterevidence: str
+    monitoring: str
+    invalidation: str
+    duplicate_cluster: str
+    source_role: NewsSourceRole
+
+
+@dataclass(frozen=True, slots=True)
+class RecentNegativeNewsCollection:
+    events: tuple[RecentNegativeNewsEvent, ...]
+    status: Literal["available", "partial"]
+    missing_reasons: tuple[str, ...]
+    cache_hits: int
+    online_fetches: int
+
+
+class NewsTransport(Protocol):
+    def discover(
+        self, *, query: str, start_at: str, end_at: str
+    ) -> Sequence[NewsDiscoveryCandidate]: ...
+
+    def fetch(self, *, url: str) -> bytes: ...
+
+
+class NewsInterpreter(Protocol):
+    def interpret(
+        self,
+        *,
+        issuer_id: str,
+        as_of: str,
+        sources: Sequence[Mapping[str, str]],
+    ) -> Sequence[Mapping[str, object]]: ...
+
+
+class GdeltNewsTransport:
+    """Credential-free discovery plus direct original-URL fetches."""
+
+    def discover(
+        self, *, query: str, start_at: str, end_at: str
+    ) -> Sequence[NewsDiscoveryCandidate]:
+        start = _news_instant(start_at).astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
+        end = _news_instant(end_at).astimezone(timezone.utc).strftime("%Y%m%d%H%M%S")
+        endpoint = "https://api.gdeltproject.org/api/v2/doc/doc?" + urlencode(
+            {
+                "query": query,
+                "mode": "ArtList",
+                "format": "json",
+                "maxrecords": "250",
+                "startdatetime": start,
+                "enddatetime": end,
+            }
+        )
+        request = Request(endpoint, headers={"User-Agent": "CompanyQualityResearch/0.1"})
+        try:
+            with urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read())
+        except Exception as exc:
+            raise NewsSourceError("GDELT discovery unavailable") from exc
+        articles = payload.get("articles") if isinstance(payload, dict) else None
+        if not isinstance(articles, list):
+            raise NewsSourceError("GDELT discovery returned invalid JSON")
+        result: list[NewsDiscoveryCandidate] = []
+        for index, item in enumerate(articles):
+            if not isinstance(item, dict) or not str(item.get("url", "")).startswith("https://"):
+                continue
+            seen = str(item.get("seendate", ""))
+            try:
+                published = datetime.strptime(seen, "%Y%m%dT%H%M%SZ").replace(
+                    tzinfo=timezone.utc
+                ).isoformat()
+            except ValueError:
+                continue
+            domain = str(item.get("domain") or urlparse(str(item["url"])).netloc)
+            role: NewsSourceRole = _domain_role(domain)
+            result.append(
+                NewsDiscoveryCandidate(
+                    discovery_id=f"gdelt:{index}:{sha256(str(item['url']).encode()).hexdigest()[:16]}",
+                    url=str(item["url"]),
+                    publisher=domain,
+                    source_role=role,
+                    title=str(item.get("title") or domain),
+                    publication_at=published,
+                    available_at=published,
+                )
+            )
+        return result
+
+    def fetch(self, *, url: str) -> bytes:
+        request = Request(url, headers={"User-Agent": "CompanyQualityResearch/0.1"})
+        try:
+            with urlopen(request, timeout=30) as response:
+                return response.read()
+        except Exception as exc:
+            raise NewsSourceError("original news source unavailable") from exc
+
+
+class HermesNewsInterpreter:
+    """Hermes may interpret only supplied, already materialized original text."""
+
+    def __init__(self, *, base_url: str, api_key: str, session_id: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.session_id = session_id
+
+    @classmethod
+    def from_environment(cls, generation_id: str) -> HermesNewsInterpreter | None:
+        api_key = (
+            os.environ.get("HERMES_API_KEY")
+            or os.environ.get("API_SERVER_KEY")
+            or ""
+        ).strip()
+        if not api_key:
+            return None
+        return cls(
+            base_url=os.environ.get(
+                "HERMES_API_BASE_URL", "http://127.0.0.1:8642/v1"
+            ),
+            api_key=api_key,
+            session_id=f"company-quality-news-{generation_id}",
+        )
+
+    def interpret(
+        self,
+        *,
+        issuer_id: str,
+        as_of: str,
+        sources: Sequence[Mapping[str, str]],
+    ) -> Sequence[Mapping[str, object]]:
+        fields = (
+            "candidate_id, issuer_id, evidence_id, verbatim_quote, event_date, category, "
+            "status, affected_account, cash_flow, impact, severity, confidence, "
+            "counterevidence, monitoring, invalidation, duplicate_cluster"
+        )
+        prompt = (
+            "Interpret negative-event candidates only from supplied original source text. "
+            "Return one JSON object with candidates array and no markdown. Each candidate "
+            f"must contain string fields: {fields}. Copy verbatim_quote exactly. Categories "
+            f"must be one of {sorted(_NEWS_CATEGORIES)}. Do not invent missing facts."
+        )
+        endpoint = (
+            f"{self.base_url}/chat/completions"
+            if self.base_url.endswith("/v1")
+            else f"{self.base_url}/v1/chat/completions"
+        )
+        payload = {
+            "model": "hermes-agent",
+            "messages": [
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"issuer_id": issuer_id, "as_of": as_of, "sources": sources},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "stream": False,
+            "tools": [],
+        }
+        request = Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "X-Hermes-Session-Id": self.session_id,
+            },
+            method="POST",
+        )
+        with urlopen(request, timeout=30) as response:
+            decoded = json.loads(response.read())
+        content = json.loads(decoded["choices"][0]["message"]["content"])
+        candidates = content.get("candidates")
+        if not isinstance(candidates, list) or not all(
+            isinstance(item, dict) for item in candidates
+        ):
+            raise ValueError("Hermes news response must contain candidates array")
+        return candidates
+
+
+def _news_instant(value: str) -> datetime:
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise NewsSourceError("invalid news timestamp") from exc
+    if result.tzinfo is None or result.utcoffset() is None:
+        raise NewsSourceError("news timestamp must be timezone-aware")
+    return result
+
+
+def _months_before(value: datetime, months: int) -> datetime:
+    year = value.year
+    month = value.month - months
+    while month <= 0:
+        year -= 1
+        month += 12
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _domain_role(domain: str) -> NewsSourceRole:
+    host = domain.casefold()
+    if "judicial.gov.tw" in host:
+        return "court"
+    if any(
+        marker in host
+        for marker in ("gov.tw", "twse.com.tw", "tpex.org.tw", "mops.twse.com.tw")
+    ):
+        return "authority"
+    if any(host == domain or host.endswith(f".{domain}") for domain in _MAINSTREAM_DOMAINS):
+        return "mainstream_media"
+    return "anonymous"
+
+
+def _atomic_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _atomic_bytes(path: Path, body: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_bytes(body)
+    os.replace(temporary, path)
+
+
+def _discovery_cache_path(root: Path, issuer_id: str, as_of: str) -> Path:
+    key = sha256(f"{issuer_id}|{as_of}".encode()).hexdigest()
+    return root / "discovery" / f"{key}.json"
+
+
+def _load_discovery(path: Path) -> tuple[NewsDiscoveryCandidate, ...]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise NewsSourceError("invalid cached news discovery")
+    try:
+        return tuple(NewsDiscoveryCandidate(**item) for item in payload)
+    except (TypeError, ValueError) as exc:
+        raise NewsSourceError("invalid cached news discovery") from exc
+
+
+def _visible_news_text(body: bytes) -> str:
+    parser = _VisibleText()
+    parser.feed(body.decode("utf-8", "replace"))
+    return " ".join(parser.parts)
+
+
+def _materialize_news_source(
+    *,
+    candidate: NewsDiscoveryCandidate,
+    issuer_id: str,
+    security_code: str,
+    company_name: str,
+    retrieved_at: str,
+    root: Path,
+    transport: NewsTransport,
+) -> tuple[_MaterializedNewsSource, bool]:
+    key = sha256(candidate.url.encode()).hexdigest()
+    body_path = root / "artifacts" / f"{key}.html"
+    metadata_path = root / "artifacts" / f"{key}.json"
+    cached = False
+    if body_path.is_file() and metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        body = body_path.read_bytes()
+        if metadata.get("content_sha256") != sha256(body).hexdigest():
+            raise NewsSourceError("cached news artifact hash mismatch")
+        cached = True
+    else:
+        body = transport.fetch(url=candidate.url)
+        if not body:
+            raise NewsSourceError("original news source returned empty body")
+        digest = sha256(body).hexdigest()
+        _atomic_bytes(body_path, body)
+        metadata = {
+            **asdict(candidate),
+            "issuer_id": issuer_id,
+            "security_code": security_code,
+            "company_name": company_name,
+            "retrieved_at": retrieved_at,
+            "content_sha256": digest,
+            "citation_locator": "document-text:verbatim-quote",
+        }
+        _atomic_json(metadata_path, metadata)
+    text = _visible_news_text(body)
+    if not text:
+        raise NewsSourceError("original news source has no readable text")
+    if not any(value and value in text for value in (company_name, security_code, issuer_id)):
+        raise NewsSourceError("news source issuer identity mismatch")
+    digest = sha256(body).hexdigest()
+    evidence_id = f"news-source:{candidate.discovery_id}"
+    return (
+        _MaterializedNewsSource(
+            evidence_id=evidence_id,
+            discovery_id=candidate.discovery_id,
+            issuer_id=issuer_id,
+            security_code=security_code,
+            company_name=company_name,
+            url=candidate.url,
+            publisher=candidate.publisher,
+            source_role=candidate.source_role,
+            title=candidate.title,
+            publication_at=candidate.publication_at,
+            available_at=candidate.available_at,
+            retrieved_at=str(metadata["retrieved_at"]),
+            content_sha256=digest,
+            artifact_path=body_path,
+            text=text,
+            citation_locator=str(metadata["citation_locator"]),
+        ),
+        cached,
+    )
+
+
+def _admit_news_candidate(
+    candidate: Mapping[str, object],
+    *,
+    source: _MaterializedNewsSource,
+    issuer_id: str,
+) -> RecentNegativeNewsEvent | None:
+    required = (
+        "candidate_id",
+        "issuer_id",
+        "evidence_id",
+        "verbatim_quote",
+        "event_date",
+        "category",
+        "status",
+        "affected_account",
+        "cash_flow",
+        "impact",
+        "severity",
+        "confidence",
+        "counterevidence",
+        "monitoring",
+        "invalidation",
+        "duplicate_cluster",
+    )
+    if any(
+        not isinstance(candidate.get(field), str) or not str(candidate[field]).strip()
+        for field in required
+    ):
+        return None
+    quote = str(candidate["verbatim_quote"]).strip()
+    event_date = str(candidate["event_date"]).strip()
+    category = str(candidate["category"])
+    status = str(candidate["status"])
+    impact = str(candidate["impact"])
+    severity = str(candidate["severity"])
+    confidence = str(candidate["confidence"])
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", event_date) is None:
+        return None
+    try:
+        datetime.fromisoformat(event_date)
+    except ValueError:
+        return None
+    if (
+        candidate["issuer_id"] != issuer_id
+        or candidate["evidence_id"] != source.evidence_id
+        or quote not in source.text
+        or event_date not in quote
+        or category not in _NEWS_CATEGORIES
+        or status not in {"resolved", "unresolved", "ongoing"}
+        or impact not in {"realised", "hypothetical"}
+        or severity not in {"low", "medium", "high"}
+        or confidence not in {"low", "medium", "high"}
+    ):
+        return None
+    unverified = source.source_role in _UNVERIFIED_ROLES
+    return RecentNegativeNewsEvent(
+        event_id=str(candidate["candidate_id"]).strip(),
+        evidence_id=source.evidence_id,
+        issuer_id=issuer_id,
+        security_code=source.security_code,
+        company_name=source.company_name,
+        category=category,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
+        event_date=event_date,
+        publication_at=source.publication_at,
+        available_at=source.available_at,
+        retrieved_at=source.retrieved_at,
+        publisher=source.publisher,
+        source_url=source.url,
+        source_role=source.source_role,
+        citation_locator=source.citation_locator,
+        content_sha256=source.content_sha256,
+        artifact_path=source.artifact_path,
+        verbatim_excerpt=quote,
+        affected_account=str(candidate["affected_account"]).strip(),
+        cash_flow=str(candidate["cash_flow"]).strip(),
+        impact=impact,  # type: ignore[arg-type]
+        severity=severity,  # type: ignore[arg-type]
+        confidence=confidence,  # type: ignore[arg-type]
+        counterevidence=str(candidate["counterevidence"]).strip(),
+        monitoring=str(candidate["monitoring"]).strip(),
+        invalidation=str(candidate["invalidation"]).strip(),
+        duplicate_cluster=str(candidate["duplicate_cluster"]).strip(),
+        duplicate_source_ids=(source.evidence_id,),
+        verification_status="unverified" if unverified else "verified",
+        affects_downside=not unverified,
+    )
+
+
+class RecentNegativeNewsCollector:
+    def __init__(
+        self,
+        transport: NewsTransport | None = None,
+        interpreter: NewsInterpreter | None = None,
+    ) -> None:
+        self.transport = transport or GdeltNewsTransport()
+        self.interpreter = interpreter
+
+    def collect(
+        self,
+        *,
+        issuer_id: str,
+        security_code: str,
+        company_name: str,
+        as_of: str,
+        retrieved_at: str,
+        store_root: Path,
+    ) -> RecentNegativeNewsCollection:
+        decision = _news_instant(as_of)
+        _news_instant(retrieved_at)
+        twelve_month_start = _months_before(decision, 12)
+        general_start = decision - timedelta(days=180)
+        root = store_root / "news" / issuer_id
+        discovery_path = _discovery_cache_path(root, issuer_id, as_of)
+        cache_hits = 0
+        online_fetches = 0
+        missing: list[str] = []
+        if discovery_path.is_file():
+            discoveries = _load_discovery(discovery_path)
+            cache_hits += 1
+        else:
+            try:
+                discoveries = tuple(
+                    self.transport.discover(
+                        query=f'"{company_name}" OR "{security_code}"',
+                        start_at=twelve_month_start.isoformat(),
+                        end_at=decision.isoformat(),
+                    )
+                )
+            except Exception:
+                return RecentNegativeNewsCollection(
+                    events=(),
+                    status="partial",
+                    missing_reasons=("news_discovery_unavailable",),
+                    cache_hits=0,
+                    online_fetches=0,
+                )
+            _atomic_json(discovery_path, [asdict(item) for item in discoveries])
+            online_fetches += 1
+
+        sources: list[_MaterializedNewsSource] = []
+        for item in discoveries:
+            try:
+                if item.source_role not in _SOURCE_PRECEDENCE:
+                    raise NewsSourceError("invalid news source role")
+                published = _news_instant(item.publication_at)
+                available = _news_instant(item.available_at)
+                if published > decision or available > decision:
+                    continue
+                source, cached = _materialize_news_source(
+                    candidate=item,
+                    issuer_id=issuer_id,
+                    security_code=security_code,
+                    company_name=company_name,
+                    retrieved_at=retrieved_at,
+                    root=root,
+                    transport=self.transport,
+                )
+                sources.append(source)
+                if cached:
+                    cache_hits += 1
+                else:
+                    online_fetches += 1
+            except Exception:
+                missing.append(f"news_original_unavailable:{item.discovery_id}")
+
+        if self.interpreter is None:
+            return RecentNegativeNewsCollection(
+                events=(),
+                status="partial",
+                missing_reasons=tuple((*missing, "hermes_news_not_configured")),
+                cache_hits=cache_hits,
+                online_fetches=online_fetches,
+            )
+        supplied = tuple(
+            {
+                "evidence_id": item.evidence_id,
+                "publisher": item.publisher,
+                "source_role": item.source_role,
+                "publication_at": item.publication_at,
+                "available_at": item.available_at,
+                "source_url": item.url,
+                "original_text": item.text[:12000],
+            }
+            for item in sources
+        )
+        try:
+            candidates = self.interpreter.interpret(
+                issuer_id=issuer_id, as_of=as_of, sources=supplied
+            )
+        except Exception:
+            return RecentNegativeNewsCollection(
+                events=(),
+                status="partial",
+                missing_reasons=tuple((*missing, "hermes_news_unavailable")),
+                cache_hits=cache_hits,
+                online_fetches=online_fetches,
+            )
+        by_evidence = {item.evidence_id: item for item in sources}
+        admitted: list[RecentNegativeNewsEvent] = []
+        for candidate in candidates:
+            source = by_evidence.get(str(candidate.get("evidence_id", "")))
+            event = (
+                _admit_news_candidate(candidate, source=source, issuer_id=issuer_id)
+                if source is not None
+                else None
+            )
+            if event is None:
+                missing.append("news_candidate_rejected")
+                continue
+            publication = _news_instant(event.publication_at)
+            in_general_window = publication >= general_start
+            in_extended_window = (
+                publication >= twelve_month_start
+                and event.category in _EXTENDED_NEWS_CATEGORIES
+                and event.status in {"unresolved", "ongoing"}
+            )
+            if in_general_window or in_extended_window:
+                admitted.append(event)
+
+        clusters: dict[str, list[RecentNegativeNewsEvent]] = {}
+        for event in admitted:
+            clusters.setdefault(event.duplicate_cluster, []).append(event)
+        promoted: list[RecentNegativeNewsEvent] = []
+        for cluster in clusters.values():
+            primary = min(cluster, key=lambda item: _SOURCE_PRECEDENCE[item.source_role])
+            promoted.append(
+                replace(
+                    primary,
+                    duplicate_source_ids=tuple(item.evidence_id for item in cluster),
+                )
+            )
+        promoted.sort(key=lambda item: item.publication_at, reverse=True)
+        return RecentNegativeNewsCollection(
+            events=tuple(promoted),
+            status="partial" if missing else "available",
+            missing_reasons=tuple(dict.fromkeys(missing)),
+            cache_hits=cache_hits,
+            online_fetches=online_fetches,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class KamAnnualTimeline:
     period: str
@@ -90,6 +793,7 @@ class CompanyAnalysisResult:
     source_coverage: tuple[SourceCoverage, ...]
     kam_judgement: KamJudgement
     research_report: SingleCompanyResearchReport
+    recent_negative_news: RecentNegativeNewsCollection
     probability_calibration: SingleCompanyProbabilityCalibration | None
     calibration_error: str | None
     filing_store_stats: FilingStoreStats | None = None
@@ -673,6 +1377,115 @@ def build_report_from_evidence(
     return _with_hermes_candidates(report=report, candidate_adapter=candidate_adapter)
 
 
+def _news_citation(event: RecentNegativeNewsEvent) -> EvidenceCitation:
+    tier = (
+        "official"
+        if event.source_role in {"regulator", "court", "authority"}
+        else "issuer_primary"
+        if event.source_role == "issuer"
+        else "trusted_secondary"
+    )
+    return EvidenceCitation(
+        evidence_id=event.evidence_id,
+        source_id=event.evidence_id,
+        source_tier=tier,  # type: ignore[arg-type]
+        url=event.source_url,
+        content_sha256=event.content_sha256,
+        period=event.event_date,
+        available_at=event.available_at,
+        page=None,
+        coordinate=None,
+        verbatim_excerpt=event.verbatim_excerpt,
+        source_format="html",
+        locator=event.citation_locator,
+    )
+
+
+def attach_recent_negative_news(
+    report: SingleCompanyResearchReport,
+    collection: RecentNegativeNewsCollection,
+) -> SingleCompanyResearchReport:
+    """Attach only verified events to downside; retain unverified items in collection JSON."""
+
+    if any(item.family == "recent_negative_news" for item in report.source_coverage):
+        raise ReportOrchestrationError("recent negative news already attached")
+    verified = tuple(item for item in collection.events if item.affects_downside)
+    citations = tuple(_news_citation(item) for item in verified)
+    findings: list[Finding] = []
+    for item in verified:
+        source_finding_id = f"source-fact:{item.event_id}"
+        findings.append(
+            Finding(
+                finding_id=source_finding_id,
+                kind="fact",
+                direction="context",
+                statement=item.verbatim_excerpt,
+                materiality=Decimal("0"),
+                evidence_ids=(item.evidence_id,),
+                supporting_finding_ids=(),
+                counter_finding_ids=(),
+                counter_evidence_reason=None,
+            )
+        )
+        findings.append(
+            RecentNegativeNewsFinding(
+                finding_id=item.event_id,
+                kind="judgement",
+                direction="support",
+                statement=(
+                    f"{item.event_date} {item.category}；status={item.status}；"
+                    f"affected_account={item.affected_account}；cash_flow={item.cash_flow}；"
+                    f"impact={item.impact}。"
+                ),
+                materiality=Decimal("0"),
+                evidence_ids=(item.evidence_id,),
+                supporting_finding_ids=(source_finding_id,),
+                counter_finding_ids=(),
+                counter_evidence_reason=item.counterevidence,
+                category=item.category,
+                status=item.status,
+                affected_account=item.affected_account,
+                cash_flow=item.cash_flow,
+                impact=item.impact,
+                severity=item.severity,
+                confidence=item.confidence,
+                counterevidence=item.counterevidence,
+                monitoring=item.monitoring,
+                invalidation=item.invalidation,
+                duplicate_cluster=item.duplicate_cluster,
+                source_role=item.source_role,
+            )
+        )
+    unverified_count = sum(not item.affects_downside for item in collection.events)
+    limitation = (
+        "近期負面新聞：available；社群／論壇／匿名來源"
+        f"{unverified_count}件僅unverified展示且不影響downside。"
+        if collection.status == "available"
+        else "近期負面新聞：partial ("
+        + ",".join(collection.missing_reasons)
+        + ")；缺失不得視為零風險。"
+    )
+    coverage = SourceCoverage(
+        family="recent_negative_news",
+        required=1,
+        available=1 if collection.status == "available" else 0,
+        missing_reasons=collection.missing_reasons,
+    )
+    return build_single_company_research_report(
+        request=report.request,
+        generation_id=report.generation_id,
+        generated_at=report.generated_at,
+        citations=(*report.citations, *citations),
+        source_coverage=(*report.source_coverage, coverage),
+        downside=replace(
+            report.downside,
+            findings=(*report.downside.findings, *findings),
+        ),
+        upside=report.upside,
+        limitations=(*report.limitations, limitation),
+    )
+
+
 def run_single_company_analysis(
     *,
     identifier: str,
@@ -728,13 +1541,28 @@ def run_single_company_analysis(
         generation_id=generation_id,
         candidate_adapter=candidate_adapter,
     )
+    news = RecentNegativeNewsCollector(
+        interpreter=HermesNewsInterpreter.from_environment(generation_id)
+    ).collect(
+        issuer_id=bundle.identity.issuer_id,
+        security_code=bundle.identity.security_code,
+        company_name=bundle.identity.company_name,
+        as_of=as_of,
+        retrieved_at=retrieved_at,
+        store_root=output_root / "evidence",
+    )
+    report = attach_recent_negative_news(report, news)
+    evidence_status = (
+        "partial" if news.status == "partial" and bundle.status != "blocked" else bundle.status
+    )
     return CompanyAnalysisResult(
         generation_id=generation_id,
         identity=bundle.identity,
-        evidence_status=bundle.status,
-        source_coverage=bundle.source_coverage,
+        evidence_status=evidence_status,
+        source_coverage=report.source_coverage,
         kam_judgement=kam_judgement,
         research_report=report,
+        recent_negative_news=news,
         probability_calibration=calibration,
         calibration_error=calibration_error,
         filing_store_stats=bundle.filing_store_stats,
@@ -743,10 +1571,18 @@ def run_single_company_analysis(
 
 __all__ = [
     "CompanyAnalysisResult",
+    "GdeltNewsTransport",
     "HermesApiCandidateAdapter",
     "KamAnnualTimeline",
     "KamJudgement",
+    "HermesNewsInterpreter",
+    "NewsDiscoveryCandidate",
+    "NewsSourceError",
+    "RecentNegativeNewsCollection",
+    "RecentNegativeNewsCollector",
+    "RecentNegativeNewsEvent",
     "ReportOrchestrationError",
+    "attach_recent_negative_news",
     "admit_hermes_candidates",
     "build_report_from_evidence",
     "build_kam_judgement",
