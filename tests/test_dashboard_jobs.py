@@ -184,14 +184,16 @@ def test_http_dashboard_creates_polls_and_reads_job_result(tmp_path: Path) -> No
         assert "12個月絕對正報酬" in html
         assert "官方引用證據" in html
         assert "本機財報庫" in html
-        assert "Local hits" in html
-        assert "materiality" in html
-        assert "無法解釋財報異常" in html
-        assert "severity" in html
-        assert "counterevidence" in html
-        assert "monitoring" in html
-        assert "invalidation" in html
-        assert "issuer_id" in html and "job.market" in html
+        assert "本機命中" in html
+        assert "重大財報異常" in html
+        assert "支持證據" in html
+        assert "反向證據／保留因素" in html
+        assert "後續要監控什麼" in html
+        assert "何時需要重新判斷" in html
+        assert "「分析批次」是什麼？" in html
+        assert "目前無法形成可靠判斷" in html
+        assert "本區沒有足夠已准入證據" not in html
+        assert "report.request.security_code" in html and "job.market" in html
 
         with urlopen(base + "/api/companies/search?q=" + quote("台積"), timeout=5) as response:
             matches = json.load(response)
