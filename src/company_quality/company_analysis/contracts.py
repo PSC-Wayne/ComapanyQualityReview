@@ -7,7 +7,7 @@ cases.  It deliberately contains no combined investment score.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 import re
@@ -117,6 +117,15 @@ class UpsideCase:
 
 
 @dataclass(frozen=True, slots=True)
+class ValuationCase:
+    generation_id: str
+    status: Literal["research_only", "blocked"]
+    headline: str
+    findings: tuple[Finding, ...]
+    confidence: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class FinancialTrendMetric:
     metric_id: str
     label: str
@@ -192,6 +201,7 @@ class SingleCompanyResearchReport:
     downside: DownsideCase
     upside: UpsideCase
     limitations: tuple[str, ...]
+    valuation: ValuationCase | None = None
     downside_sections: tuple[DownsideSection, ...] = ()
     financial_deterioration: FinancialDeteriorationSection | None = None
     status: PublicationStatus = "complete"
@@ -584,6 +594,7 @@ def build_single_company_research_report(
     downside: DownsideCase,
     upside: UpsideCase,
     limitations: Sequence[str] = (),
+    valuation: ValuationCase | None = None,
     financial_deterioration: FinancialDeteriorationSection | None = None,
     downside_sections: Sequence[DownsideSection] = (),
     status: PublicationStatus | None = None,
@@ -619,22 +630,62 @@ def build_single_company_research_report(
         downside.twelve_month_drawdown_probability,
         "twelve-month drawdown probability",
     )
+    embedded_valuation = tuple(
+        item
+        for item in upside.findings
+        if item.finding_id.startswith("upside:valuation:")
+    )
+    normalized_upside = replace(
+        upside,
+        findings=tuple(
+            item
+            for item in upside.findings
+            if not item.finding_id.startswith("upside:valuation:")
+        ),
+    )
+    normalized_valuation = valuation or ValuationCase(
+        generation_id=generation,
+        status="research_only" if embedded_valuation else "blocked",
+        headline=(
+            "透明估值情境僅供研究使用，不是正式目標價。"
+            if embedded_valuation
+            else "本generation沒有足夠已准入資料建立估值情境。"
+        ),
+        findings=embedded_valuation,
+        confidence=upside.confidence if embedded_valuation else Decimal("0"),
+    )
+    _validate_findings(
+        (*normalized_upside.findings, *normalized_valuation.findings),
+        evidence_ids,
+        "upside and valuation",
+        allow_empty=publication_status == "blocked",
+    )
     _validate_case_common(
-        generation_id=upside.generation_id,
+        generation_id=normalized_upside.generation_id,
         expected_generation=generation,
-        status=upside.status,
-        headline=upside.headline,
-        findings=upside.findings,
-        confidence=upside.confidence,
+        status=normalized_upside.status,
+        headline=normalized_upside.headline,
+        findings=normalized_upside.findings,
+        confidence=normalized_upside.confidence,
         evidence_ids=evidence_ids,
         case_name="upside",
         allow_empty=publication_status == "blocked",
     )
-    _validate_probability(upside.positive_return_probability, "positive-return probability")
     _validate_probability(
-        upside.benchmark_outperform_probability,
+        normalized_upside.positive_return_probability, "positive-return probability"
+    )
+    _validate_probability(
+        normalized_upside.benchmark_outperform_probability,
         "benchmark-outperform probability",
     )
+    if normalized_valuation.generation_id != generation:
+        raise CompanyAnalysisContractError("valuation generation mismatch")
+    if normalized_valuation.status not in ("research_only", "blocked"):
+        raise CompanyAnalysisContractError("invalid valuation status")
+    _text(normalized_valuation.headline, "valuation headline", 1000)
+    _ratio(normalized_valuation.confidence, "valuation confidence")
+    if normalized_valuation.status == "research_only" and not normalized_valuation.findings:
+        raise CompanyAnalysisContractError("research-only valuation findings are required")
     _validate_financial_deterioration(
         financial_deterioration,
         expected_generation=generation,
@@ -659,8 +710,9 @@ def build_single_company_research_report(
         citations=tuple(citations),
         source_coverage=tuple(source_coverage),
         downside=downside,
-        upside=upside,
+        upside=normalized_upside,
         limitations=normalized_limitations,
+        valuation=normalized_valuation,
         downside_sections=normalized_sections,
         financial_deterioration=financial_deterioration,
         status=publication_status,
@@ -683,5 +735,6 @@ __all__ = [
     "SingleCompanyResearchReport",
     "SourceCoverage",
     "UpsideCase",
+    "ValuationCase",
     "build_single_company_research_report",
 ]

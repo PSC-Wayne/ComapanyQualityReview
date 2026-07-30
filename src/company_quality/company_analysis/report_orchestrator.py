@@ -1243,6 +1243,7 @@ def _with_hermes_candidates(
         source_coverage=report.source_coverage,
         downside=replace(report.downside, findings=(*report.downside.findings, *findings)),
         upside=report.upside,
+        valuation=report.valuation,
         limitations=(
             *report.limitations,
             f"Hermes候選抽取：{status}{detail}。",
@@ -1516,6 +1517,7 @@ def attach_recent_negative_news(
             findings=(*report.downside.findings, *findings),
         ),
         upside=report.upside,
+        valuation=report.valuation,
         limitations=(*report.limitations, limitation),
         financial_deterioration=report.financial_deterioration,
         downside_sections=report.downside_sections,
@@ -1767,6 +1769,7 @@ def publish_four_downside_sections(
         source_coverage=coverage,
         downside=report.downside,
         upside=report.upside,
+        valuation=report.valuation,
         limitations=limitations,
         financial_deterioration=report.financial_deterioration,
         downside_sections=sections,
