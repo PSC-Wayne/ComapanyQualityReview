@@ -22,6 +22,14 @@ CaseStatus = Literal["research_only", "available", "blocked"]
 ProbabilityStatus = Literal["formal", "research_only", "unavailable"]
 FinancialTrendDirection = Literal["improving", "deteriorating", "flat", "mixed"]
 FinancialDeteriorationStatus = Literal["available", "partial"]
+PublicationStatus = Literal["complete", "partial", "blocked"]
+DownsideSectionStatus = Literal["available", "partial", "blocked"]
+DownsideSectionId = Literal[
+    "financial_deterioration",
+    "unexplained_financial_anomalies",
+    "recent_negative_news",
+    "three_year_kam",
+]
 Coordinate = tuple[Decimal, Decimal, Decimal, Decimal]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -152,6 +160,29 @@ class FinancialDeteriorationSection:
 
 
 @dataclass(frozen=True, slots=True)
+class DownsideSectionItem:
+    item_id: str
+    severity: Literal["none", "unknown", "low", "moderate", "medium", "high", "critical"]
+    confidence: Decimal | Literal["low", "medium", "high"] | None
+    summary: str
+    evidence: tuple[str, ...]
+    counterevidence: tuple[str, ...]
+    monitoring: tuple[str, ...]
+    invalidation: tuple[str, ...]
+    evidence_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DownsideSection:
+    section_id: DownsideSectionId
+    title: str
+    generation_id: str
+    status: DownsideSectionStatus
+    items: tuple[DownsideSectionItem, ...]
+    gaps: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SingleCompanyResearchReport:
     request: CompanyAnalysisRequest
     generation_id: str
@@ -161,8 +192,9 @@ class SingleCompanyResearchReport:
     downside: DownsideCase
     upside: UpsideCase
     limitations: tuple[str, ...]
+    downside_sections: tuple[DownsideSection, ...] = ()
     financial_deterioration: FinancialDeteriorationSection | None = None
-    status: Literal["research_only"] = "research_only"
+    status: PublicationStatus = "complete"
     schema_version: Literal["SingleCompanyResearchReport.v3"] = (
         "SingleCompanyResearchReport.v3"
     )
@@ -200,9 +232,9 @@ def _validate_request(request: CompanyAnalysisRequest) -> datetime:
 
 
 def _validate_citations(
-    citations: Sequence[EvidenceCitation], as_of: datetime
+    citations: Sequence[EvidenceCitation], as_of: datetime, *, allow_empty: bool = False
 ) -> set[str]:
-    if not citations:
+    if not citations and not allow_empty:
         raise CompanyAnalysisContractError("at least one evidence citation is required")
     ids: set[str] = set()
     for citation in citations:
@@ -302,9 +334,9 @@ def _validate_probability(value: CaseProbability, field: str) -> None:
 
 
 def _validate_findings(
-    findings: Sequence[Finding], evidence_ids: set[str], case_name: str
+    findings: Sequence[Finding], evidence_ids: set[str], case_name: str, *, allow_empty: bool
 ) -> None:
-    if not findings:
+    if not findings and not allow_empty:
         raise CompanyAnalysisContractError(f"{case_name} findings are required")
     by_id: dict[str, Finding] = {}
     for item in findings:
@@ -349,6 +381,7 @@ def _validate_case_common(
     confidence: Decimal,
     evidence_ids: set[str],
     case_name: str,
+    allow_empty: bool = False,
 ) -> None:
     if generation_id != expected_generation:
         raise CompanyAnalysisContractError("both cases must bind the same generation")
@@ -356,7 +389,7 @@ def _validate_case_common(
         raise CompanyAnalysisContractError(f"invalid {case_name} status")
     _text(headline, f"{case_name} headline", 1000)
     _ratio(confidence, f"{case_name} confidence")
-    _validate_findings(findings, evidence_ids, case_name)
+    _validate_findings(findings, evidence_ids, case_name, allow_empty=allow_empty)
 
 
 def _validate_financial_deterioration(
@@ -441,6 +474,106 @@ def _validate_financial_deterioration(
             )
 
 
+_DOWNSIDE_SECTION_ORDER: tuple[DownsideSectionId, ...] = (
+    "financial_deterioration",
+    "unexplained_financial_anomalies",
+    "recent_negative_news",
+    "three_year_kam",
+)
+
+
+def _publication_status(coverage: Sequence[SourceCoverage]) -> PublicationStatus:
+    core = next((item for item in coverage if item.family == "three_statement_html"), None)
+    if core is not None and core.available < core.required:
+        return "blocked"
+    return "partial" if any(item.available < item.required for item in coverage) else "complete"
+
+
+def _placeholder_sections(
+    generation_id: str, status: PublicationStatus
+) -> tuple[DownsideSection, ...]:
+    titles = {
+        "financial_deterioration": "財報惡化",
+        "unexplained_financial_anomalies": "無法解釋財報異常",
+        "recent_negative_news": "近期負面新聞",
+        "three_year_kam": "三年KAM",
+    }
+    section_status: DownsideSectionStatus = "blocked" if status == "blocked" else "partial"
+    gap = "core_three_statements_incomplete" if status == "blocked" else "section_not_collected_for_generation"
+    return tuple(
+        DownsideSection(
+            section_id=section_id,
+            title=titles[section_id],
+            generation_id=generation_id,
+            status=section_status,
+            items=(
+                DownsideSectionItem(
+                    item_id=f"{section_id}:unavailable",
+                    severity="unknown",
+                    confidence=None,
+                    summary="本generation資料不足，不能解讀為零風險。",
+                    evidence=("本generation沒有足夠已准入證據。",),
+                    counterevidence=("資料不足，尚無法形成有效反證。",),
+                    monitoring=("補齊本區來源後重新產生同generation報告。",),
+                    invalidation=("取得並准入本區必要來源後，由新generation取代。",),
+                ),
+            ),
+            gaps=(gap,),
+        )
+        for section_id in _DOWNSIDE_SECTION_ORDER
+    )
+
+
+def _validate_downside_sections(
+    sections: Sequence[DownsideSection],
+    *,
+    expected_generation: str,
+    publication_status: PublicationStatus,
+    evidence_ids: set[str],
+) -> None:
+    if tuple(item.section_id for item in sections) != _DOWNSIDE_SECTION_ORDER:
+        raise CompanyAnalysisContractError("four ordered downside sections are required")
+    for section in sections:
+        if section.generation_id != expected_generation:
+            raise CompanyAnalysisContractError("downside section generation mismatch")
+        _text(section.title, "downside section title", 128)
+        if section.status not in ("available", "partial", "blocked"):
+            raise CompanyAnalysisContractError("invalid downside section status")
+        if publication_status == "blocked" and section.status != "blocked":
+            raise CompanyAnalysisContractError("blocked publication requires blocked downside sections")
+        if section.status in ("partial", "blocked") and not section.gaps:
+            raise CompanyAnalysisContractError("non-available downside section requires typed gaps")
+        if section.status == "available" and section.gaps:
+            raise CompanyAnalysisContractError("available downside section cannot carry gaps")
+        for gap in section.gaps:
+            _text(gap, "downside section gap", 512)
+        if not section.items:
+            raise CompanyAnalysisContractError("downside section item is required")
+        for item in section.items:
+            _text(item.item_id, "downside section item_id", 256)
+            if item.severity not in (
+                "none", "unknown", "low", "moderate", "medium", "high", "critical"
+            ):
+                raise CompanyAnalysisContractError("invalid downside section severity")
+            if isinstance(item.confidence, Decimal):
+                _ratio(item.confidence, "downside section confidence")
+            elif item.confidence not in (None, "low", "medium", "high"):
+                raise CompanyAnalysisContractError("invalid downside section confidence")
+            _text(item.summary, "downside section summary", 2000)
+            for field, values in (
+                ("evidence", item.evidence),
+                ("counterevidence", item.counterevidence),
+                ("monitoring", item.monitoring),
+                ("invalidation", item.invalidation),
+            ):
+                if not values:
+                    raise CompanyAnalysisContractError(f"downside section {field} is required")
+                for value in values:
+                    _text(value, f"downside section {field}", 1000)
+            if not set(item.evidence_ids).issubset(evidence_ids):
+                raise CompanyAnalysisContractError("downside section cites unknown evidence")
+
+
 def build_single_company_research_report(
     *,
     request: CompanyAnalysisRequest,
@@ -452,6 +585,8 @@ def build_single_company_research_report(
     upside: UpsideCase,
     limitations: Sequence[str] = (),
     financial_deterioration: FinancialDeteriorationSection | None = None,
+    downside_sections: Sequence[DownsideSection] = (),
+    status: PublicationStatus | None = None,
 ) -> SingleCompanyResearchReport:
     """Validate and bind one evidence-first report without blending its cases."""
 
@@ -460,8 +595,15 @@ def build_single_company_research_report(
     generated = _instant(generated_at, "generated_at")
     if generated < as_of:
         raise CompanyAnalysisContractError("generated_at cannot precede analysis as_of")
-    evidence_ids = _validate_citations(citations, as_of)
     _validate_coverage(source_coverage)
+    publication_status = status or _publication_status(source_coverage)
+    if not downside_sections and publication_status == "complete":
+        publication_status = "partial"
+    if publication_status not in ("complete", "partial", "blocked"):
+        raise CompanyAnalysisContractError("invalid publication status")
+    evidence_ids = _validate_citations(
+        citations, as_of, allow_empty=publication_status == "blocked"
+    )
     _validate_case_common(
         generation_id=downside.generation_id,
         expected_generation=generation,
@@ -471,6 +613,7 @@ def build_single_company_research_report(
         confidence=downside.confidence,
         evidence_ids=evidence_ids,
         case_name="downside",
+        allow_empty=publication_status == "blocked",
     )
     _validate_probability(
         downside.twelve_month_drawdown_probability,
@@ -485,6 +628,7 @@ def build_single_company_research_report(
         confidence=upside.confidence,
         evidence_ids=evidence_ids,
         case_name="upside",
+        allow_empty=publication_status == "blocked",
     )
     _validate_probability(upside.positive_return_probability, "positive-return probability")
     _validate_probability(
@@ -494,6 +638,15 @@ def build_single_company_research_report(
     _validate_financial_deterioration(
         financial_deterioration,
         expected_generation=generation,
+        evidence_ids=evidence_ids,
+    )
+    normalized_sections = tuple(downside_sections) or _placeholder_sections(
+        generation, publication_status
+    )
+    _validate_downside_sections(
+        normalized_sections,
+        expected_generation=generation,
+        publication_status=publication_status,
         evidence_ids=evidence_ids,
     )
     normalized_limitations = tuple(
@@ -508,7 +661,9 @@ def build_single_company_research_report(
         downside=downside,
         upside=upside,
         limitations=normalized_limitations,
+        downside_sections=normalized_sections,
         financial_deterioration=financial_deterioration,
+        status=publication_status,
     )
 
 
@@ -517,6 +672,8 @@ __all__ = [
     "CompanyAnalysisContractError",
     "CompanyAnalysisRequest",
     "DownsideCase",
+    "DownsideSection",
+    "DownsideSectionItem",
     "EvidenceCitation",
     "FinancialDeteriorationItem",
     "FinancialDeteriorationSection",

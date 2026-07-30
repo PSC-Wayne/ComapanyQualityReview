@@ -20,6 +20,8 @@ from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.contracts import (
     CaseProbability,
     DownsideCase,
+    DownsideSection,
+    DownsideSectionItem,
     EvidenceCitation,
     Finding,
     SingleCompanyResearchReport,
@@ -789,7 +791,7 @@ class KamJudgement:
 class CompanyAnalysisResult:
     generation_id: str
     identity: CompanyIdentity
-    evidence_status: Literal["available", "partial", "blocked"]
+    evidence_status: Literal["complete", "partial", "blocked"]
     source_coverage: tuple[SourceCoverage, ...]
     kam_judgement: KamJudgement
     research_report: SingleCompanyResearchReport
@@ -1266,6 +1268,38 @@ def build_report_from_evidence(
         raise ReportOrchestrationError("invalid generated_at") from exc
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
+    core = next(
+        (item for item in bundle.source_coverage if item.family == "three_statement_html"),
+        None,
+    )
+    if core is None or core.available < core.required:
+        unavailable = _unavailable("核心三表不足，整份分析blocked。")
+        return build_single_company_research_report(
+            request=bundle.request,
+            generation_id=generation_id,
+            generated_at=generated_at,
+            citations=(),
+            source_coverage=bundle.source_coverage,
+            downside=DownsideCase(
+                generation_id=generation_id,
+                status="blocked",
+                headline="核心三表不足，Downside分析blocked。",
+                findings=(),
+                twelve_month_drawdown_probability=unavailable,
+                confidence=Decimal("0"),
+            ),
+            upside=UpsideCase(
+                generation_id=generation_id,
+                status="blocked",
+                headline="核心三表不足，Upside分析blocked。",
+                findings=(),
+                positive_return_probability=unavailable,
+                benchmark_outperform_probability=unavailable,
+                confidence=Decimal("0"),
+            ),
+            limitations=("core_three_statements_incomplete",),
+            status="blocked",
+        )
     audit_available, audit_required = _coverage(bundle, "audit_or_review_pdf")
     annual_available, annual_required = _coverage(bundle, "annual_audit_pdf")
     positive, outperform = _probabilities(
@@ -1483,6 +1517,260 @@ def attach_recent_negative_news(
         ),
         upside=report.upside,
         limitations=(*report.limitations, limitation),
+        financial_deterioration=report.financial_deterioration,
+        downside_sections=report.downside_sections,
+    )
+
+
+def _section_placeholder(
+    *, section_id: str, title: str, generation_id: str, gap: str
+) -> DownsideSection:
+    return DownsideSection(
+        section_id=section_id,  # type: ignore[arg-type]
+        title=title,
+        generation_id=generation_id,
+        status="partial",
+        items=(
+            DownsideSectionItem(
+                item_id=f"{section_id}:insufficient",
+                severity="unknown",
+                confidence=None,
+                summary="本generation資料不足，不能解讀為零風險。",
+                evidence=("本區沒有足夠已准入證據。",),
+                counterevidence=("資料不足，尚無法形成有效反證。",),
+                monitoring=("補齊本區來源並以新generation重新分析。",),
+                invalidation=("取得並准入必要來源後，由新generation取代。",),
+            ),
+        ),
+        gaps=(gap,),
+    )
+
+
+def _financial_section(report: SingleCompanyResearchReport) -> DownsideSection:
+    section = report.financial_deterioration
+    if section is None:
+        return _section_placeholder(
+            section_id="financial_deterioration",
+            title="財報惡化",
+            generation_id=report.generation_id,
+            gap="financial_trend_periods_incomplete",
+        )
+    return DownsideSection(
+        section_id="financial_deterioration",
+        title="財報惡化",
+        generation_id=report.generation_id,
+        status=section.status,
+        items=tuple(
+            DownsideSectionItem(
+                item_id=item.item_id,
+                severity=item.severity,
+                confidence=item.confidence,
+                summary=item.summary,
+                evidence=item.evidence,
+                counterevidence=item.counterevidence,
+                monitoring=item.monitoring,
+                invalidation=item.invalidation,
+                evidence_ids=item.evidence_ids,
+            )
+            for item in section.items
+        ),
+        gaps=(section.partial_reason,) if section.partial_reason else (),
+    )
+
+
+def _anomaly_section(report: SingleCompanyResearchReport) -> DownsideSection:
+    findings = tuple(
+        item for item in report.downside.findings if hasattr(item, "explanation_status")
+    )
+    if not findings:
+        return DownsideSection(
+            section_id="unexplained_financial_anomalies",
+            title="無法解釋財報異常",
+            generation_id=report.generation_id,
+            status="available",
+            items=(
+                DownsideSectionItem(
+                    item_id="financial-anomalies:none-admitted",
+                    severity="none",
+                    confidence="medium",
+                    summary="本generation未准入達雙重重大性門檻的財報異常；不代表未來零風險。",
+                    evidence=("已套用30%相對變動與1%公司規模雙重門檻。",),
+                    counterevidence=("門檻以下變動與未來新資訊仍可能改變判斷。",),
+                    monitoring=("持續監控後續三表、附註、重大訊息與已准入新聞。",),
+                    invalidation=("新generation出現達門檻候選時失效。",),
+                ),
+            ),
+            gaps=(),
+        )
+    blocked = tuple(
+        item for item in findings if getattr(item, "explanation_status") == "blocked_by_missing_evidence"
+    )
+    return DownsideSection(
+        section_id="unexplained_financial_anomalies",
+        title="無法解釋財報異常",
+        generation_id=report.generation_id,
+        status="partial" if blocked else "available",
+        items=tuple(
+            DownsideSectionItem(
+                item_id=item.finding_id,
+                severity=getattr(item, "severity"),
+                confidence=getattr(item, "confidence"),
+                summary=item.statement,
+                evidence=tuple(getattr(item, "evidence")),
+                counterevidence=tuple(getattr(item, "counterevidence")),
+                monitoring=(str(getattr(item, "monitoring")),),
+                invalidation=(str(getattr(item, "invalidation")),),
+                evidence_ids=item.evidence_ids,
+            )
+            for item in findings
+        ),
+        gaps=("anomaly_explanation_sources_incomplete",) if blocked else (),
+    )
+
+
+def _news_section(
+    report: SingleCompanyResearchReport, news: RecentNegativeNewsCollection
+) -> DownsideSection:
+    if news.status == "partial":
+        return _section_placeholder(
+            section_id="recent_negative_news",
+            title="近期負面新聞",
+            generation_id=report.generation_id,
+            gap=news.missing_reasons[0] if news.missing_reasons else "recent_negative_news_incomplete",
+        )
+    items = tuple(
+        DownsideSectionItem(
+            item_id=item.event_id,
+            severity=item.severity,
+            confidence=item.confidence,
+            summary=(
+                f"{item.event_date} {item.category}；status={item.status}；"
+                f"affected_account={item.affected_account}；cash_flow={item.cash_flow}；"
+                f"impact={item.impact}。"
+            ),
+            evidence=(item.verbatim_excerpt,),
+            counterevidence=(item.counterevidence,),
+            monitoring=(item.monitoring,),
+            invalidation=(item.invalidation,),
+            evidence_ids=(item.evidence_id,) if item.affects_downside else (),
+        )
+        for item in news.events
+    ) or (
+        DownsideSectionItem(
+            item_id="recent-negative-news:none-admitted",
+            severity="none",
+            confidence="medium",
+            summary="本generation未准入近期負面事件；不代表未來零風險。",
+            evidence=("本generation新聞探索與原文准入流程已完成。",),
+            counterevidence=("搜尋窗口、來源可得性與後續事件仍有限制。",),
+            monitoring=("持續監控180日一般事件與12個月未解決重大事件。",),
+            invalidation=("新generation准入負面事件時失效。",),
+        ),
+    )
+    return DownsideSection(
+        section_id="recent_negative_news",
+        title="近期負面新聞",
+        generation_id=report.generation_id,
+        status="available",
+        items=items,
+        gaps=(),
+    )
+
+
+def _kam_section(report: SingleCompanyResearchReport, kam: KamJudgement) -> DownsideSection:
+    if kam.generation_id != report.generation_id:
+        raise ReportOrchestrationError("KAM generation mismatch")
+    if kam.status == "partial" or not all(
+        (kam.change_summary, kam.risk_mechanism, kam.counterevidence, kam.monitoring, kam.invalidation)
+    ):
+        gap = next(
+            iter((*kam.rejection_reasons, *kam.missing_year_reasons)),
+            "three_year_kam_incomplete",
+        )
+        return _section_placeholder(
+            section_id="three_year_kam",
+            title="三年KAM",
+            generation_id=report.generation_id,
+            gap=gap,
+        )
+    return DownsideSection(
+        section_id="three_year_kam",
+        title="三年KAM",
+        generation_id=report.generation_id,
+        status="available",
+        items=(
+            DownsideSectionItem(
+                item_id="three-year-kam:judgement",
+                severity=kam.severity or "unknown",
+                confidence=kam.confidence,
+                summary=f"{kam.change_summary} 風險機制：{kam.risk_mechanism}",
+                evidence=tuple(
+                    year.citation.verbatim_excerpt for year in kam.years
+                ) or ("已准入三年KAM判讀結果。",),
+                counterevidence=(kam.counterevidence or "資料不足。",),
+                monitoring=(kam.monitoring or "補齊監控條件。",),
+                invalidation=(kam.invalidation or "補齊失效條件。",),
+                evidence_ids=tuple(year.citation.evidence_id for year in kam.years),
+            ),
+        ),
+        gaps=(),
+    )
+
+
+def publish_four_downside_sections(
+    *,
+    report: SingleCompanyResearchReport,
+    kam: KamJudgement,
+    news: RecentNegativeNewsCollection,
+) -> SingleCompanyResearchReport:
+    """Publish four independent, same-generation downside sections."""
+
+    if report.status == "blocked":
+        return report
+    sections = (
+        _financial_section(report),
+        _anomaly_section(report),
+        _news_section(report, news),
+        _kam_section(report, kam),
+    )
+    citations = _unique_citations(
+        (*report.citations, *(year.citation for year in kam.years))
+    )
+    coverage_by_family = {item.family: item for item in report.source_coverage}
+    coverage_by_family["recent_negative_news"] = SourceCoverage(
+        "recent_negative_news",
+        1,
+        1 if news.status == "available" else 0,
+        news.missing_reasons,
+    )
+    coverage_by_family[kam.coverage.family] = kam.coverage
+    coverage = tuple(coverage_by_family.values())
+    status = (
+        "partial"
+        if any(item.status == "partial" for item in sections)
+        or any(item.available < item.required for item in coverage)
+        else "complete"
+    )
+    limitations = tuple(
+        dict.fromkeys(
+            (
+                *report.limitations,
+                *(f"{item.title}:{gap}" for item in sections for gap in item.gaps),
+            )
+        )
+    )
+    return build_single_company_research_report(
+        request=report.request,
+        generation_id=report.generation_id,
+        generated_at=report.generated_at,
+        citations=citations,
+        source_coverage=coverage,
+        downside=report.downside,
+        upside=report.upside,
+        limitations=limitations,
+        financial_deterioration=report.financial_deterioration,
+        downside_sections=sections,
+        status=status,
     )
 
 
@@ -1552,13 +1840,15 @@ def run_single_company_analysis(
         store_root=output_root / "evidence",
     )
     report = attach_recent_negative_news(report, news)
-    evidence_status = (
-        "partial" if news.status == "partial" and bundle.status != "blocked" else bundle.status
+    report = publish_four_downside_sections(
+        report=report,
+        kam=kam_judgement,
+        news=news,
     )
     return CompanyAnalysisResult(
         generation_id=generation_id,
         identity=bundle.identity,
-        evidence_status=evidence_status,
+        evidence_status=report.status,
         source_coverage=report.source_coverage,
         kam_judgement=kam_judgement,
         research_report=report,
@@ -1586,5 +1876,6 @@ __all__ = [
     "admit_hermes_candidates",
     "build_report_from_evidence",
     "build_kam_judgement",
+    "publish_four_downside_sections",
     "run_single_company_analysis",
 ]

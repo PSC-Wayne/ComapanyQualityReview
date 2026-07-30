@@ -37,13 +37,16 @@ from company_quality.company_analysis.valuation import (
 import company_quality.company_analysis.guidance_industry as guidance_module
 from company_quality.company_analysis.report_orchestrator import (
     HermesApiCandidateAdapter,
+    KamJudgement,
     NewsDiscoveryCandidate,
     NewsSourceError,
+    RecentNegativeNewsCollection,
     RecentNegativeNewsCollector,
     ReportOrchestrationError,
     attach_recent_negative_news,
     admit_hermes_candidates,
     build_report_from_evidence,
+    publish_four_downside_sections,
 )
 from company_quality.company_analysis.contracts import CompanyAnalysisRequest, SourceCoverage
 from company_quality.dashboard_server import _INDEX
@@ -1313,3 +1316,139 @@ def test_media_only_enters_report_json_and_source_failure_is_partial(
         "duplicate cluster",
     ):
         assert label in _INDEX
+
+
+def _kam_publication(status: str = "available") -> KamJudgement:
+    missing = () if status == "available" else ("112Q4:annual_audit_pdf:missing",)
+    return KamJudgement(
+        generation_id=GENERATION,
+        status=status,  # type: ignore[arg-type]
+        coverage=SourceCoverage("kam_annual_comparison", 3, 3 if status == "available" else 2, missing),
+        years=(),
+        missing_year_reasons=missing,
+        change_summary="三年KAM議題持續。" if status == "available" else None,
+        risk_mechanism="重大估計可能改變認列時點。" if status == "available" else None,
+        counterevidence="KAM本身不代表錯誤。" if status == "available" else None,
+        severity="medium" if status == "available" else None,
+        confidence=Decimal("0.75") if status == "available" else None,
+        monitoring="追蹤次年KAM。" if status == "available" else None,
+        invalidation="議題消失且估計差異不重大。" if status == "available" else None,
+        rejection_reasons=() if status == "available" else ("hermes_unavailable",),
+    )
+
+
+def _news_publication(status: str = "available") -> RecentNegativeNewsCollection:
+    return RecentNegativeNewsCollection(
+        events=(),
+        status=status,  # type: ignore[arg-type]
+        missing_reasons=() if status == "available" else ("news_discovery_unavailable",),
+        cache_hits=0,
+        online_fetches=0,
+    )
+
+
+def test_core_three_statement_gap_blocks_whole_publication(tmp_path: Path) -> None:
+    bundle = replace(
+        _bundle(tmp_path),
+        source_coverage=(
+            SourceCoverage("three_statement_html", 60, 59, ("115Q1:income:missing",)),
+            SourceCoverage("audit_or_review_pdf", 20, 20, ()),
+            SourceCoverage("annual_audit_pdf", 5, 5, ()),
+        ),
+        status="partial",
+    )
+
+    report = build_report_from_evidence(
+        bundle=bundle, generation_id=GENERATION, generated_at=GENERATED_AT
+    )
+
+    assert report.status == "blocked"
+    assert {section.status for section in report.downside_sections} == {"blocked"}
+    assert "core_three_statements_incomplete" in report.limitations
+
+
+def test_four_downside_sections_publish_mixed_status_without_composite_score(
+    tmp_path: Path,
+) -> None:
+    base = build_report_from_evidence(
+        bundle=_detailed_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+    )
+    report = publish_four_downside_sections(
+        report=base,
+        kam=_kam_publication("available"),
+        news=_news_publication("available"),
+    )
+    payload = asdict(report)
+    sections = {item.section_id: item for item in report.downside_sections}
+
+    assert tuple(sections) == (
+        "financial_deterioration",
+        "unexplained_financial_anomalies",
+        "recent_negative_news",
+        "three_year_kam",
+    )
+    assert sections["financial_deterioration"].status == "partial"
+    assert sections["unexplained_financial_anomalies"].status == "partial"
+    assert sections["recent_negative_news"].status == "available"
+    assert sections["three_year_kam"].status == "available"
+    assert report.status == "partial"
+    assert all(item.generation_id == GENERATION for item in report.downside_sections)
+    assert all(
+        item.evidence and item.counterevidence and item.monitoring and item.invalidation
+        for section in report.downside_sections
+        for item in section.items
+    )
+    forbidden = {"combined_score", "composite_score", "risk_score", "stars", "faces"}
+    assert forbidden.isdisjoint(payload)
+
+
+@pytest.mark.parametrize(
+    ("kam_status", "news_status", "section_id", "gap"),
+    [
+        ("partial", "available", "three_year_kam", "hermes_unavailable"),
+        ("available", "partial", "recent_negative_news", "news_discovery_unavailable"),
+    ],
+)
+def test_each_non_core_source_only_marks_its_own_section_partial(
+    tmp_path: Path, kam_status: str, news_status: str, section_id: str, gap: str
+) -> None:
+    base = build_report_from_evidence(
+        bundle=_financial_trend_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        candidate_adapter=_FakeHermesAdapter([
+            _candidate(
+                candidate_id="hermes:financial-deterioration:synthesis",
+                statement="財務趨勢需持續監測。",
+                verbatim_quote="營業收入合計 | 260 | 100 | 260 | 100 | 300 | 100 | 300 | 100",
+                value="260",
+                unit="營業收入合計",
+                evidence_id="TWSE:2330:115Q1:income:fixture:row:trend-revenue",
+                citation_locator="table-row:營業收入合計",
+            )
+        ]),
+    )
+    report = publish_four_downside_sections(
+        report=base,
+        kam=_kam_publication(kam_status),
+        news=_news_publication(news_status),
+    )
+    sections = {item.section_id: item for item in report.downside_sections}
+
+    assert sections[section_id].status == "partial"
+    assert gap in sections[section_id].gaps
+    other = "recent_negative_news" if section_id == "three_year_kam" else "three_year_kam"
+    assert sections[other].status == "available"
+
+
+def test_dashboard_uses_four_current_report_sections_and_never_legacy_fallback() -> None:
+    for title in ("財報惡化", "無法解釋財報異常", "近期負面新聞", "三年KAM"):
+        assert _INDEX.count(title) >= 1
+    for field in ("status", "severity", "confidence", "evidence", "counterevidence", "monitoring", "invalidation"):
+        assert field in _INDEX
+    assert "report.downside_sections" in _INDEX
+    assert "result.kam_judgement" not in _INDEX
+    assert "result.recent_negative_news" not in _INDEX
+    assert "舊bundle不相容；不讀取legacy fallback" in _INDEX
