@@ -7,7 +7,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Mapping, Sequence
 
 import fitz
 
@@ -20,9 +20,24 @@ from company_quality.sources.financial import FinancialArtifact
 ExplanationStatus = Literal[
     "explained",
     "partially_explained",
-    "unexplained_in_available_filings",
+    "unexplained_in_available_evidence",
     "blocked_by_missing_evidence",
 ]
+AnomalyFamily = Literal[
+    "material_asset_or_liability_change",
+    "expense_increase",
+    "three_statement_inconsistency",
+    "one_off_gain_or_loss",
+    "related_party_activity",
+    "reclassification_or_accounting_change",
+]
+StatementScope = Literal["balance", "income", "expense", "cash_flow"]
+EvidenceRole = Literal["support", "counter"]
+Severity = Literal["medium", "high"]
+Confidence = Literal["low", "medium", "high"]
+_REQUIRED_EXPLANATION_FAMILIES = frozenset(
+    {"three_statements", "notes", "material_events", "admitted_news"}
+)
 _Q = Decimal("0.0001")
 _COMPONENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("不動產、廠房及設備", ("不動產、廠房及設備", "未完工程")),
@@ -45,6 +60,155 @@ class FinancialAnomalyAnalysis:
     findings: tuple[Finding, ...]
     limitations: tuple[str, ...]
     headline: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialChangeObservation:
+    """Locked statement values supplied to deterministic anomaly selection."""
+
+    candidate_id: str
+    family: AnomalyFamily
+    account: str
+    statement_scope: StatementScope
+    period: str
+    baseline_period: str
+    current_value: Decimal
+    baseline_value: Decimal
+    scale_value: Decimal
+    evidence_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AnomalyEvidence:
+    source_family: str
+    evidence_id: str
+    text: str
+    role: EvidenceRole
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialAnomalyFinding(Finding):
+    """One independently displayed anomaly; deliberately has no composite score."""
+
+    family: AnomalyFamily
+    explanation_status: ExplanationStatus
+    severity: Severity
+    confidence: Confidence
+    evidence: tuple[str, ...]
+    counterevidence: tuple[str, ...]
+    monitoring: str
+    invalidation: str
+    relative_change: Decimal | None
+    absolute_materiality: Decimal
+    direction_event: str | None
+
+    @property
+    def candidate_id(self) -> str:
+        return self.finding_id
+
+
+def _direction_event(current: Decimal, baseline: Decimal) -> str:
+    if baseline == 0:
+        return "zero_baseline_increase" if current > 0 else "zero_baseline_decrease"
+    if baseline < 0 <= current:
+        return "negative_to_positive"
+    if current < baseline:
+        return "negative_baseline_decrease"
+    return "negative_baseline_increase"
+
+
+def _explanation(
+    observation: FinancialChangeObservation,
+    evidence_by_family: Mapping[str, Sequence[AnomalyEvidence]],
+) -> tuple[ExplanationStatus, tuple[AnomalyEvidence, ...]]:
+    relevant = tuple(
+        item
+        for items in evidence_by_family.values()
+        for item in items
+        if observation.account in item.text or observation.family in item.text
+    )
+    supporting = tuple(item for item in relevant if item.role == "support")
+    if any(term in item.text for item in supporting for term in _STRONG_CAUSAL_TERMS):
+        return "explained", relevant
+    if supporting:
+        return "partially_explained", relevant
+    if _REQUIRED_EXPLANATION_FAMILIES.issubset(evidence_by_family):
+        return "unexplained_in_available_evidence", relevant
+    return "blocked_by_missing_evidence", relevant
+
+
+def detect_financial_anomaly_candidates(
+    observations: Sequence[FinancialChangeObservation],
+    *,
+    evidence_by_family: Mapping[str, Sequence[AnomalyEvidence]],
+) -> tuple[FinancialAnomalyFinding, ...]:
+    """Apply the 30%/1% gate and classify explanations across collected sources."""
+
+    result: list[FinancialAnomalyFinding] = []
+    for observation in observations:
+        if observation.scale_value <= 0:
+            continue
+        delta = observation.current_value - observation.baseline_value
+        absolute_materiality = abs(delta) / observation.scale_value
+        if absolute_materiality < Decimal("0.01"):
+            continue
+        if observation.baseline_value > 0:
+            relative_change: Decimal | None = abs(delta) / observation.baseline_value
+            direction_event = None
+            if relative_change < Decimal("0.30"):
+                continue
+        else:
+            relative_change = None
+            direction_event = _direction_event(
+                observation.current_value, observation.baseline_value
+            )
+        status, relevant = _explanation(observation, evidence_by_family)
+        severity: Severity = "high" if absolute_materiality >= Decimal("0.05") else "medium"
+        confidence: Confidence = (
+            "low"
+            if status == "blocked_by_missing_evidence"
+            else "medium" if status == "partially_explained" else "high"
+        )
+        support = tuple(item.evidence_id for item in relevant if item.role == "support")
+        counter = tuple(item.text for item in relevant if item.role == "counter") or (
+            "目前可得來源未提供足以排除或確認此變動的具體反證。",
+        )
+        relative_text = (
+            f"relative_change={relative_change}"
+            if relative_change is not None
+            else f"direction_event={direction_event}; ordinary_growth_rate=not_applicable"
+        )
+        statement = (
+            f"{observation.account}由{observation.baseline_value}變為"
+            f"{observation.current_value}；{relative_text}；"
+            f"absolute_materiality={absolute_materiality}；status={status}。"
+            "此狀態只描述現有證據能否解釋變動，不推定不實、隱匿或其他不當行為。"
+        )
+        result.append(
+            FinancialAnomalyFinding(
+                finding_id=observation.candidate_id,
+                kind="fact",
+                direction="support",
+                statement=statement,
+                materiality=min(absolute_materiality, Decimal("1")),
+                evidence_ids=observation.evidence_ids,
+                supporting_finding_ids=(),
+                counter_finding_ids=(),
+                counter_evidence_reason=None,
+                family=observation.family,
+                explanation_status=status,
+                severity=severity,
+                confidence=confidence,
+                evidence=(*observation.evidence_ids, *support),
+                counterevidence=counter,
+                monitoring=f"監控{observation.account}後續期間金額、占比及來源說明是否一致。",
+                invalidation=f"若同issuer、同期間官方證據可直接勾稽{observation.account}變動金額與原因，失效或降級此項。",
+                relative_change=relative_change,
+                absolute_materiality=absolute_materiality,
+                direction_event=direction_event,
+            )
+        )
+    return tuple(result)
 
 
 class _Rows(HTMLParser):
@@ -88,7 +252,7 @@ class _Snapshot:
 class _Candidate:
     previous: _Snapshot
     current: _Snapshot
-    growth: Decimal
+    growth: Decimal | None
     share_change: Decimal
     delta_share: Decimal
     contributor: str | None
@@ -165,15 +329,19 @@ def _snapshots(bundle: CompanyEvidenceBundle) -> tuple[_Snapshot, ...]:
 def _candidates(snapshots: tuple[_Snapshot, ...]) -> tuple[_Candidate, ...]:
     result: list[_Candidate] = []
     for previous, current in zip(snapshots, snapshots[1:]):
-        if previous.noncurrent == 0 or previous.total_assets == 0 or current.total_assets == 0:
+        if previous.total_assets == 0 or current.total_assets == 0:
             continue
         delta = current.noncurrent - previous.noncurrent
-        growth = delta / abs(previous.noncurrent) * 100
+        growth = (
+            delta / previous.noncurrent * 100
+            if previous.noncurrent > 0
+            else None
+        )
         prior_share = previous.noncurrent / previous.total_assets * 100
         current_share = current.noncurrent / current.total_assets * 100
         share_change = current_share - prior_share
         delta_share = abs(delta) / current.total_assets * 100
-        if abs(growth) < 20 or (delta_share < 5 and abs(share_change) < 5):
+        if delta_share < 1 or (growth is not None and abs(growth) < 30):
             continue
         component_deltas = {
             label: current.components[label] - previous.components[label]
@@ -191,7 +359,10 @@ def _candidates(snapshots: tuple[_Snapshot, ...]) -> tuple[_Candidate, ...]:
                 contributor_delta=component_deltas.get(contributor) if contributor else None,
             )
         )
-    result.sort(key=lambda item: (abs(item.share_change), abs(item.growth)), reverse=True)
+    result.sort(
+        key=lambda item: (item.delta_share, abs(item.growth or Decimal("0"))),
+        reverse=True,
+    )
     return tuple(result[:3])
 
 
@@ -288,7 +459,7 @@ def _note_assessment(
         if partial is not None:
             return "partially_explained", partial, "找到相關科目附註，但附近沒有充分因果說明"
         if coverage >= 0.80:
-            return "unexplained_in_available_filings", None, "可搜尋PDF中未找到主要貢獻科目的相關說明"
+            return "unexplained_in_available_evidence", None, "可搜尋PDF中未找到主要貢獻科目的相關說明"
         return "blocked_by_missing_evidence", None, "PDF可搜尋文字coverage不足80%，無法判定沒有說明"
     finally:
         document.close()
@@ -309,7 +480,7 @@ def analyze_financial_anomalies(bundle: CompanyEvidenceBundle) -> FinancialAnoma
         return FinancialAnomalyAnalysis(
             citations=(),
             findings=(),
-            limitations=("未發現同時達到20%變動且占總資產5%的非流動資產候選異常。",),
+            limitations=("未發現同時達到30%變動且占總資產1%的非流動資產候選異常。",),
             headline=None,
         )
     citations: list[EvidenceCitation] = []
@@ -340,7 +511,7 @@ def analyze_financial_anomalies(bundle: CompanyEvidenceBundle) -> FinancialAnoma
         if note_citation is not None:
             citations.append(note_citation)
             evidence_ids.append(note_citation.evidence_id)
-        if status in ("partially_explained", "unexplained_in_available_filings"):
+        if status in ("partially_explained", "unexplained_in_available_evidence"):
             insufficiently_explained += 1
         contributor_text = (
             f"主要可量化貢獻科目為{candidate.contributor}（變動{_bn(candidate.contributor_delta or Decimal(0))}）"
@@ -348,22 +519,62 @@ def analyze_financial_anomalies(bundle: CompanyEvidenceBundle) -> FinancialAnoma
             else "無法由可得子科目辨識主要貢獻"
         )
         fact_id = f"downside:noncurrent-anomaly:{slug}"
+        relative_text = (
+            f"變動{_pct(candidate.growth)}"
+            if candidate.growth is not None
+            else (
+                "普通成長率不適用；方向事件="
+                + _direction_event(
+                    candidate.current.noncurrent, candidate.previous.noncurrent
+                )
+            )
+        )
+        severity: Severity = "high" if candidate.delta_share >= 5 else "medium"
+        confidence: Confidence = (
+            "low"
+            if status == "blocked_by_missing_evidence"
+            else "medium" if status == "partially_explained" else "high"
+        )
         findings.append(
-            Finding(
+            FinancialAnomalyFinding(
                 finding_id=fact_id,
                 kind="fact",
                 direction="support",
                 statement=(
                     f"{candidate.previous.period}至{candidate.current.period}非流動資產由"
                     f"{_bn(candidate.previous.noncurrent)}變為{_bn(candidate.current.noncurrent)}，"
-                    f"變動{_pct(candidate.growth)}，占總資產比重變動{_pct(candidate.share_change)}；"
-                    f"{contributor_text}。附註說明狀態：{status}（{reason}）。"
+                    f"{relative_text}，絕對變動占總資產{candidate.delta_share.quantize(Decimal('0.1'))}%；"
+                    f"{contributor_text}。status={status}（{reason}）。"
+                    "此狀態只描述現有證據能否解釋變動，不構成任何不當行為判定。"
                 ),
-                materiality=Decimal("0.90") if status == "unexplained_in_available_filings" else Decimal("0.75"),
+                materiality=min(candidate.delta_share / 100, Decimal("1")),
                 evidence_ids=tuple(evidence_ids),
                 supporting_finding_ids=(),
                 counter_finding_ids=(),
                 counter_evidence_reason=None,
+                family="material_asset_or_liability_change",
+                explanation_status=status,
+                severity=severity,
+                confidence=confidence,
+                evidence=tuple(evidence_ids),
+                counterevidence=(
+                    "目前可得來源未提供足以排除或確認此變動的具體反證。",
+                ),
+                monitoring="監控主要貢獻科目後續金額、占總資產比重及跨來源說明是否一致。",
+                invalidation="若同issuer、同期間官方三表、附註、重大訊息或已准入新聞可直接勾稽變動金額與原因，失效或降級此項。",
+                relative_change=(
+                    abs(candidate.growth) / 100
+                    if candidate.growth is not None
+                    else None
+                ),
+                absolute_materiality=candidate.delta_share / 100,
+                direction_event=(
+                    None
+                    if candidate.growth is not None
+                    else _direction_event(
+                        candidate.current.noncurrent, candidate.previous.noncurrent
+                    )
+                ),
             )
         )
         findings.append(
@@ -396,7 +607,11 @@ def analyze_financial_anomalies(bundle: CompanyEvidenceBundle) -> FinancialAnoma
 
 
 __all__ = [
+    "AnomalyEvidence",
     "ExplanationStatus",
+    "FinancialAnomalyFinding",
     "FinancialAnomalyAnalysis",
+    "FinancialChangeObservation",
     "analyze_financial_anomalies",
+    "detect_financial_anomaly_candidates",
 ]

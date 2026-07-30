@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import date
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -23,6 +23,11 @@ from company_quality.company_analysis.material_events import (
 from company_quality.company_analysis.guidance_industry import (
     GuidanceIndustryCollector,
     GuidanceEvidenceError,
+)
+from company_quality.company_analysis.financial_anomalies import (
+    AnomalyEvidence,
+    FinancialChangeObservation,
+    detect_financial_anomaly_candidates,
 )
 from company_quality.company_analysis.valuation import (
     MarketValuationCollector,
@@ -304,6 +309,150 @@ def test_builds_detailed_research_cases_from_financial_evidence(tmp_path: Path) 
     assert "非流動資產" in statements
     assert any(item.kind == "judgement" for item in report.downside.findings)
     assert len(report.citations) >= 18
+    anomaly = next(
+        item
+        for item in report.downside.findings
+        if item.finding_id.startswith("downside:noncurrent-anomaly:")
+    )
+    payload = json.loads(json.dumps(asdict(anomaly), default=str))
+    assert payload["explanation_status"] == "blocked_by_missing_evidence"
+    assert payload["severity"] == "high"
+    assert payload["confidence"] == "low"
+    assert payload["evidence"]
+    assert payload["counterevidence"]
+    assert payload["monitoring"]
+    assert payload["invalidation"]
+
+
+def _change(**overrides: object) -> FinancialChangeObservation:
+    values: dict[str, object] = {
+        "candidate_id": "anomaly:receivables",
+        "family": "material_asset_or_liability_change",
+        "account": "應收帳款",
+        "statement_scope": "balance",
+        "period": "115Q1",
+        "baseline_period": "114Q1",
+        "current_value": Decimal("140"),
+        "baseline_value": Decimal("100"),
+        "scale_value": Decimal("1000"),
+        "evidence_ids": ("balance-current", "balance-prior"),
+    }
+    values.update(overrides)
+    return FinancialChangeObservation(**values)  # type: ignore[arg-type]
+
+
+def test_anomaly_candidates_require_30_percent_and_one_percent_materiality() -> None:
+    result = detect_financial_anomaly_candidates(
+        (
+            _change(candidate_id="passes"),
+            _change(
+                candidate_id="relative-only",
+                current_value=Decimal("131"),
+                scale_value=Decimal("10000"),
+            ),
+            _change(candidate_id="size-only", current_value=Decimal("129")),
+        ),
+        evidence_by_family={},
+    )
+
+    assert [item.candidate_id for item in result] == ["passes"]
+    assert result[0].relative_change == Decimal("0.4")
+    assert result[0].absolute_materiality == Decimal("0.04")
+
+
+@pytest.mark.parametrize(
+    ("baseline", "current", "direction"),
+    [
+        ("0", "20", "zero_baseline_increase"),
+        ("-10", "20", "negative_to_positive"),
+        ("-20", "-40", "negative_baseline_decrease"),
+    ],
+)
+def test_zero_or_negative_baselines_use_material_direction_events(
+    baseline: str, current: str, direction: str
+) -> None:
+    result = detect_financial_anomaly_candidates(
+        (_change(baseline_value=Decimal(baseline), current_value=Decimal(current)),),
+        evidence_by_family={},
+    )
+
+    assert result[0].relative_change is None
+    assert result[0].direction_event == direction
+
+
+@pytest.mark.parametrize(
+    ("evidence", "status"),
+    [
+        (
+            {
+                "notes": (
+                    AnomalyEvidence(
+                        "notes",
+                        "note-1",
+                        "應收帳款增加主要係新客戶付款條件延長",
+                        "support",
+                    ),
+                )
+            },
+            "explained",
+        ),
+        (
+            {
+                "notes": (
+                    AnomalyEvidence("notes", "note-1", "應收帳款明細", "support"),
+                )
+            },
+            "partially_explained",
+        ),
+        (
+            {
+                "three_statements": (),
+                "notes": (),
+                "material_events": (),
+                "admitted_news": (),
+            },
+            "unexplained_in_available_evidence",
+        ),
+        ({"three_statements": ()}, "blocked_by_missing_evidence"),
+    ],
+)
+def test_anomaly_explanation_uses_only_four_states(
+    evidence: dict[str, tuple[AnomalyEvidence, ...]], status: str
+) -> None:
+    item = detect_financial_anomaly_candidates(
+        (_change(),), evidence_by_family=evidence
+    )[0]
+
+    assert item.explanation_status == status
+    assert item.severity in {"medium", "high"}
+    assert item.confidence in {"low", "medium", "high"}
+    assert item.evidence
+    assert item.counterevidence
+    assert item.monitoring
+    assert item.invalidation
+    assert "fraud" not in item.statement.lower()
+    assert "舞弊" not in item.statement
+
+
+def test_anomaly_candidate_families_remain_independent_without_composite_score() -> None:
+    families = (
+        "material_asset_or_liability_change",
+        "expense_increase",
+        "three_statement_inconsistency",
+        "one_off_gain_or_loss",
+        "related_party_activity",
+        "reclassification_or_accounting_change",
+    )
+    result = detect_financial_anomaly_candidates(
+        tuple(
+            _change(candidate_id=f"anomaly:{family}", family=family)
+            for family in families
+        ),
+        evidence_by_family={"three_statements": ()},
+    )
+
+    assert tuple(item.family for item in result) == families
+    assert all(not hasattr(item, "score") for item in result)
 
 
 def test_rejects_stale_or_wrong_company_calibration(tmp_path: Path) -> None:
