@@ -118,9 +118,21 @@ class _TableParser(HTMLParser):
 _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "balance": (
         ("balance.cash_and_cash_equivalents", ("現金及約當現金",)),
+        ("balance.restricted_cash", ("受限制資產－流動", "受限制銀行存款")),
         ("balance.accounts_receivable_net", ("應收帳款淨額",)),
         ("balance.inventories", ("存貨",)),
+        ("balance.contract_assets", ("合約資產－流動", "合約資產")),
+        ("balance.accounts_payable", ("應付帳款",)),
+        ("balance.current_assets", ("流動資產合計",)),
+        ("balance.current_liabilities", ("流動負債合計",)),
+        ("balance.short_term_borrowings", ("短期借款",)),
+        (
+            "balance.current_portion_long_term_debt",
+            ("一年或一營業週期內到期長期負債", "一年內到期之長期負債"),
+        ),
         ("balance.property_plant_equipment", ("不動產、廠房及設備",)),
+        ("balance.goodwill", ("商譽",)),
+        ("balance.intangible_assets", ("無形資產",)),
         ("balance.total_assets", ("資產總額",)),
         ("balance.long_term_borrowings", ("長期借款",)),
         ("balance.total_liabilities", ("負債總額",)),
@@ -128,6 +140,7 @@ _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "income": (
         ("income.revenue", ("營業收入合計", "營業收入")),
+        ("income.cost_of_revenue", ("營業成本合計", "營業成本")),
         ("income.gross_profit", ("營業毛利（毛損）", "營業毛利（毛損）淨額")),
         ("income.operating_income", ("營業利益（損失）",)),
         (
@@ -139,12 +152,21 @@ _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         ("income.net_income", ("本期淨利（淨損）", "繼續營業單位本期淨利（淨損）")),
+        (
+            "income.net_income_attributable_to_owners",
+            ("母公司業主（淨利∕損）", "母公司業主（淨利／損）"),
+        ),
+        ("income.income_tax_expense", ("所得稅費用（利益）", "所得稅費用（利益）合計")),
+        ("income.interest_expense", ("利息費用",)),
+        ("income.basic_eps", ("基本每股盈餘",)),
+        ("income.diluted_eps", ("稀釋每股盈餘",)),
     ),
     "cash_flow": (
         ("cash_flow.operating_cash_flow", ("營業活動之淨現金流入（流出）",)),
         ("cash_flow.investing_cash_flow", ("投資活動之淨現金流入（流出）",)),
         ("cash_flow.financing_cash_flow", ("籌資活動之淨現金流入（流出）",)),
         ("cash_flow.acquisition_of_ppe", ("取得不動產、廠房及設備",)),
+        ("cash_flow.cash_dividends_paid", ("支付之現金股利", "發放現金股利")),
         ("cash_flow.ending_cash", ("期末現金及約當現金餘額",)),
     ),
     "equity_changes": (),
@@ -283,7 +305,10 @@ class FinancialFactParser:
                     matches = [
                         (header_index + 2 + offset, row)
                         for offset, row in enumerate(rows)
-                        if row and row[0].text == alias
+                        if row
+                        and row[0].text == alias
+                        and column_index < len(row)
+                        and row[column_index].text.strip() not in ("", "-", "—", "--")
                     ]
                     if len(matches) > 1:
                         raise FinancialFactConflictError(

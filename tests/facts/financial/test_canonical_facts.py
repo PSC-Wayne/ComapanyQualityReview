@@ -95,9 +95,9 @@ def test_parses_core_three_statement_facts_with_source_lineage(tmp_path) -> None
 
     result = FinancialFactParser().parse((balance, income, cash_flow))
 
-    assert result.status == "available"
-    assert result.fact_coverage == 1
-    assert result.missing_concepts == ()
+    assert result.status == "partial"
+    assert result.fact_coverage == Decimal("18") / Decimal("34")
+    assert "balance.accounts_payable" in result.missing_concepts
     facts = {fact.concept_id: fact for fact in result.facts}
     assert str(facts["balance.cash_and_cash_equivalents"].value) == "1000"
     assert str(facts["cash_flow.financing_cash_flow"].value) == "-50"
@@ -131,7 +131,19 @@ def test_uses_target_quarter_column_not_ytd_or_comparative_column(tmp_path) -> N
     assert str(revenue.value) == "900"
     assert revenue.source_column_index == 3
     assert revenue.period_start == "2026-04-01"
-    assert result.fact_coverage == Decimal("0.2")
+    assert result.fact_coverage == Decimal(1) / Decimal(11)
+
+
+def test_blank_duplicate_group_heading_is_not_a_fact_conflict(tmp_path) -> None:
+    body = table(
+        "115年第2季",
+        [("基本每股盈餘", ""), ("基本每股盈餘", "12.34")],
+    )
+
+    result = FinancialFactParser().parse((artifact(tmp_path, "income", body),))
+
+    eps = next(f for f in result.facts if f.concept_id == "income.basic_eps")
+    assert eps.value == Decimal("12.34")
 
 
 @pytest.mark.parametrize(
@@ -224,7 +236,7 @@ def test_missing_concepts_are_explicit_and_not_filled_with_zero(tmp_path) -> Non
     )
 
     assert result.status == "partial"
-    assert result.fact_coverage == Decimal("0.125")
+    assert result.fact_coverage == Decimal(1) / Decimal(17)
     assert "balance.cash_and_cash_equivalents" in result.missing_concepts
     assert all(fact.value != 0 for fact in result.facts)
 

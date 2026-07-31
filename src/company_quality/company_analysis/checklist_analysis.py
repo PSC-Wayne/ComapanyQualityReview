@@ -17,14 +17,13 @@ from company_quality.company_analysis.checklist_contracts import (
     ChecklistCheckResult,
     ChecklistCoverage,
     CompanyRoute,
-    FinancialMetricValue,
     FinancialOverview,
-    FinancialOverviewMetric,
     GrowthConclusion,
     GrowthTransmissionStage,
     RiskConclusion,
 )
 from company_quality.company_analysis.contracts import FinancialDeteriorationSection
+from company_quality.company_analysis.checklist_metrics import build_financial_overview
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 
 
@@ -222,9 +221,32 @@ def _basis_records(bundle: CompanyEvidenceBundle) -> tuple[AnalysisBasisRecord, 
 def _canonical_period_complete(period: object) -> bool:
     canonical = getattr(period, "canonical_financial", None)
     financial = getattr(period, "financial", None)
+    required = {
+        "balance.cash_and_cash_equivalents",
+        "balance.accounts_receivable_net",
+        "balance.inventories",
+        "balance.current_assets",
+        "balance.current_liabilities",
+        "balance.total_assets",
+        "balance.total_liabilities",
+        "balance.total_equity",
+        "income.revenue",
+        "income.gross_profit",
+        "income.operating_income",
+        "income.net_income",
+        "cash_flow.operating_cash_flow",
+        "cash_flow.acquisition_of_ppe",
+        "equity.common_stock",
+        "equity.total_equity",
+    }
+    values = (
+        {item.concept_id: item.value for item in canonical.facts}
+        if canonical is not None
+        else {}
+    )
     return bool(
         canonical is not None
-        and canonical.status == "available"
+        and all(values.get(item) is not None for item in required)
         and financial is not None
         and len(financial.artifacts) == 4
         and all(item.statement_scope != "unknown" for item in financial.artifacts)
@@ -233,58 +255,12 @@ def _canonical_period_complete(period: object) -> bool:
 
 def _equity_cross_check_complete(period: object) -> bool:
     canonical = getattr(period, "canonical_financial", None)
-    if canonical is None or canonical.status != "available":
+    if canonical is None:
         return False
     values = {item.concept_id: item.value for item in canonical.facts}
     balance = values.get("balance.total_equity")
     equity = values.get("equity.total_equity")
     return balance is not None and equity is not None and balance == equity
-
-
-def _financial_overview(
-    section: FinancialDeteriorationSection | None,
-) -> FinancialOverview | None:
-    if section is None or not section.periods:
-        return None
-    periods = tuple(item.period for item in section.periods)
-    metric_ids = tuple(dict.fromkeys(
-        metric.metric_id for period in section.periods for metric in period.metrics
-    ))
-    metrics: list[FinancialOverviewMetric] = []
-    for metric_id in metric_ids:
-        values: list[FinancialMetricValue] = []
-        trend = "unresolved"
-        for period in section.periods:
-            metric = next((item for item in period.metrics if item.metric_id == metric_id), None)
-            if metric is None:
-                values.append(FinancialMetricValue(period.period, None, None, "not_derivable", ()))
-                continue
-            values.append(
-                FinancialMetricValue(
-                    period.period,
-                    metric.absolute_value,
-                    metric.ratio,
-                    "available",
-                    metric.evidence_ids,
-                )
-            )
-            trend = {
-                "flat": "stable", "mixed": "unresolved"
-            }.get(metric.direction, metric.direction)
-        metrics.append(
-            FinancialOverviewMetric(
-                metric_id=metric_id,
-                values=tuple(values),
-                trend_status=trend,  # type: ignore[arg-type]
-                formula_id=(
-                    "DSO.average_receivables.period_revenue.actual_days.v1"
-                    if metric_id == "receivables" else f"legacy.{metric_id}.v1"
-                ),
-                days_basis=("actual_calendar_days" if metric_id == "receivables" else None),
-                approximation_reason=None,
-            )
-        )
-    return FinancialOverview(periods=periods, metrics=tuple(metrics))
 
 
 def _placeholder_checks(reason: str) -> tuple[ChecklistCheckResult, ...]:
@@ -318,6 +294,107 @@ def _placeholder_checks(reason: str) -> tuple[ChecklistCheckResult, ...]:
     )
 
 
+_QUANTITATIVE_CHECKS = {
+    "G01": "revenue", "G05": "gross_profit", "G06": "gross_margin",
+    "G07": "operating_income", "G08": "operating_margin",
+    "G09": "net_income", "G10": "net_margin", "G12": "dso_days",
+    "G14": "inventory_days", "G15": "cfo_to_net_income",
+    "G16": "free_cash_flow", "G17": "capex", "G18": "capex",
+    "G19": "roic", "G20": "common_stock_capital",
+    "G21": "diluted_weighted_average_shares",
+    "R01": "current_ratio", "R02": "current_ratio", "R03": "cash",
+    "R04": "restricted_cash", "R05": "debt_due_within_year",
+    "R06": "interest_bearing_debt", "R09": "receivables",
+    "R10": "dso_days", "R14": "inventory", "R15": "inventory_days",
+    "R18": "contract_assets", "R21": "cfo_to_net_income",
+    "R22": "free_cash_flow", "R27": "goodwill_and_intangibles",
+    "R43": "common_stock_capital", "R44": "diluted_weighted_average_shares",
+    "R46": "cash_dividends_paid", "R47": "roic",
+}
+
+
+def _overview_metric(overview: FinancialOverview | None, metric_id: str):
+    if overview is None:
+        return None
+    return next((item for item in overview.metrics if item.metric_id == metric_id), None)
+
+
+def _quantitative_checks(
+    overview: FinancialOverview | None,
+    unresolved_reason: str,
+) -> tuple[ChecklistCheckResult, ...]:
+    rows = {item.check_id: item for item in _placeholder_checks(unresolved_reason)}
+    for check_id, metric_id in _QUANTITATIVE_CHECKS.items():
+        metric = _overview_metric(overview, metric_id)
+        if metric is None:
+            continue
+        available = [item for item in metric.values[-4:] if item.status == "available"]
+        if len(available) < 2:
+            continue
+        previous, latest = available[-2:]
+        assert previous.value is not None and latest.value is not None
+        domain = "growth" if check_id.startswith("G") else "risk"
+        deterioration = metric.trend_status == "deteriorating"
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id,
+            domain=domain,
+            applicability="triggered",
+            status="evaluated",
+            first_detectable_at=None,
+            financial_period=latest.period,
+            observations=(
+                f"{metric_id}由{previous.value}變為{latest.value}；趨勢={metric.trend_status}",
+                f"formula_id={metric.formula_id}",
+            ),
+            evidence_ids=tuple(dict.fromkeys((*previous.evidence_ids, *latest.evidence_ids))),
+            supporting_evidence=("量化趨勢改善或持平。",) if not deterioration else (),
+            counterevidence=("量化趨勢惡化。",) if deterioration else (),
+            inference_chain=(f"canonical facts → {metric.formula_id} → 趨勢判定",),
+            mechanism=f"追蹤{metric_id}對成長品質或風險承受力的變化。",
+            leading_warnings=(f"{metric_id}連續惡化",),
+            buffers=(f"{metric_id}改善或維持",),
+            monitoring_metrics=(metric_id,),
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("下一期同口徑資料使趨勢反轉。",),
+            severity=("high" if deterioration else "low") if domain == "risk" else "not_applicable",
+            confidence="medium",
+            unresolved_reasons=(),
+        )
+    return tuple(
+        rows[item] for item in (*GROWTH_CHECK_IDS, *RISK_CHECK_IDS, *NOTE_CHECK_IDS)
+    )
+
+
+def _transmission_from_overview(
+    overview: FinancialOverview | None,
+) -> tuple[GrowthTransmissionStage, ...]:
+    metric_by_stage = {
+        "revenue": "revenue",
+        "margin": "gross_margin",
+        "cash": "operating_cash_flow",
+    }
+    result: list[GrowthTransmissionStage] = []
+    for stage in GROWTH_TRANSMISSION_STAGES:
+        metric = _overview_metric(overview, metric_by_stage.get(stage, ""))
+        latest = (
+            next((item for item in reversed(metric.values) if item.status == "available"), None)
+            if metric is not None
+            else None
+        )
+        if latest is not None:
+            result.append(GrowthTransmissionStage(stage, "verified", latest.evidence_ids))
+        else:
+            result.append(
+                GrowthTransmissionStage(
+                    stage,
+                    "unresolved",
+                    (),
+                    "該傳導階段尚未完成公司原始證據與反證准入。",
+                )
+            )
+    return tuple(result)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -340,7 +417,7 @@ def build_checklist_assessment(
     monthly_ids = _ids(bundle.monthly_revenue)
     audit_ids = _ids(_audit_artifacts(bundle))
     basis_records = _basis_records(bundle)
-    overview = _financial_overview(financial_section)
+    overview = build_financial_overview(bundle)
 
     if route != "general_non_financial":
         reason = "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
@@ -433,6 +510,34 @@ def build_checklist_assessment(
             if judgement != "unresolved":
                 growth[dimension] = _growth_resolved(dimension, judgement, (label,), evidence_ids)
 
+    canonical_growth = {
+        "revenue_momentum": ("revenue", "營收趨勢"),
+        "margin_and_product_mix": ("gross_margin", "毛利率趨勢"),
+        "operating_leverage": ("operating_margin", "營業利益率趨勢"),
+        "earnings_quality": ("cfo_to_net_income", "CFO／淨利品質"),
+        "cash_conversion": ("cash_conversion_cycle_days", "現金轉換週期"),
+        "reinvestment_efficiency": ("roic", "ROIC"),
+        "per_share_value": ("diluted_eps", "稀釋每股盈餘"),
+    }
+    for dimension, (metric_id, label) in canonical_growth.items():
+        metric = _overview_metric(overview, metric_id)
+        if metric is None or metric.trend_status == "unresolved":
+            continue
+        available = [item for item in metric.values[-4:] if item.status == "available"]
+        if len(available) < 2:
+            continue
+        evidence_ids = tuple(
+            dict.fromkeys(item for value in available[-2:] for item in value.evidence_ids)
+        )
+        if dimension == "revenue_momentum":
+            evidence_ids = (*monthly_ids, *evidence_ids)
+        growth[dimension] = _growth_resolved(
+            dimension,
+            metric.trend_status,
+            (f"{label}；formula_id={metric.formula_id}",),
+            evidence_ids,
+        )
+
     risks = {item: _risk_unresolved(item, "缺少清單要求的附註、量化或反證。") for item in RISK_DIMENSIONS}
     metric_risks = {
         "liquidity_and_refinancing": ("liquidity", "流動性與財務結構趨勢", ("流動比率", "到期債務")),
@@ -449,6 +554,32 @@ def build_checklist_assessment(
                     dimension, judgement, label, getattr(metric, "evidence_ids", ()), monitoring
                 )
 
+    canonical_risks = {
+        "liquidity_and_refinancing": ("current_ratio", ("流動比率", "一年內到期債務")),
+        "receivables_and_collection": ("dso_days", ("平均餘額DSO", "應收成長相對營收")),
+        "inventory_and_impairment": ("inventory_days", ("平均存貨週轉天數", "跌價損失")),
+        "contract_assets_and_revenue_recognition": ("contract_assets", ("合約資產", "收入認列政策")),
+        "earnings_quality": ("cfo_to_net_income", ("CFO／淨利", "自由現金流")),
+        "capital_structure_and_dilution": ("common_stock_capital", ("股本", "完全稀釋股數")),
+    }
+    for dimension, (metric_id, monitoring) in canonical_risks.items():
+        metric = _overview_metric(overview, metric_id)
+        if metric is None or metric.trend_status == "unresolved":
+            continue
+        available = [item for item in metric.values[-4:] if item.status == "available"]
+        if len(available) < 2:
+            continue
+        evidence_ids = tuple(
+            dict.fromkeys(item for value in available[-2:] for item in value.evidence_ids)
+        )
+        risks[dimension] = _risk_resolved(
+            dimension,
+            metric.trend_status,
+            f"{metric_id}趨勢；formula_id={metric.formula_id}",
+            evidence_ids,
+            monitoring,
+        )
+
     return ChecklistAssessment(
         generation_id=generation_id,
         route=route,
@@ -457,8 +588,10 @@ def build_checklist_assessment(
         risks=tuple(risks[item] for item in RISK_DIMENSIONS),
         basis_records=basis_records,
         financial_overview=overview,
-        checks=_placeholder_checks("該題尚未完成權威逐項 producer 與反證准入。"),
-        growth_transmission=_transmission("該傳導階段尚未完成公司原始證據與反證准入。"),
+        checks=_quantitative_checks(
+            overview, "該題尚未完成權威逐項 producer 與反證准入。"
+        ),
+        growth_transmission=_transmission_from_overview(overview),
     )
 
 
