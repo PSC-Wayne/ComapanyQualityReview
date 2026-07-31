@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 from company_quality.company_analysis.checklist_contracts import (
+    AUDIT_CHECK_IDS,
     GROWTH_CHECK_IDS,
     GROWTH_DIMENSIONS,
     GROWTH_TRANSMISSION_STAGES,
+    INDUSTRY_CHECK_IDS,
     NOTE_CHECK_IDS,
     REQUIRED_COMPLETION_ITEMS,
     RISK_CHECK_IDS,
@@ -18,6 +20,7 @@ from company_quality.company_analysis.checklist_contracts import (
     ChecklistCoverage,
     CompanyRoute,
     FinancialOverview,
+    IndustryRoute,
     GrowthConclusion,
     GrowthTransmissionStage,
     RiskConclusion,
@@ -263,7 +266,27 @@ def _equity_cross_check_complete(period: object) -> bool:
     return balance is not None and equity is not None and balance == equity
 
 
-def _placeholder_checks(reason: str) -> tuple[ChecklistCheckResult, ...]:
+def _industry_route(bundle: CompanyEvidenceBundle, route: CompanyRoute) -> IndustryRoute:
+    if route != "general_non_financial":
+        return "financial"
+    code = bundle.identity.industry_code
+    if code == "30":
+        return "software_ai"
+    if code == "22":
+        return "biotech"
+    if code == "23":
+        return "energy"
+    if code in {"01", "02", "03", "04", "05", "06", "08", "09", "10", "11", "12", "21", "24", "25", "26", "27", "28", "31"}:
+        return "manufacturing_hardware"
+    if code in {"14"}:
+        return "unresolved"
+    return "not_applicable"
+
+
+def _placeholder_checks(
+    reason: str,
+    industry_route: IndustryRoute = "not_applicable",
+) -> tuple[ChecklistCheckResult, ...]:
     def row(check_id: str, domain: str) -> ChecklistCheckResult:
         return ChecklistCheckResult(
             check_id=check_id,
@@ -291,6 +314,8 @@ def _placeholder_checks(reason: str) -> tuple[ChecklistCheckResult, ...]:
         *(row(item, "growth") for item in GROWTH_CHECK_IDS),
         *(row(item, "risk") for item in RISK_CHECK_IDS),
         *(row(item, "note") for item in NOTE_CHECK_IDS),
+        *(row(item, "audit") for item in AUDIT_CHECK_IDS),
+        *(row(item, "industry") for item in INDUSTRY_CHECK_IDS.get(industry_route, ())),
     )
 
 
@@ -322,8 +347,12 @@ def _overview_metric(overview: FinancialOverview | None, metric_id: str):
 def _quantitative_checks(
     overview: FinancialOverview | None,
     unresolved_reason: str,
+    industry_route: IndustryRoute = "not_applicable",
 ) -> tuple[ChecklistCheckResult, ...]:
-    rows = {item.check_id: item for item in _placeholder_checks(unresolved_reason)}
+    rows = {
+        item.check_id: item
+        for item in _placeholder_checks(unresolved_reason, industry_route)
+    }
     for check_id, metric_id in _QUANTITATIVE_CHECKS.items():
         metric = _overview_metric(overview, metric_id)
         if metric is None:
@@ -361,8 +390,141 @@ def _quantitative_checks(
             unresolved_reasons=(),
         )
     return tuple(
-        rows[item] for item in (*GROWTH_CHECK_IDS, *RISK_CHECK_IDS, *NOTE_CHECK_IDS)
+        rows[item]
+        for item in (
+            *GROWTH_CHECK_IDS,
+            *RISK_CHECK_IDS,
+            *NOTE_CHECK_IDS,
+            *AUDIT_CHECK_IDS,
+            *INDUSTRY_CHECK_IDS.get(industry_route, ()),
+        )
     )
+
+
+def _document_checks(
+    checks: tuple[ChecklistCheckResult, ...],
+    document_evidence: object | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    rows = {item.check_id: item for item in checks}
+    for check_id, citation in getattr(document_evidence, "note_citations", ()):
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id,
+            domain="note",
+            applicability="triggered",
+            status="evaluated",
+            first_detectable_at=citation.available_at,
+            financial_period=citation.period,
+            observations=(citation.verbatim_excerpt,),
+            evidence_ids=(citation.evidence_id,),
+            supporting_evidence=("已定位並讀取官方附註原文。",),
+            counterevidence=(),
+            inference_chain=("官方查核報告附註 → 對應最低附註類別",),
+            mechanism="附註原文已納入；相關量化風險仍由對應R題判定。",
+            leading_warnings=("附註內容或會計政策於後續期間變更",),
+            buffers=("後續期間無重大變更且量化指標改善",),
+            monitoring_metrics=(check_id,),
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("新一期附註取代本期原文。",),
+            severity="not_applicable",
+            confidence="medium",
+            unresolved_reasons=(),
+        )
+    opinion_citations: tuple[Any, ...] = tuple(
+        getattr(document_evidence, "audit_opinion_citations", ())
+    )
+    opinion_types: tuple[tuple[str, str], ...] = tuple(
+        getattr(document_evidence, "audit_opinion_types", ())
+    )
+    if len(opinion_citations) == 3 and len(opinion_types) == 3:
+        rows["A01_auditor_opinion"] = ChecklistCheckResult(
+            check_id="A01_auditor_opinion", domain="audit", applicability="triggered",
+            status="evaluated", first_detectable_at=opinion_citations[-1].available_at,
+            financial_period=opinion_citations[-1].period,
+            observations=tuple(f"{period}: {opinion}" for period, opinion in opinion_types),
+            evidence_ids=tuple(item.evidence_id for item in opinion_citations),
+            supporting_evidence=("MOPS公告意見類型與查核報告原文均已取得。",),
+            counterevidence=(), inference_chain=("公告 opinion_type → PDF查核意見段",),
+            mechanism="非無保留意見可能限制財報可靠性或揭露重大爭議。",
+            leading_warnings=("意見類型轉差",), buffers=("連續無保留意見",),
+            monitoring_metrics=("auditor_opinion_type",), monitoring_date=None,
+            invalidation_or_resolution_conditions=("新年度查核意見取代目前判定。",),
+            severity="high" if any(item[1] != "unmodified" for item in opinion_types) else "low",
+            confidence="high", unresolved_reasons=(),
+        )
+
+    def explicit_audit_paragraph(check_id: str, citations: tuple[Any, ...], label: str) -> None:
+        if not citations:
+            return
+        latest = citations[-1]
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id, domain="audit", applicability="triggered",
+            status="evaluated", first_detectable_at=latest.available_at,
+            financial_period=latest.period,
+            observations=tuple(item.verbatim_excerpt for item in citations),
+            evidence_ids=tuple(item.evidence_id for item in citations),
+            supporting_evidence=(f"查核報告明確出現{label}段落。",), counterevidence=(),
+            inference_chain=(f"查核報告原文 → {label}",),
+            mechanism=f"{label}可能揭露財報之外的重大不確定性或注意事項。",
+            leading_warnings=(f"{label}持續或擴大",), buffers=(),
+            monitoring_metrics=(label,), monitoring_date=None,
+            invalidation_or_resolution_conditions=("後續查核報告明確解除或更新。",),
+            severity="high", confidence="high", unresolved_reasons=(),
+        )
+
+    explicit_audit_paragraph(
+        "A02_going_concern",
+        getattr(document_evidence, "going_concern_citations", ()),
+        "繼續經營重大不確定性",
+    )
+    explicit_audit_paragraph(
+        "A03_emphasis_and_other_matters",
+        getattr(document_evidence, "emphasis_other_citations", ()),
+        "強調或其他事項",
+    )
+    search_complete_periods = getattr(
+        document_evidence, "audit_text_search_complete_periods", ()
+    )
+    if len(search_complete_periods) == 3:
+        search_evidence_ids = tuple(
+            item.evidence_id for item in (*opinion_citations, *getattr(document_evidence, "kam_citations", ()))
+        )
+        for check_id, label in (
+            ("A02_going_concern", "繼續經營重大不確定性"),
+            ("A03_emphasis_and_other_matters", "強調或其他事項"),
+        ):
+            if rows[check_id].status == "evaluated":
+                continue
+            rows[check_id] = ChecklistCheckResult(
+                check_id=check_id, domain="audit", applicability="not_triggered",
+                status="evaluated", first_detectable_at=opinion_citations[-1].available_at,
+                financial_period=opinion_citations[-1].period,
+                observations=(f"最近三年可搜尋查核報告未命中{label}段落。",),
+                evidence_ids=search_evidence_ids,
+                supporting_evidence=(), counterevidence=(f"未發現{label}段落。",),
+                inference_chain=("三年查核報告全文搜尋 → 未命中",),
+                mechanism=f"目前沒有明確{label}訊號；不代表未來不會出現。",
+                leading_warnings=(f"後續新增{label}",), buffers=("三年未見明確段落",),
+                monitoring_metrics=(label,), monitoring_date=None,
+                invalidation_or_resolution_conditions=(f"新報告出現{label}。",),
+                severity="low", confidence="medium", unresolved_reasons=(),
+            )
+    kam_citations = getattr(document_evidence, "kam_citations", ())
+    if len(kam_citations) == 3:
+        rows["A04_three_year_kam"] = ChecklistCheckResult(
+            check_id="A04_three_year_kam", domain="audit", applicability="triggered",
+            status="evaluated", first_detectable_at=kam_citations[-1].available_at,
+            financial_period=kam_citations[-1].period,
+            observations=tuple(item.verbatim_excerpt for item in kam_citations),
+            evidence_ids=tuple(item.evidence_id for item in kam_citations),
+            supporting_evidence=("最近三年KAM原文均已取得。",), counterevidence=(),
+            inference_chain=("三年年度查核報告 → KAM逐年比較",),
+            mechanism="KAM持續或新增反映重大估計及查核關注。",
+            leading_warnings=("KAM新增、範圍擴大或措辭惡化",), buffers=(),
+            monitoring_metrics=("KAM逐年變化",), monitoring_date=None,
+            invalidation_or_resolution_conditions=("新年度KAM取代目前比較。",),
+            severity="medium", confidence="high", unresolved_reasons=(),
+        )
+    return tuple(rows[item.check_id] for item in checks)
 
 
 def _transmission_from_overview(
@@ -406,6 +568,7 @@ def build_checklist_assessment(
     bundle: CompanyEvidenceBundle,
     generation_id: str,
     financial_section: FinancialDeteriorationSection | None,
+    detailed_analysis: object | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -418,6 +581,8 @@ def build_checklist_assessment(
     audit_ids = _ids(_audit_artifacts(bundle))
     basis_records = _basis_records(bundle)
     overview = build_financial_overview(bundle)
+    industry_route = _industry_route(bundle, route)
+    document_evidence = getattr(detailed_analysis, "checklist_document_evidence", None)
 
     if route != "general_non_financial":
         reason = "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
@@ -429,8 +594,9 @@ def build_checklist_assessment(
             risks=tuple(_risk_unresolved(item, reason) for item in RISK_DIMENSIONS),
             basis_records=basis_records,
             financial_overview=overview,
-            checks=_placeholder_checks(reason),
+            checks=_placeholder_checks(reason, industry_route),
             growth_transmission=_transmission(reason),
+            industry_route=industry_route,
         )
 
     annual = [item for item in bundle.periods if item.is_annual and item.financial]
@@ -481,9 +647,50 @@ def build_checklist_assessment(
             "權益變動表尚未完成canonical parse，或總權益未與資產負債表逐期勾稽。",
         )
     )
+    opinion_citations = getattr(document_evidence, "audit_opinion_citations", ())
+    kam_citations = getattr(document_evidence, "kam_citations", ())
+    audit_evidence_ids = tuple(
+        item.evidence_id for item in (*opinion_citations, *kam_citations)
+    )
+    search_complete_periods = getattr(
+        document_evidence, "audit_text_search_complete_periods", ()
+    )
+    going_concern_read = bool(
+        getattr(document_evidence, "going_concern_citations", ())
+    ) or len(search_complete_periods) == 3
+    emphasis_other_read = bool(
+        getattr(document_evidence, "emphasis_other_citations", ())
+    ) or len(search_complete_periods) == 3
+    coverage["auditor_opinion_going_concern_emphasis_other_matters_and_kam_read"] = (
+        _complete(
+            "auditor_opinion_going_concern_emphasis_other_matters_and_kam_read",
+            audit_evidence_ids,
+        )
+        if (
+            len(opinion_citations) == 3
+            and len(kam_citations) == 3
+            and going_concern_read
+            and emphasis_other_read
+        )
+        else _unresolved(
+            "auditor_opinion_going_concern_emphasis_other_matters_and_kam_read",
+            f"最近三年查核意見取得{len(opinion_citations)}/3、KAM取得{len(kam_citations)}/3；"
+            f"繼續經營判定={'完成' if going_concern_read else '未完成'}、"
+            f"強調/其他事項判定={'完成' if emphasis_other_read else '未完成'}。",
+        )
+    )
+    note_citations = getattr(document_evidence, "note_citations", ())
+    note_ids = {item[0] for item in note_citations}
+    note_evidence_ids = tuple(item[1].evidence_id for item in note_citations)
+    coverage["minimum_notes_coverage_complete"] = (
+        _complete("minimum_notes_coverage_complete", note_evidence_ids)
+        if note_ids == set(NOTE_CHECK_IDS)
+        else _unresolved(
+            "minimum_notes_coverage_complete",
+            f"最低附註覆蓋{len(note_ids)}/{len(NOTE_CHECK_IDS)}；未取得不代表沒有該風險。",
+        )
+    )
     fixed_unresolved = {
-        "auditor_opinion_going_concern_emphasis_other_matters_and_kam_read": "最近三年KAM與查核意見尚未全部逐字抽取並准入。",
-        "minimum_notes_coverage_complete": "重大承諾、或有事項、關係人、減損及政策附註尚未逐項完成。",
         "growth_drivers_have_evidence_counterevidence_invalidation_and_monitoring": "需求至現金的成長鏈仍有未解項目。",
         "risks_have_mechanism_warning_buffer_threshold_and_monitoring": "各風險的機制、緩衝、門檻及監控尚未全部建立。",
         "history_peer_seasonality_and_business_model_considered": "同業、季節性與商業模式比較尚未全部准入。",
@@ -588,10 +795,16 @@ def build_checklist_assessment(
         risks=tuple(risks[item] for item in RISK_DIMENSIONS),
         basis_records=basis_records,
         financial_overview=overview,
-        checks=_quantitative_checks(
-            overview, "該題尚未完成權威逐項 producer 與反證准入。"
+        checks=_document_checks(
+            _quantitative_checks(
+                overview,
+                "該題尚未完成權威逐項 producer 與反證准入。",
+                industry_route,
+            ),
+            document_evidence,
         ),
         growth_transmission=_transmission_from_overview(overview),
+        industry_route=industry_route,
     )
 
 

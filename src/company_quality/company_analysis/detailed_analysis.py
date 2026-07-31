@@ -22,6 +22,10 @@ from company_quality.company_analysis.contracts import (
     FinancialTrendPeriod,
     Finding,
 )
+from company_quality.company_analysis.checklist_evidence import (
+    ChecklistDocumentEvidence,
+    collect_checklist_document_evidence,
+)
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 from company_quality.company_analysis.financial_anomalies import (
     analyze_financial_anomalies,
@@ -62,6 +66,7 @@ class DetailedAnalysis:
     upside_confidence: Decimal
     limitations: tuple[str, ...]
     available: bool
+    checklist_document_evidence: ChecklistDocumentEvidence | None = None
 
 
 class _TableRows(HTMLParser):
@@ -1072,19 +1077,13 @@ def build_detailed_analysis(
     )
 
     audits = sorted(_audit_filings(bundle), key=lambda item: item.period)
-    kam_citations: list[EvidenceCitation] = []
-    for audit in audits:
-        citation = _pdf_citation(
-            audit,
-            slug="kam",
-            keywords=("待驗設備及未完工程",),
-            following_blocks=16,
-            ocr_keywords=("待驗設備及未完工程",),
-            max_pages=14,
-        )
-        if citation is not None:
-            kam_citations.append(citation)
-            citations.append(citation)
+    checklist_document_evidence = collect_checklist_document_evidence(tuple(audits))
+    kam_citations = list(checklist_document_evidence.kam_citations)
+    citations.extend(checklist_document_evidence.audit_opinion_citations)
+    citations.extend(checklist_document_evidence.going_concern_citations)
+    citations.extend(checklist_document_evidence.emphasis_other_citations)
+    citations.extend(checklist_document_evidence.kam_citations)
+    citations.extend(citation for _, citation in checklist_document_evidence.note_citations)
     latest_audit = audits[-1] if audits else None
     concentration_receivable = (
         _pdf_citation(
@@ -1586,6 +1585,7 @@ def build_detailed_analysis(
         ),
         limitations=tuple(limitations),
         available=True,
+        checklist_document_evidence=checklist_document_evidence,
     )
 
 

@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from company_quality.company_analysis.checklist_contracts import (
+    AUDIT_CHECK_IDS,
     GROWTH_CHECK_IDS,
     GROWTH_DIMENSIONS,
     GROWTH_TRANSMISSION_STAGES,
@@ -93,6 +94,7 @@ def _checks():
         *(row(item, "growth") for item in GROWTH_CHECK_IDS),
         *(row(item, "risk") for item in RISK_CHECK_IDS),
         *(row(item, "note") for item in NOTE_CHECK_IDS),
+        *(row(item, "audit") for item in AUDIT_CHECK_IDS),
     )
 
 
@@ -133,6 +135,7 @@ def _assessment(**changes):
         "financial_overview": FinancialOverview(("114Q4",), ()),
         "checks": _checks(),
         "growth_transmission": _transmission(),
+        "industry_route": "not_applicable",
     }
     values.update(changes)
     return ChecklistAssessment(**values)
@@ -190,8 +193,13 @@ def test_coverage_must_declare_every_authoritative_completion_item() -> None:
 
 
 def test_every_growth_risk_and_note_check_is_required() -> None:
-    with pytest.raises(ValueError, match="every G, R and note check"):
+    with pytest.raises(ValueError, match="every G, R, note and routed industry check"):
         _assessment(checks=_checks()[:-1])
+
+
+def test_routed_industry_requires_its_add_on_checks() -> None:
+    with pytest.raises(ValueError, match="routed industry check"):
+        _assessment(industry_route="manufacturing_hardware")
 
 
 def test_every_growth_transmission_stage_is_required() -> None:

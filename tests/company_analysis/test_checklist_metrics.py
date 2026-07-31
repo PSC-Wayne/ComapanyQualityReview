@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from company_quality.company_analysis.checklist_metrics import build_financial_overview
 from company_quality.company_analysis.checklist_analysis import (
+    _industry_route,
     _quantitative_checks,
     _transmission_from_overview,
 )
@@ -56,6 +57,14 @@ def _period(period, *, annual, revenue, cfo, capex, ar, inventory, payable, equi
 
 def _metric(overview, metric_id):
     return next(item for item in overview.metrics if item.metric_id == metric_id)
+
+
+def test_industry_route_uses_official_industry_code_and_preserves_ambiguity() -> None:
+    semiconductor = cast(Any, SimpleNamespace(identity=SimpleNamespace(industry_code="24")))
+    construction = cast(Any, SimpleNamespace(identity=SimpleNamespace(industry_code="14")))
+    assert _industry_route(semiconductor, "general_non_financial") == "manufacturing_hardware"
+    assert _industry_route(construction, "general_non_financial") == "unresolved"
+    assert _industry_route(semiconductor, "financial_institution_unrouted") == "financial"
 
 
 def test_overview_uses_five_annual_and_four_recent_quarters_with_correct_flows() -> None:

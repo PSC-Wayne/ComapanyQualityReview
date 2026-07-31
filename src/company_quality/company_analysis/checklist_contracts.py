@@ -22,6 +22,11 @@ CompanyRoute = Literal[
     "securities_firm",
     "financial_institution_unrouted",
 ]
+IndustryRoute = Literal[
+    "manufacturing_hardware", "ecommerce_platform", "project_engineering_epc",
+    "software_ai", "financial", "biotech", "energy",
+    "not_applicable", "unresolved",
+]
 
 REQUIRED_COMPLETION_ITEMS = (
     "five_year_annual_consolidated_statements",
@@ -62,7 +67,24 @@ NOTE_CHECK_IDS = (
     "N16_share_based_payments", "N17_eps", "N18_segments",
     "N19_subsequent_events",
 )
-REQUIRED_CHECK_IDS = (*GROWTH_CHECK_IDS, *RISK_CHECK_IDS, *NOTE_CHECK_IDS)
+AUDIT_CHECK_IDS = (
+    "A01_auditor_opinion",
+    "A02_going_concern",
+    "A03_emphasis_and_other_matters",
+    "A04_three_year_kam",
+)
+REQUIRED_CHECK_IDS = (
+    *GROWTH_CHECK_IDS, *RISK_CHECK_IDS, *NOTE_CHECK_IDS, *AUDIT_CHECK_IDS,
+)
+INDUSTRY_CHECK_IDS = {
+    "manufacturing_hardware": tuple(f"I-MFG-{item:02d}" for item in range(1, 8)),
+    "ecommerce_platform": tuple(f"I-ECOM-{item:02d}" for item in range(1, 5)),
+    "project_engineering_epc": tuple(f"I-EPC-{item:02d}" for item in range(1, 6)),
+    "software_ai": tuple(f"I-SW-{item:02d}" for item in range(1, 6)),
+    "financial": tuple(f"I-FIN-{item:02d}" for item in range(1, 5)),
+    "biotech": tuple(f"I-BIO-{item:02d}" for item in range(1, 6)),
+    "energy": tuple(f"I-ENERGY-{item:02d}" for item in range(1, 6)),
+}
 GROWTH_TRANSMISSION_STAGES = (
     "demand", "opportunity", "order", "backlog", "revenue", "margin", "cash"
 )
@@ -248,6 +270,7 @@ class ChecklistAssessment:
     financial_overview: FinancialOverview | None = None
     checks: tuple[ChecklistCheckResult, ...] = ()
     growth_transmission: tuple[GrowthTransmissionStage, ...] = ()
+    industry_route: IndustryRoute = "unresolved"
     detailed_check_status: Literal["complete", "incomplete_unresolved", "not_applicable_company_route"] = field(init=False)
     schema_version: Literal["ChecklistAssessment.v1"] = "ChecklistAssessment.v1"
 
@@ -264,8 +287,9 @@ class ChecklistAssessment:
         check_ids = tuple(item.check_id for item in self.checks)
         if len(set(check_ids)) != len(check_ids):
             raise ValueError("duplicate checklist check")
-        if set(check_ids) != set(REQUIRED_CHECK_IDS):
-            raise ValueError("assessment must declare every G, R and note check")
+        required_checks = (*REQUIRED_CHECK_IDS, *INDUSTRY_CHECK_IDS.get(self.industry_route, ()))
+        if set(check_ids) != set(required_checks):
+            raise ValueError("assessment must declare every G, R, note and routed industry check")
         stages = tuple(item.stage for item in self.growth_transmission)
         if len(set(stages)) != len(stages) or set(stages) != set(GROWTH_TRANSMISSION_STAGES):
             raise ValueError("assessment must declare every growth transmission stage")
@@ -273,6 +297,7 @@ class ChecklistAssessment:
             self.route == "general_non_financial"
             and bool(self.basis_records)
             and self.financial_overview is not None
+            and self.industry_route != "unresolved"
             and all(item.status in {"complete", "not_applicable"} for item in self.coverage)
             and all(item.status == "evaluated" and item.applicability != "unresolved" for item in self.checks)
             and all(item.status in {"verified", "partially_verified", "not_applicable"} for item in self.growth_transmission)
@@ -315,8 +340,8 @@ class ChecklistAssessment:
 
 
 __all__ = [
-    "AUTHORITY_DOCUMENT", "GROWTH_CHECK_IDS", "GROWTH_DIMENSIONS",
-    "GROWTH_TRANSMISSION_STAGES", "NOTE_CHECK_IDS", "REQUIRED_CHECK_IDS",
+    "AUDIT_CHECK_IDS", "AUTHORITY_DOCUMENT", "GROWTH_CHECK_IDS", "GROWTH_DIMENSIONS",
+    "GROWTH_TRANSMISSION_STAGES", "INDUSTRY_CHECK_IDS", "NOTE_CHECK_IDS", "REQUIRED_CHECK_IDS",
     "REQUIRED_COMPLETION_ITEMS", "RISK_CHECK_IDS", "RISK_DIMENSIONS",
     "AnalysisBasisRecord", "ChecklistAssessment", "ChecklistCheckResult",
     "ChecklistCoverage", "FinancialMetricValue", "FinancialOverview",

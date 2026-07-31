@@ -1319,10 +1319,10 @@ def build_report_from_evidence(
     financial_deterioration, financial_citations = build_financial_deterioration(
         bundle, generation_id
     )
-    checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, financial_deterioration
-    )
     detailed = build_detailed_analysis(bundle)
+    checklist_assessment = build_checklist_assessment(
+        bundle, generation_id, financial_deterioration, detailed
+    )
     if detailed.available:
         limitations = [
             *detailed.limitations,
