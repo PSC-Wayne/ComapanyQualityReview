@@ -3,12 +3,20 @@ from dataclasses import replace
 import pytest
 
 from company_quality.company_analysis.checklist_contracts import (
+    GROWTH_CHECK_IDS,
     GROWTH_DIMENSIONS,
+    GROWTH_TRANSMISSION_STAGES,
+    NOTE_CHECK_IDS,
     REQUIRED_COMPLETION_ITEMS,
+    RISK_CHECK_IDS,
     RISK_DIMENSIONS,
+    AnalysisBasisRecord,
     ChecklistAssessment,
+    ChecklistCheckResult,
     ChecklistCoverage,
+    FinancialOverview,
     GrowthConclusion,
+    GrowthTransmissionStage,
     RiskConclusion,
 )
 
@@ -57,6 +65,63 @@ def _risks():
     )
 
 
+def _checks():
+    def row(check_id, domain):
+        return ChecklistCheckResult(
+            check_id=check_id,
+            domain=domain,
+            applicability="not_triggered",
+            status="evaluated",
+            first_detectable_at=None,
+            financial_period=None,
+            observations=("已完成檢查，未達觸發條件",),
+            evidence_ids=(),
+            supporting_evidence=(),
+            counterevidence=(),
+            inference_chain=(),
+            mechanism=None,
+            leading_warnings=(),
+            buffers=(),
+            monitoring_metrics=("下一期同口徑檢查",),
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("新資料達觸發條件",),
+            severity="not_applicable",
+            confidence="not_applicable",
+            unresolved_reasons=(),
+        )
+    return (
+        *(row(item, "growth") for item in GROWTH_CHECK_IDS),
+        *(row(item, "risk") for item in RISK_CHECK_IDS),
+        *(row(item, "note") for item in NOTE_CHECK_IDS),
+    )
+
+
+def _transmission():
+    return tuple(
+        GrowthTransmissionStage(stage, "not_applicable", ())
+        for stage in GROWTH_TRANSMISSION_STAGES
+    )
+
+
+def _basis():
+    return (
+        AnalysisBasisRecord(
+            period="114Q4",
+            statement="income",
+            consolidation_scope="consolidated",
+            period_basis="annual",
+            assurance="audit",
+            currency="TWD",
+            unit="thousand_twd",
+            restatement_status="original",
+            report_date="2026-03-01T00:00:00+08:00",
+            filed_at="2026-03-01T00:00:00+08:00",
+            available_at="2026-03-01T00:00:00+08:00",
+            evidence_ids=("evidence:basis",),
+        ),
+    )
+
+
 def _assessment(**changes):
     values = {
         "generation_id": "generation-1",
@@ -64,6 +129,10 @@ def _assessment(**changes):
         "coverage": _coverage(),
         "growth": _growth(),
         "risks": _risks(),
+        "basis_records": _basis(),
+        "financial_overview": FinancialOverview(("114Q4",), ()),
+        "checks": _checks(),
+        "growth_transmission": _transmission(),
     }
     values.update(changes)
     return ChecklistAssessment(**values)
@@ -72,6 +141,7 @@ def _assessment(**changes):
 def test_complete_general_company_requires_all_authoritative_dimensions() -> None:
     assessment = _assessment()
     assert assessment.detailed_check_complete is True
+    assert assessment.detailed_check_status == "complete"
     assert assessment.unresolved_reasons == ()
 
 
@@ -104,12 +174,39 @@ def test_unresolved_growth_cannot_be_published_as_complete() -> None:
     assert "月營收來源不足" in assessment.unresolved_reasons
 
 
-@pytest.mark.parametrize("route", ["bank", "life_insurer", "property_insurer", "securities_firm"])
+@pytest.mark.parametrize(
+    "route",
+    ["bank", "life_insurer", "property_insurer", "securities_firm", "financial_institution_unrouted"],
+)
 def test_financial_institutions_never_use_general_company_completion(route: str) -> None:
     assessment = _assessment(route=route)
     assert assessment.detailed_check_complete is False
+    assert assessment.detailed_check_status == "not_applicable_company_route"
 
 
 def test_coverage_must_declare_every_authoritative_completion_item() -> None:
     with pytest.raises(ValueError, match="every completion item"):
         _assessment(coverage=_coverage()[:-1])
+
+
+def test_every_growth_risk_and_note_check_is_required() -> None:
+    with pytest.raises(ValueError, match="every G, R and note check"):
+        _assessment(checks=_checks()[:-1])
+
+
+def test_every_growth_transmission_stage_is_required() -> None:
+    with pytest.raises(ValueError, match="every growth transmission stage"):
+        _assessment(growth_transmission=_transmission()[:-1])
+
+
+def test_unresolved_check_fails_closed() -> None:
+    first = replace(
+        _checks()[0],
+        applicability="unresolved",
+        status="unresolved",
+        observations=(),
+        unresolved_reasons=("G01證據不足",),
+    )
+    assessment = _assessment(checks=(first, *_checks()[1:]))
+    assert assessment.detailed_check_complete is False
+    assert "G01證據不足" in assessment.unresolved_reasons

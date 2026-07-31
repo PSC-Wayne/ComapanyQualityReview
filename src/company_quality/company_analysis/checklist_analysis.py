@@ -5,13 +5,23 @@ from __future__ import annotations
 from typing import Iterable
 
 from company_quality.company_analysis.checklist_contracts import (
+    GROWTH_CHECK_IDS,
     GROWTH_DIMENSIONS,
+    GROWTH_TRANSMISSION_STAGES,
+    NOTE_CHECK_IDS,
     REQUIRED_COMPLETION_ITEMS,
+    RISK_CHECK_IDS,
     RISK_DIMENSIONS,
+    AnalysisBasisRecord,
     ChecklistAssessment,
+    ChecklistCheckResult,
     ChecklistCoverage,
     CompanyRoute,
+    FinancialMetricValue,
+    FinancialOverview,
+    FinancialOverviewMetric,
     GrowthConclusion,
+    GrowthTransmissionStage,
     RiskConclusion,
 )
 from company_quality.company_analysis.contracts import FinancialDeteriorationSection
@@ -143,6 +153,148 @@ def _metrics(
     return {item.metric_id: item for item in section.periods[-1].metrics}
 
 
+def _basis_records(bundle: CompanyEvidenceBundle) -> tuple[AnalysisBasisRecord, ...]:
+    records: list[AnalysisBasisRecord] = []
+    for period in bundle.periods:
+        if period.financial is not None:
+            for artifact in period.financial.artifacts:
+                records.append(
+                    AnalysisBasisRecord(
+                        period=artifact.period,
+                        statement=artifact.report,
+                        consolidation_scope=artifact.statement_scope,
+                        period_basis=artifact.period_basis,
+                        assurance="unaudited",
+                        currency=None,
+                        unit=None,
+                        restatement_status="unknown",
+                        report_date=None,
+                        filed_at=None,
+                        available_at=artifact.available_at,
+                        evidence_ids=(artifact.artifact_id,),
+                    )
+                )
+        if period.audit is not None and period.audit.pdf_path is not None:
+            records.append(
+                AnalysisBasisRecord(
+                    period=period.period,
+                    statement="audit_report",
+                    consolidation_scope=period.audit.report_scope,
+                    period_basis="annual" if period.is_annual else "not_applicable",
+                    assurance="audit" if period.is_annual else "review",
+                    currency=None,
+                    unit=None,
+                    restatement_status="unknown",
+                    report_date=period.audit.auditor_report_at,
+                    filed_at=period.audit.official_filed_at,
+                    available_at=period.audit.available_at,
+                    evidence_ids=period.audit.evidence_ids,
+                )
+            )
+    records.extend(
+        AnalysisBasisRecord(
+            period=item.month,
+            statement="monthly_revenue",
+            consolidation_scope="consolidated",
+            period_basis="single_period",
+            assurance="unaudited",
+            currency="TWD",
+            unit="thousand_twd",
+            restatement_status="unknown",
+            report_date=None,
+            filed_at=None,
+            available_at=item.available_at,
+            evidence_ids=(item.artifact_id,),
+        )
+        for item in bundle.monthly_revenue
+    )
+    return tuple(records)
+
+
+def _financial_overview(
+    section: FinancialDeteriorationSection | None,
+) -> FinancialOverview | None:
+    if section is None or not section.periods:
+        return None
+    periods = tuple(item.period for item in section.periods)
+    metric_ids = tuple(dict.fromkeys(
+        metric.metric_id for period in section.periods for metric in period.metrics
+    ))
+    metrics: list[FinancialOverviewMetric] = []
+    for metric_id in metric_ids:
+        values: list[FinancialMetricValue] = []
+        trend = "unresolved"
+        for period in section.periods:
+            metric = next((item for item in period.metrics if item.metric_id == metric_id), None)
+            if metric is None:
+                values.append(FinancialMetricValue(period.period, None, None, "not_derivable", ()))
+                continue
+            values.append(
+                FinancialMetricValue(
+                    period.period,
+                    metric.absolute_value,
+                    metric.ratio,
+                    "available",
+                    metric.evidence_ids,
+                )
+            )
+            trend = {
+                "flat": "stable", "mixed": "unresolved"
+            }.get(metric.direction, metric.direction)
+        metrics.append(
+            FinancialOverviewMetric(
+                metric_id=metric_id,
+                values=tuple(values),
+                trend_status=trend,  # type: ignore[arg-type]
+                formula_id=(
+                    "DSO.average_receivables.period_revenue.actual_days.v1"
+                    if metric_id == "receivables" else f"legacy.{metric_id}.v1"
+                ),
+                days_basis=("actual_calendar_days" if metric_id == "receivables" else None),
+                approximation_reason=None,
+            )
+        )
+    return FinancialOverview(periods=periods, metrics=tuple(metrics))
+
+
+def _placeholder_checks(reason: str) -> tuple[ChecklistCheckResult, ...]:
+    def row(check_id: str, domain: str) -> ChecklistCheckResult:
+        return ChecklistCheckResult(
+            check_id=check_id,
+            domain=domain,  # type: ignore[arg-type]
+            applicability="unresolved",
+            status="unresolved",
+            first_detectable_at=None,
+            financial_period=None,
+            observations=(),
+            evidence_ids=(),
+            supporting_evidence=(),
+            counterevidence=(),
+            inference_chain=(),
+            mechanism=None,
+            leading_warnings=(),
+            buffers=(),
+            monitoring_metrics=(),
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=(),
+            severity="not_applicable",
+            confidence="low",
+            unresolved_reasons=(reason,),
+        )
+    return (
+        *(row(item, "growth") for item in GROWTH_CHECK_IDS),
+        *(row(item, "risk") for item in RISK_CHECK_IDS),
+        *(row(item, "note") for item in NOTE_CHECK_IDS),
+    )
+
+
+def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
+    return tuple(
+        GrowthTransmissionStage(item, "unresolved", (), reason)
+        for item in GROWTH_TRANSMISSION_STAGES
+    )
+
+
 def build_checklist_assessment(
     bundle: CompanyEvidenceBundle,
     generation_id: str,
@@ -157,6 +309,8 @@ def build_checklist_assessment(
     financial_ids = _ids(financial)
     monthly_ids = _ids(bundle.monthly_revenue)
     audit_ids = _ids(_audit_artifacts(bundle))
+    basis_records = _basis_records(bundle)
+    overview = _financial_overview(financial_section)
 
     if route != "general_non_financial":
         reason = "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
@@ -166,6 +320,10 @@ def build_checklist_assessment(
             coverage=tuple(_unresolved(item, reason) for item in REQUIRED_COMPLETION_ITEMS),
             growth=tuple(_growth_unresolved(item, reason) for item in GROWTH_DIMENSIONS),
             risks=tuple(_risk_unresolved(item, reason) for item in RISK_DIMENSIONS),
+            basis_records=basis_records,
+            financial_overview=overview,
+            checks=_placeholder_checks(reason),
+            growth_transmission=_transmission(reason),
         )
 
     annual = [item for item in bundle.periods if item.is_annual and item.financial]
@@ -268,6 +426,10 @@ def build_checklist_assessment(
         coverage=tuple(coverage[item] for item in REQUIRED_COMPLETION_ITEMS),
         growth=tuple(growth[item] for item in GROWTH_DIMENSIONS),
         risks=tuple(risks[item] for item in RISK_DIMENSIONS),
+        basis_records=basis_records,
+        financial_overview=overview,
+        checks=_placeholder_checks("該題尚未完成權威逐項 producer 與反證准入。"),
+        growth_transmission=_transmission("該傳導階段尚未完成公司原始證據與反證准入。"),
     )
 
 

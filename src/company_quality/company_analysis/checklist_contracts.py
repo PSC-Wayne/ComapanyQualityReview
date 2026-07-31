@@ -1,18 +1,16 @@
-"""Authoritative completion and conclusion contracts for single-company research.
+"""Executable contracts for the authoritative company-analysis checklist.
 
 The behavioral authority is ``Financial_Statement_Growth_Risk_Checklist.md``.
-These contracts fail closed: an unresolved required item prevents a detailed
-check from being described as complete.
+Missing evidence always fails closed; it is never interpreted as no risk.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Literal
 
-
 AUTHORITY_DOCUMENT = "Financial_Statement_Growth_Risk_Checklist.md"
-
 CoverageStatus = Literal["complete", "unresolved", "not_applicable"]
 Judgement = Literal["improving", "stable", "deteriorating", "unresolved"]
 Confidence = Literal["high", "medium", "low"]
@@ -24,7 +22,6 @@ CompanyRoute = Literal[
     "securities_firm",
     "financial_institution_unrouted",
 ]
-
 
 REQUIRED_COMPLETION_ITEMS = (
     "five_year_annual_consolidated_statements",
@@ -41,28 +38,33 @@ REQUIRED_COMPLETION_ITEMS = (
     "history_peer_seasonality_and_business_model_considered",
     "missing_evidence_preserved_as_unresolved",
 )
-
 GROWTH_DIMENSIONS = (
-    "revenue_momentum",
-    "margin_and_product_mix",
-    "operating_leverage",
-    "earnings_quality",
-    "cash_conversion",
-    "reinvestment_and_roic",
+    "revenue_momentum", "margin_and_product_mix", "operating_leverage",
+    "earnings_quality", "cash_conversion", "reinvestment_and_roic",
     "per_share_value_and_dilution",
 )
-
 RISK_DIMENSIONS = (
-    "liquidity_and_refinancing",
-    "receivables_and_collection",
-    "inventory_and_impairment",
-    "contract_assets_and_revenue_recognition",
-    "earnings_quality",
-    "goodwill_and_asset_impairment",
-    "related_parties_and_governance",
-    "customer_and_supplier_concentration",
+    "liquidity_and_refinancing", "receivables_and_collection",
+    "inventory_and_impairment", "contract_assets_and_revenue_recognition",
+    "earnings_quality", "goodwill_and_asset_impairment",
+    "related_parties_and_governance", "customer_and_supplier_concentration",
     "litigation_guarantees_and_commitments",
     "shareholder_dilution_and_capital_allocation",
+)
+GROWTH_CHECK_IDS = tuple(f"G{i:02d}" for i in range(1, 26))
+RISK_CHECK_IDS = tuple(f"R{i:02d}" for i in range(1, 49))
+NOTE_CHECK_IDS = (
+    "N01_revenue_recognition", "N02_receivables", "N03_inventory",
+    "N04_contract_assets", "N05_ppe", "N06_goodwill_intangibles",
+    "N07_borrowings_bonds", "N08_liquidity", "N09_restricted_cash",
+    "N10_related_parties", "N11_guarantees", "N12_contingencies_litigation",
+    "N13_commitments", "N14_income_tax", "N15_financial_instruments",
+    "N16_share_based_payments", "N17_eps", "N18_segments",
+    "N19_subsequent_events",
+)
+REQUIRED_CHECK_IDS = (*GROWTH_CHECK_IDS, *RISK_CHECK_IDS, *NOTE_CHECK_IDS)
+GROWTH_TRANSMISSION_STAGES = (
+    "demand", "opportunity", "order", "backlog", "revenue", "margin", "cash"
 )
 
 
@@ -82,6 +84,112 @@ class ChecklistCoverage:
             raise ValueError("unresolved checklist item requires a reason")
         if self.status != "unresolved" and self.unresolved_reason is not None:
             raise ValueError("only unresolved checklist items may have a reason")
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisBasisRecord:
+    period: str
+    statement: Literal["balance", "income", "cash_flow", "equity_changes", "monthly_revenue", "audit_report"]
+    consolidation_scope: Literal["consolidated", "individual", "not_applicable", "unknown"]
+    period_basis: Literal["point_in_time", "single_period", "single_and_ytd", "year_to_date", "annual", "not_applicable", "unknown"]
+    assurance: Literal["audit", "review", "unaudited", "not_applicable", "unknown"]
+    currency: str | None
+    unit: str | None
+    restatement_status: Literal["original", "restated", "corrected", "unknown"]
+    report_date: str | None
+    filed_at: str | None
+    available_at: str
+    evidence_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.period or not self.evidence_ids or not self.available_at:
+            raise ValueError("basis record requires period, availability and evidence")
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialMetricValue:
+    period: str
+    value: Decimal | None
+    ratio: Decimal | None
+    status: Literal["available", "not_disclosed", "not_derivable", "not_applicable"]
+    evidence_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.status == "available" and (self.value is None or not self.evidence_ids):
+            raise ValueError("available metric value requires value and evidence")
+        if self.status != "available" and self.value is not None:
+            raise ValueError("unavailable metric value cannot carry a numeric value")
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialOverviewMetric:
+    metric_id: str
+    values: tuple[FinancialMetricValue, ...]
+    trend_status: Judgement | Literal["mixed"]
+    formula_id: str | None
+    days_basis: str | None
+    approximation_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FinancialOverview:
+    periods: tuple[str, ...]
+    metrics: tuple[FinancialOverviewMetric, ...]
+    schema_version: Literal["FinancialOverview.v1"] = "FinancialOverview.v1"
+
+    def __post_init__(self) -> None:
+        if len(set(self.periods)) != len(self.periods):
+            raise ValueError("duplicate financial overview period")
+        if len({item.metric_id for item in self.metrics}) != len(self.metrics):
+            raise ValueError("duplicate financial overview metric")
+
+
+@dataclass(frozen=True, slots=True)
+class ChecklistCheckResult:
+    check_id: str
+    domain: Literal["growth", "risk", "note", "audit", "industry"]
+    applicability: Literal["triggered", "not_triggered", "not_applicable", "unresolved"]
+    status: Literal["evaluated", "unresolved"]
+    first_detectable_at: str | None
+    financial_period: str | None
+    observations: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    supporting_evidence: tuple[str, ...]
+    counterevidence: tuple[str, ...]
+    inference_chain: tuple[str, ...]
+    mechanism: str | None
+    leading_warnings: tuple[str, ...]
+    buffers: tuple[str, ...]
+    monitoring_metrics: tuple[str, ...]
+    monitoring_date: str | None
+    invalidation_or_resolution_conditions: tuple[str, ...]
+    severity: Literal["low", "medium", "high", "critical", "not_applicable"]
+    confidence: Literal["high", "medium", "low", "not_applicable"]
+    unresolved_reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.status == "unresolved" and not self.unresolved_reasons:
+            raise ValueError("unresolved check requires reasons")
+        if self.status == "evaluated" and self.applicability == "triggered" and not self.evidence_ids:
+            raise ValueError("triggered evaluated check requires evidence")
+        if self.status == "evaluated" and self.unresolved_reasons:
+            raise ValueError("evaluated check cannot retain unresolved reasons")
+
+
+@dataclass(frozen=True, slots=True)
+class GrowthTransmissionStage:
+    stage: str
+    status: Literal["verified", "partially_verified", "unverified", "unresolved", "not_applicable"]
+    evidence_ids: tuple[str, ...]
+    unresolved_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.stage not in GROWTH_TRANSMISSION_STAGES:
+            raise ValueError(f"unknown growth transmission stage: {self.stage}")
+        if self.status in {"verified", "partially_verified"} and not self.evidence_ids:
+            raise ValueError("verified transmission stage requires evidence")
+        if self.status in {"unverified", "unresolved"} and not self.unresolved_reason:
+            raise ValueError("unverified transmission stage requires a reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +244,12 @@ class ChecklistAssessment:
     coverage: tuple[ChecklistCoverage, ...]
     growth: tuple[GrowthConclusion, ...]
     risks: tuple[RiskConclusion, ...]
+    basis_records: tuple[AnalysisBasisRecord, ...] = ()
+    financial_overview: FinancialOverview | None = None
+    checks: tuple[ChecklistCheckResult, ...] = ()
+    growth_transmission: tuple[GrowthTransmissionStage, ...] = ()
+    detailed_check_status: Literal["complete", "incomplete_unresolved", "not_applicable_company_route"] = field(init=False)
+    schema_version: Literal["ChecklistAssessment.v1"] = "ChecklistAssessment.v1"
 
     def __post_init__(self) -> None:
         coverage_ids = tuple(item.item_id for item in self.coverage)
@@ -143,21 +257,37 @@ class ChecklistAssessment:
             raise ValueError("duplicate checklist coverage item")
         if set(coverage_ids) != set(REQUIRED_COMPLETION_ITEMS):
             raise ValueError("assessment must declare every completion item")
-        if len({item.dimension for item in self.growth}) != len(self.growth):
-            raise ValueError("duplicate growth dimension")
-        if len({item.dimension for item in self.risks}) != len(self.risks):
-            raise ValueError("duplicate risk dimension")
+        if {item.dimension for item in self.growth} != set(GROWTH_DIMENSIONS):
+            raise ValueError("assessment must declare all growth dimensions")
+        if {item.dimension for item in self.risks} != set(RISK_DIMENSIONS):
+            raise ValueError("assessment must declare all risk dimensions")
+        check_ids = tuple(item.check_id for item in self.checks)
+        if len(set(check_ids)) != len(check_ids):
+            raise ValueError("duplicate checklist check")
+        if set(check_ids) != set(REQUIRED_CHECK_IDS):
+            raise ValueError("assessment must declare every G, R and note check")
+        stages = tuple(item.stage for item in self.growth_transmission)
+        if len(set(stages)) != len(stages) or set(stages) != set(GROWTH_TRANSMISSION_STAGES):
+            raise ValueError("assessment must declare every growth transmission stage")
+        complete = (
+            self.route == "general_non_financial"
+            and bool(self.basis_records)
+            and self.financial_overview is not None
+            and all(item.status in {"complete", "not_applicable"} for item in self.coverage)
+            and all(item.status == "evaluated" and item.applicability != "unresolved" for item in self.checks)
+            and all(item.status in {"verified", "partially_verified", "not_applicable"} for item in self.growth_transmission)
+            and all(item.judgement != "unresolved" for item in (*self.growth, *self.risks))
+        )
+        status = (
+            "not_applicable_company_route"
+            if self.route != "general_non_financial"
+            else "complete" if complete else "incomplete_unresolved"
+        )
+        object.__setattr__(self, "detailed_check_status", status)
 
     @property
     def detailed_check_complete(self) -> bool:
-        if self.route != "general_non_financial":
-            return False
-        return (
-            all(item.status in {"complete", "not_applicable"} for item in self.coverage)
-            and {item.dimension for item in self.growth} == set(GROWTH_DIMENSIONS)
-            and {item.dimension for item in self.risks} == set(RISK_DIMENSIONS)
-            and all(item.judgement != "unresolved" for item in (*self.growth, *self.risks))
-        )
+        return self.detailed_check_status == "complete"
 
     @property
     def unresolved_reasons(self) -> tuple[str, ...]:
@@ -167,8 +297,29 @@ class ChecklistAssessment:
             if item.status == "unresolved" and item.unresolved_reason is not None
         ]
         reasons.extend(
-            unresolved
+            reason
             for conclusion in (*self.growth, *self.risks)
-            for unresolved in conclusion.unresolved_items
+            for reason in conclusion.unresolved_items
         )
-        return tuple(dict.fromkeys(reasons))
+        reasons.extend(reason for item in self.checks for reason in item.unresolved_reasons)
+        reasons.extend(
+            item.unresolved_reason
+            for item in self.growth_transmission
+            if item.unresolved_reason is not None
+        )
+        if not self.basis_records:
+            reasons.append("分析口徑紀錄尚未建立。")
+        if self.financial_overview is None:
+            reasons.append("權威財務總覽尚未建立。")
+        return tuple(dict.fromkeys(reason for reason in reasons if reason))
+
+
+__all__ = [
+    "AUTHORITY_DOCUMENT", "GROWTH_CHECK_IDS", "GROWTH_DIMENSIONS",
+    "GROWTH_TRANSMISSION_STAGES", "NOTE_CHECK_IDS", "REQUIRED_CHECK_IDS",
+    "REQUIRED_COMPLETION_ITEMS", "RISK_CHECK_IDS", "RISK_DIMENSIONS",
+    "AnalysisBasisRecord", "ChecklistAssessment", "ChecklistCheckResult",
+    "ChecklistCoverage", "FinancialMetricValue", "FinancialOverview",
+    "FinancialOverviewMetric", "GrowthConclusion", "GrowthTransmissionStage",
+    "RiskConclusion",
+]
