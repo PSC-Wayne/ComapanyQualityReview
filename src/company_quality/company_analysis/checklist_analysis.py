@@ -158,6 +158,14 @@ def _basis_records(bundle: CompanyEvidenceBundle) -> tuple[AnalysisBasisRecord, 
     for period in bundle.periods:
         if period.financial is not None:
             for artifact in period.financial.artifacts:
+                canonical = (
+                    period.canonical_financial.facts
+                    if period.canonical_financial is not None
+                    else ()
+                )
+                artifact_has_canonical_facts = any(
+                    fact.source_artifact_id == artifact.artifact_id for fact in canonical
+                )
                 records.append(
                     AnalysisBasisRecord(
                         period=artifact.period,
@@ -165,8 +173,8 @@ def _basis_records(bundle: CompanyEvidenceBundle) -> tuple[AnalysisBasisRecord, 
                         consolidation_scope=artifact.statement_scope,
                         period_basis=artifact.period_basis,
                         assurance="unaudited",
-                        currency=None,
-                        unit=None,
+                        currency="TWD" if artifact_has_canonical_facts else None,
+                        unit="TWD_thousands" if artifact_has_canonical_facts else None,
                         restatement_status="unknown",
                         report_date=None,
                         filed_at=None,
@@ -209,6 +217,28 @@ def _basis_records(bundle: CompanyEvidenceBundle) -> tuple[AnalysisBasisRecord, 
         for item in bundle.monthly_revenue
     )
     return tuple(records)
+
+
+def _canonical_period_complete(period: object) -> bool:
+    canonical = getattr(period, "canonical_financial", None)
+    financial = getattr(period, "financial", None)
+    return bool(
+        canonical is not None
+        and canonical.status == "available"
+        and financial is not None
+        and len(financial.artifacts) == 4
+        and all(item.statement_scope != "unknown" for item in financial.artifacts)
+    )
+
+
+def _equity_cross_check_complete(period: object) -> bool:
+    canonical = getattr(period, "canonical_financial", None)
+    if canonical is None or canonical.status != "available":
+        return False
+    values = {item.concept_id: item.value for item in canonical.facts}
+    balance = values.get("balance.total_equity")
+    equity = values.get("equity.total_equity")
+    return balance is not None and equity is not None and balance == equity
 
 
 def _financial_overview(
@@ -332,19 +362,13 @@ def build_checklist_assessment(
     coverage: dict[str, ChecklistCoverage] = {}
     coverage["five_year_annual_consolidated_statements"] = (
         _complete("five_year_annual_consolidated_statements", financial_ids)
-        if len(annual) >= 5 and all(
-            item.financial is not None and len(item.financial.artifacts) == 4
-            for item in annual[-5:]
-        )
+        if len(annual) >= 5 and all(_canonical_period_complete(item) for item in annual[-5:])
         else _unresolved("five_year_annual_consolidated_statements", "未取得最近五個年度完整四表。")
     )
     coverage["twelve_quarter_consolidated_statements"] = (
         _complete("twelve_quarter_consolidated_statements", financial_ids)
         if len(latest_twelve) == 12
-        and all(
-            item.financial is not None and len(item.financial.artifacts) == 4
-            for item in latest_twelve
-        )
+        and all(_canonical_period_complete(item) for item in latest_twelve)
         else _unresolved("twelve_quarter_consolidated_statements", "未取得最近十二季完整四表。")
     )
     coverage["thirty_six_month_revenue"] = (
@@ -369,11 +393,16 @@ def build_checklist_assessment(
         if {"point_in_time", "single_period", "single_and_ytd", "year_to_date"}.issubset(bases)
         else _unresolved("single_period_and_cumulative_basis_confirmed", "單季／累計口徑尚未完整。")
     )
-    equity_ids = _ids(item for item in financial if getattr(item, "report", None) == "equity_changes")
+    cross_check_periods = tuple(dict.fromkeys((*annual[-5:], *latest_twelve)))
     coverage["four_statements_cross_checked"] = (
-        _complete("four_statements_cross_checked", equity_ids)
-        if len(equity_ids) >= 12
-        else _unresolved("four_statements_cross_checked", "權益變動表不足十二季。")
+        _complete("four_statements_cross_checked", financial_ids)
+        if len(annual) >= 5
+        and len(latest_twelve) == 12
+        and all(_equity_cross_check_complete(item) for item in cross_check_periods)
+        else _unresolved(
+            "four_statements_cross_checked",
+            "權益變動表尚未完成canonical parse，或總權益未與資產負債表逐期勾稽。",
+        )
     )
     fixed_unresolved = {
         "auditor_opinion_going_concern_emphasis_other_matters_and_kam_read": "最近三年KAM與查核意見尚未全部逐字抽取並准入。",

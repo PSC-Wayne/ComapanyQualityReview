@@ -156,6 +156,26 @@ def test_collects_twenty_quarters_and_five_annual_audit_pdfs(tmp_path) -> None:
     assert (coverage["monthly_revenue_html"].available, coverage["monthly_revenue_html"].required) == (60, 60)
 
 
+def test_materializes_canonical_financial_facts_into_each_period(
+    tmp_path, monkeypatch
+) -> None:
+    parsed = SimpleNamespace(status="available", facts=(), missing_concepts=())
+    calls = []
+
+    class Parser:
+        def parse(self, artifacts):
+            calls.append(tuple(artifacts))
+            return parsed
+
+    monkeypatch.setattr(evidence_bundle_module, "FinancialFactParser", Parser)
+
+    bundle = _collect(tmp_path)
+
+    assert len(calls) == 20
+    assert all(len(artifacts) == 4 for artifacts in calls)
+    assert all(period.canonical_financial is parsed for period in bundle.periods)
+
+
 def test_missing_period_is_partial_with_exact_coverage_reasons(tmp_path) -> None:
     bundle = _collect(
         tmp_path,

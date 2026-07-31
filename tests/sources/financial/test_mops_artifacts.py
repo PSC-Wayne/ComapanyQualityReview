@@ -80,6 +80,35 @@ def test_collects_selected_company_three_statement_raw_artifacts(tmp_path) -> No
     assert all(call[1]["co_id"] == "2330" for call in transport.post_calls)
 
 
+def test_annual_equity_statement_accepts_official_annual_period_marker(tmp_path) -> None:
+    def annual(title: str, marker: str) -> bytes:
+        return (
+            "<html><body>本資料由台灣積體電路製造股份有限公司提供"
+            f"<h2>{marker} {title}</h2><table><tr><td>100</td></tr></table>"
+            "</body></html>"
+        ).encode()
+
+    bodies = {
+        "ajax_t164sb03": annual("資產負債表", "民國114年第4季"),
+        "ajax_t164sb04": annual("綜合損益表", "民國114年第4季"),
+        "ajax_t164sb05": annual("現金流量表", "民國114年第4季"),
+        "ajax_t164sb06": annual("權益變動表", "民國114年度"),
+    }
+
+    result = MopsFinancialCollector(transport=FakeTransport(bodies)).collect_period(
+        "2330",
+        "台灣積體電路製造股份有限公司",
+        "台積電",
+        "22099131",
+        "TWSE",
+        Period(114, 4),
+        tmp_path,
+        "2026-07-31T12:00:00+08:00",
+    )
+
+    assert len(result.artifacts) == 4
+
+
 def test_wrong_company_or_no_data_is_not_saved_as_success(tmp_path) -> None:
     bad = "<html><body>查無公司資料！</body></html>".encode()
     transport = FakeTransport(

@@ -184,7 +184,10 @@ def _validate_body(
         raise SourceArtifactError("MOPS security/interstitial response")
     if company_name not in text and company_short_name not in text:
         raise SourceArtifactError("official response company identity mismatch")
-    if f"民國{period.roc_year}年第{period.quarter}季" not in text:
+    period_markers = [f"民國{period.roc_year}年第{period.quarter}季"]
+    if period.quarter == 4:
+        period_markers.append(f"民國{period.roc_year}年度")
+    if not any(marker in text for marker in period_markers):
         raise SourceArtifactError("official response period mismatch")
     if title not in text or "<table" not in text.lower():
         raise SourceArtifactError("official response statement type mismatch")

@@ -27,6 +27,7 @@ from company_quality.identity import (
     resolve_identity,
 )
 from company_quality.filing_store import FilingStore, FilingStoreStats
+from company_quality.facts.financial import CanonicalFinancialFacts, FinancialFactParser
 from company_quality.sources.financial import (
     ArtifactConflictError,
     MopsFinancialCollector,
@@ -73,6 +74,7 @@ class PeriodEvidence:
     financial: PeriodCollection | None
     audit: AuditFilingInventory | None
     missing_reasons: tuple[str, ...]
+    canonical_financial: CanonicalFinancialFacts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +327,13 @@ def collect_company_evidence_bundle(
             equity_missing.append(equity_reason)
             reasons.append(equity_reason)
 
+        canonical_financial: CanonicalFinancialFacts | None = None
+        if financial is not None:
+            try:
+                canonical_financial = FinancialFactParser().parse(financial.artifacts)
+            except (OSError, RuntimeError, ValueError) as exc:
+                reasons.append(_reason("canonical_financial_facts", period, exc))
+
         audit: AuditFilingInventory | None = None
         try:
             attempts = 2 if period.quarter == 4 else 1
@@ -409,6 +418,7 @@ def collect_company_evidence_bundle(
                 financial=financial,
                 audit=audit,
                 missing_reasons=tuple(reasons),
+                canonical_financial=canonical_financial,
             )
         )
 
