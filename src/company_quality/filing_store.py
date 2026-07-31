@@ -288,7 +288,7 @@ class FilingStore:
             raise FilingStoreError("statement body has no table")
         _instant(retrieved_at, "retrieved_at")
         _instant(available_at, "available_at")
-        if report not in ("balance", "income", "cash_flow"):
+        if report not in ("balance", "income", "cash_flow", "equity_changes"):
             raise FilingStoreError("invalid statement report")
         if not official_url.startswith("https://"):
             raise FilingStoreError("official statement URL must use HTTPS")

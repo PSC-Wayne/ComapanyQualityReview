@@ -40,6 +40,7 @@ from company_quality.sources.financial import (
 
 _TAIPEI = ZoneInfo("Asia/Taipei")
 _EXPECTED_REPORTS = frozenset({"balance", "income", "cash_flow"})
+_EXPECTED_EQUITY_REPORTS = frozenset({"equity_changes"})
 
 
 class CompanyEvidenceBundleError(RuntimeError):
@@ -150,9 +151,11 @@ def collect_company_evidence_bundle(
 
     collected: list[PeriodEvidence] = []
     statement_missing: list[str] = []
+    equity_missing: list[str] = []
     audit_missing: list[str] = []
     annual_missing: list[str] = []
     statement_count = 0
+    equity_count = 0
     audit_pdf_count = 0
     annual_pdf_count = 0
 
@@ -200,15 +203,26 @@ def collect_company_evidence_bundle(
                 )
                 statement_missing.append(reason)
                 reasons.append(reason)
+                equity_reason = _coverage_reason(
+                    period.key, "equity_changes_html", rejected[0].reason
+                )
+                equity_missing.append(equity_reason)
+                reasons.append(equity_reason)
             elif future:
                 reason = _coverage_reason(
                     period.key, "three_statement_html", "artifact_after_as_of"
                 )
                 statement_missing.append(reason)
                 reasons.append(reason)
+                equity_reason = _coverage_reason(
+                    period.key, "equity_changes_html", "artifact_after_as_of"
+                )
+                equity_missing.append(equity_reason)
+                reasons.append(equity_reason)
             else:
                 financial = candidate
                 statement_count += len(reports & _EXPECTED_REPORTS)
+                equity_count += len(reports & _EXPECTED_EQUITY_REPORTS)
                 missing_reports = sorted(_EXPECTED_REPORTS - reports)
                 if missing_reports:
                     reason = _coverage_reason(
@@ -217,6 +231,15 @@ def collect_company_evidence_bundle(
                         "missing_" + "_".join(missing_reports),
                     )
                     statement_missing.append(reason)
+                    reasons.append(reason)
+                missing_equity = sorted(_EXPECTED_EQUITY_REPORTS - reports)
+                if missing_equity:
+                    reason = _coverage_reason(
+                        period.key,
+                        "equity_changes_html",
+                        "missing_" + "_".join(missing_equity),
+                    )
+                    equity_missing.append(reason)
                     reasons.append(reason)
         except (
             SourceArtifactError,
@@ -229,6 +252,9 @@ def collect_company_evidence_bundle(
             reason = _reason("three_statement_html", period, exc)
             statement_missing.append(reason)
             reasons.append(reason)
+            equity_reason = _reason("equity_changes_html", period, exc)
+            equity_missing.append(equity_reason)
+            reasons.append(equity_reason)
 
         audit: AuditFilingInventory | None = None
         try:
@@ -325,6 +351,12 @@ def collect_company_evidence_bundle(
             missing_reasons=tuple(statement_missing),
         ),
         SourceCoverage(
+            family="equity_changes_html",
+            required=20,
+            available=equity_count,
+            missing_reasons=tuple(equity_missing),
+        ),
+        SourceCoverage(
             family="audit_or_review_pdf",
             required=20,
             available=audit_pdf_count,
@@ -339,7 +371,12 @@ def collect_company_evidence_bundle(
     )
     if statement_count == 0 and audit_pdf_count == 0:
         status: Literal["available", "partial", "blocked"] = "blocked"
-    elif statement_count == 60 and audit_pdf_count == 20 and annual_pdf_count == 5:
+    elif (
+        statement_count == 60
+        and equity_count == 20
+        and audit_pdf_count == 20
+        and annual_pdf_count == 5
+    ):
         status = "available"
     else:
         status = "partial"

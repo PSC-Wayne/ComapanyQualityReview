@@ -17,13 +17,14 @@ from zoneinfo import ZoneInfo
 from company_quality.filing_store import FilingStore, StoredStatement
 
 Market = Literal["TWSE", "TPEx"]
-Report = Literal["balance", "income", "cash_flow"]
+Report = Literal["balance", "income", "cash_flow", "equity_changes"]
 _TAIPEI = ZoneInfo("Asia/Taipei")
 _BASE_URL = "https://mopsov.twse.com.tw/mops/web/"
 _REPORTS: tuple[tuple[Report, str, str], ...] = (
     ("balance", "t164sb03", "資產負債表"),
     ("income", "t164sb04", "綜合損益表"),
     ("cash_flow", "t164sb05", "現金流量表"),
+    ("equity_changes", "t164sb06", "權益變動表"),
 )
 _LATEST_URLS = {
     "TWSE": "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci",

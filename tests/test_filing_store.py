@@ -194,12 +194,13 @@ def test_audit_collector_uses_exact_local_hit_without_network(tmp_path: Path) ->
     assert hit.pdf_sha256 == sha256(PDF).hexdigest()
 
 
-def test_financial_collector_uses_three_local_hits_without_network(tmp_path: Path) -> None:
+def test_financial_collector_uses_four_local_hits_without_network(tmp_path: Path) -> None:
     store = FilingStore(tmp_path / "filing-store")
     for report, endpoint in (
         ("balance", "ajax_t164sb03"),
         ("income", "ajax_t164sb04"),
         ("cash_flow", "ajax_t164sb05"),
+        ("equity_changes", "ajax_t164sb06"),
     ):
         store.put_statement(
             body=HTML.replace(b"assets", report.encode()),
@@ -235,6 +236,6 @@ def test_financial_collector_uses_three_local_hits_without_network(tmp_path: Pat
     )
 
     assert {artifact.report for artifact in result.artifacts} == {
-        "balance", "income", "cash_flow"
+        "balance", "income", "cash_flow", "equity_changes"
     }
     assert all("filing-store/html" in artifact.path.as_posix() for artifact in result.artifacts)

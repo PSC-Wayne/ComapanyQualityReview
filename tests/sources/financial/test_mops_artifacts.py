@@ -46,6 +46,7 @@ def test_collects_selected_company_three_statement_raw_artifacts(tmp_path) -> No
         "ajax_t164sb03": html("資產負債表"),
         "ajax_t164sb04": html("綜合損益表"),
         "ajax_t164sb05": html("現金流量表"),
+        "ajax_t164sb06": html("權益變動表"),
     }
     transport = FakeTransport(bodies)
     collector = MopsFinancialCollector(transport=transport)
@@ -62,11 +63,12 @@ def test_collects_selected_company_three_statement_raw_artifacts(tmp_path) -> No
     )
 
     assert result.status == "available"
-    assert len(result.artifacts) == 3
+    assert len(result.artifacts) == 4
     assert {artifact.report for artifact in result.artifacts} == {
         "balance",
         "income",
         "cash_flow",
+        "equity_changes",
     }
     for artifact in result.artifacts:
         raw = artifact.path.read_bytes()
@@ -81,7 +83,15 @@ def test_collects_selected_company_three_statement_raw_artifacts(tmp_path) -> No
 def test_wrong_company_or_no_data_is_not_saved_as_success(tmp_path) -> None:
     bad = "<html><body>查無公司資料！</body></html>".encode()
     transport = FakeTransport(
-        {name: bad for name in ("ajax_t164sb03", "ajax_t164sb04", "ajax_t164sb05")}
+        {
+            name: bad
+            for name in (
+                "ajax_t164sb03",
+                "ajax_t164sb04",
+                "ajax_t164sb05",
+                "ajax_t164sb06",
+            )
+        }
     )
 
     with pytest.raises(SourceArtifactError, match="no official company data"):
@@ -104,6 +114,7 @@ def test_existing_raw_artifact_is_not_overwritten_by_changed_bytes(tmp_path) -> 
         "ajax_t164sb03": html("資產負債表"),
         "ajax_t164sb04": html("綜合損益表"),
         "ajax_t164sb05": html("現金流量表"),
+        "ajax_t164sb06": html("權益變動表"),
     }
     transport = FakeTransport(bodies)
     collector = MopsFinancialCollector(transport=transport)

@@ -52,7 +52,7 @@ class FakeFinancialCollector:
                     available_at=kwargs["retrieved_at"],
                     path=Path(kwargs["output_root"]) / period.key / f"{report}.html",
                 )
-                for report in ("balance", "income", "cash_flow")
+                for report in ("balance", "income", "cash_flow", "equity_changes")
             ),
             artifact_coverage=1.0,
         )
@@ -119,13 +119,14 @@ def test_collects_twenty_quarters_and_five_annual_audit_pdfs(tmp_path) -> None:
     assert len(bundle.periods) == 20
     assert len(financial.calls) == 20
     assert len(audit.calls) == 20
-    assert sum(len(period.financial.artifacts) for period in bundle.periods) == 60
+    assert sum(len(period.financial.artifacts) for period in bundle.periods) == 80
     assert [period.period for period in bundle.periods if period.is_annual] == [
         "110Q4", "111Q4", "112Q4", "113Q4", "114Q4"
     ]
     assert all(period.audit.pdf_sha256 for period in bundle.periods)
     coverage = {item.family: item for item in bundle.source_coverage}
     assert (coverage["three_statement_html"].available, coverage["three_statement_html"].required) == (60, 60)
+    assert (coverage["equity_changes_html"].available, coverage["equity_changes_html"].required) == (20, 20)
     assert (coverage["audit_or_review_pdf"].available, coverage["audit_or_review_pdf"].required) == (20, 20)
     assert (coverage["annual_audit_pdf"].available, coverage["annual_audit_pdf"].required) == (5, 5)
 
