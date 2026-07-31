@@ -12,6 +12,12 @@ def test_authoritative_checklist_is_a_first_class_dashboard_section() -> None:
     assert "七項成長結論" in INDEX_HTML
     assert "十項風險結論" in INDEX_HTML
     assert "未完成項目與後續驗證" in INDEX_HTML
+    assert "五年年度＋最近四季財務總覽" in INDEX_HTML
+    assert "G／R／N／A／產業逐題結果" in INDEX_HTML
+    assert "產業路由：" in INDEX_HTML
+    assert "查核與KAM" in INDEX_HTML
+    assert "最低附註" in INDEX_HTML
+    assert "overviewTable(a.financial_overview)" in INDEX_HTML
 
 
 def test_dashboard_rejects_pre_v4_or_cross_generation_checklist() -> None:
