@@ -94,6 +94,7 @@ def _bundle(tmp_path: Path, periods: tuple[str, ...] = ("112Q4", "113Q4", "114Q4
         periods=tuple(
             PeriodEvidence(period, True, None, audits[period], ()) for period in periods
         ),
+        monthly_revenue=(),
         source_coverage=(SourceCoverage("annual_audit_pdf", 3, len(periods), ("111Q4:pdf_missing",) if len(periods) < 3 else ()),),
         status="available" if len(periods) == 3 else "partial",
     )
@@ -274,10 +275,10 @@ def test_dashboard_and_json_expose_kam_problem_section(tmp_path: Path, monkeypat
     try:
         with urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5) as response:
             html = response.read().decode()
-        assert "KAM問題" in html
-        assert "kam_judgement" in html
-        assert "risk_mechanism" in html
-        assert "KAM存在本身不等於問題" in html
+        assert "三年關鍵查核事項（KAM）" in html
+        assert "three_year_kam" in html
+        assert "查核與KAM" in html
+        assert "KAM存在本身不等於公司有問題" in html
     finally:
         server.shutdown()
         server.server_close()

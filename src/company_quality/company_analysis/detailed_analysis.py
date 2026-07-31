@@ -22,6 +22,10 @@ from company_quality.company_analysis.contracts import (
     FinancialTrendPeriod,
     Finding,
 )
+from company_quality.company_analysis.checklist_evidence import (
+    ChecklistDocumentEvidence,
+    collect_checklist_document_evidence,
+)
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 from company_quality.company_analysis.financial_anomalies import (
     analyze_financial_anomalies,
@@ -62,6 +66,7 @@ class DetailedAnalysis:
     upside_confidence: Decimal
     limitations: tuple[str, ...]
     available: bool
+    checklist_document_evidence: ChecklistDocumentEvidence | None = None
 
 
 class _TableRows(HTMLParser):
@@ -106,7 +111,7 @@ class _Row:
     @property
     def prior(self) -> Decimal:
         if len(self.cells) >= 9:
-            return _number(self.cells[5])
+            return _number(self.cells[3])
         if len(self.cells) >= 5:
             return _number(self.cells[3])
         if len(self.cells) >= 3:
@@ -120,8 +125,16 @@ class _Row:
     @property
     def prior_percent(self) -> Decimal | None:
         if len(self.cells) >= 9:
-            return _number(self.cells[6])
+            return _number(self.cells[4])
         return _number(self.cells[4]) if len(self.cells) >= 5 else None
+
+    @property
+    def ytd_current(self) -> Decimal:
+        return _number(self.cells[5]) if len(self.cells) >= 9 else self.current
+
+    @property
+    def ytd_prior(self) -> Decimal:
+        return _number(self.cells[7]) if len(self.cells) >= 9 else self.prior
 
 
 def _number(raw: str) -> Decimal:
@@ -395,6 +408,14 @@ def _quarter_window(period: str) -> tuple[date, date]:
     return date(year, start_month, 1), date(year, end_month, end_day)
 
 
+def _period_day_count(period: str, basis: Literal["annual", "interim"]) -> int:
+    if basis == "annual":
+        year = int(period[:3]) + 1911
+        return (date(year, 12, 31) - date(year, 1, 1)).days + 1
+    start, end = _quarter_window(period)
+    return (end - start).days + 1
+
+
 def _filing_store_root(audits: Iterable[AuditFilingInventory]) -> Path | None:
     for audit in audits:
         if audit.pdf_path is None:
@@ -506,8 +527,10 @@ def _trend_period(
     previous_balance_rows: dict[str, _Row] | None = None
     if basis == "interim":
         previous_balance_rows = _trend_rows(bundle, _period_before(period))
-    prior_year_rows = (
-        _trend_rows(bundle, _same_quarter_prior_year(period))
+    prior_year_period = _same_quarter_prior_year(period)
+    prior_year_rows = _trend_rows(bundle, prior_year_period)
+    prior_previous_balance_rows = (
+        _trend_rows(bundle, _period_before(prior_year_period))
         if basis == "interim"
         else None
     )
@@ -617,6 +640,48 @@ def _trend_period(
             prior_year_rows["liabilities"].evidence_id,
             prior_year_rows["equity"].evidence_id,
         )
+
+    turnover_days: Decimal | None = None
+    prior_turnover_days: Decimal | None = None
+    turnover_period_days: int | None = None
+    prior_turnover_period_days: int | None = None
+    if basis == "annual":
+        current_opening_receivables = rows["receivables"].prior
+        prior_opening_receivables = (
+            prior_year_rows["receivables"].prior if prior_year_rows is not None else None
+        )
+    else:
+        current_opening_receivables = (
+            previous_balance_rows["receivables"].current
+            if previous_balance_rows is not None
+            else None
+        )
+        prior_opening_receivables = (
+            prior_previous_balance_rows["receivables"].current
+            if prior_previous_balance_rows is not None
+            else None
+        )
+    if current_opening_receivables is not None and values["revenue"] != 0:
+        turnover_period_days = _period_day_count(period, basis)
+        turnover_days = (
+            (current_opening_receivables + values["receivables"])
+            / Decimal("2")
+            / values["revenue"]
+            * turnover_period_days
+        )
+    if prior_opening_receivables is not None and prior["revenue"] != 0:
+        prior_turnover_period_days = _period_day_count(prior_year_period, basis)
+        prior_turnover_days = (
+            (prior_opening_receivables + prior["receivables"])
+            / Decimal("2")
+            / prior["revenue"]
+            * prior_turnover_period_days
+        )
+    if prior_previous_balance_rows is not None:
+        evidence["receivables"] = (
+            *evidence["receivables"],
+            prior_previous_balance_rows["receivables"].evidence_id,
+        )
     sequential_values: dict[str, Decimal] = {}
     sequential_ratios: dict[str, Decimal | None] = {}
     if basis == "interim" and previous_balance_rows is not None:
@@ -675,6 +740,23 @@ def _trend_period(
             and sequential_ratios[metric_id] is not None
             else None
         )
+        if (
+            metric_id == "receivables"
+            and turnover_days is not None
+            and prior_turnover_days is not None
+        ):
+            if turnover_days < prior_turnover_days:
+                direction = "improving"
+            elif turnover_days > prior_turnover_days:
+                direction = "deteriorating"
+            else:
+                direction = "flat"
+        else:
+            direction = _metric_direction(
+                absolute_change,
+                ratio_change,
+                lower_is_better=metric_id in {"receivables", "inventory", "liabilities"},
+            )
         metrics.append(
             FinancialTrendMetric(
                 metric_id=metric_id,
@@ -685,12 +767,21 @@ def _trend_period(
                 ratio_yoy_change=ratio_change,
                 sequential_change=sequential_change,
                 ratio_sequential_change=sequential_ratio_change,
-                direction=_metric_direction(
-                    absolute_change,
-                    ratio_change,
-                    lower_is_better=metric_id in {"receivables", "inventory", "liabilities"},
-                ),
+                direction=direction,
                 evidence_ids=evidence[metric_id],
+                turnover_days=turnover_days if metric_id == "receivables" else None,
+                prior_turnover_days=(
+                    prior_turnover_days if metric_id == "receivables" else None
+                ),
+                period_days=(
+                    turnover_period_days if metric_id == "receivables" else None
+                ),
+                prior_period_days=(
+                    prior_turnover_period_days if metric_id == "receivables" else None
+                ),
+                turnover_basis=(
+                    "average_balance" if metric_id == "receivables" else None
+                ),
             )
         )
     citation_rows = [*rows.values()]
@@ -698,6 +789,8 @@ def _trend_period(
         citation_rows.extend(prior_year_rows.values())
     if previous_balance_rows is not None:
         citation_rows.extend(previous_balance_rows.values())
+    if prior_previous_balance_rows is not None:
+        citation_rows.extend(prior_previous_balance_rows.values())
     citations = tuple(
         {
             row.evidence_id: _html_citation(row)
@@ -719,14 +812,17 @@ def _trend_metric_text(metric: FinancialTrendMetric, period: FinancialTrendPerio
     if metric.metric_id in {"receivables", "inventory"} and metric.ratio is not None and metric.ratio_yoy_change is not None:
         prior_ratio = metric.ratio - metric.ratio_yoy_change
         if metric.metric_id == "receivables":
-            days = Decimal("365") if period.basis == "annual" else {
-                "1": Decimal("90"), "2": Decimal("181"), "3": Decimal("273")
-            }[period.period[-1]]
+            dso_text = "平均餘額DSO資料不足，不能形成回收速度結論"
+            if metric.turnover_days is not None and metric.prior_turnover_days is not None:
+                dso_text = (
+                    "平均餘額DSO由"
+                    f"{metric.prior_turnover_days.quantize(Decimal('0.1'))}天變為"
+                    f"{metric.turnover_days.quantize(Decimal('0.1'))}天"
+                )
             return (
                 f"應收帳款：{amount}（{yoy}），占營收比由"
-                f"{_pct(prior_ratio * 100)}升至{_pct(metric.ratio * 100)}；"
-                f"以本期天數近似DSO由{(prior_ratio * days).quantize(Decimal('0.1'))}天"
-                f"增至{(metric.ratio * days).quantize(Decimal('0.1'))}天。"
+                f"{_pct(prior_ratio * 100)}變為{_pct(metric.ratio * 100)}；"
+                f"{dso_text}。"
             )
         return (
             f"存貨：{amount}（{yoy}），占營收比由"
@@ -981,19 +1077,13 @@ def build_detailed_analysis(
     )
 
     audits = sorted(_audit_filings(bundle), key=lambda item: item.period)
-    kam_citations: list[EvidenceCitation] = []
-    for audit in audits:
-        citation = _pdf_citation(
-            audit,
-            slug="kam",
-            keywords=("待驗設備及未完工程",),
-            following_blocks=16,
-            ocr_keywords=("待驗設備及未完工程",),
-            max_pages=14,
-        )
-        if citation is not None:
-            kam_citations.append(citation)
-            citations.append(citation)
+    checklist_document_evidence = collect_checklist_document_evidence(tuple(audits))
+    kam_citations = list(checklist_document_evidence.kam_citations)
+    citations.extend(checklist_document_evidence.audit_opinion_citations)
+    citations.extend(checklist_document_evidence.going_concern_citations)
+    citations.extend(checklist_document_evidence.emphasis_other_citations)
+    citations.extend(checklist_document_evidence.kam_citations)
+    citations.extend(citation for _, citation in checklist_document_evidence.note_citations)
     latest_audit = audits[-1] if audits else None
     concentration_receivable = (
         _pdf_citation(
@@ -1495,6 +1585,7 @@ def build_detailed_analysis(
         ),
         limitations=tuple(limitations),
         available=True,
+        checklist_document_evidence=checklist_document_evidence,
     )
 
 

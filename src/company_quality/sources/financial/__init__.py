@@ -6,6 +6,8 @@ import hashlib
 import http.cookiejar
 import json
 import os
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -17,13 +19,14 @@ from zoneinfo import ZoneInfo
 from company_quality.filing_store import FilingStore, StoredStatement
 
 Market = Literal["TWSE", "TPEx"]
-Report = Literal["balance", "income", "cash_flow"]
+Report = Literal["balance", "income", "cash_flow", "equity_changes"]
 _TAIPEI = ZoneInfo("Asia/Taipei")
 _BASE_URL = "https://mopsov.twse.com.tw/mops/web/"
 _REPORTS: tuple[tuple[Report, str, str], ...] = (
     ("balance", "t164sb03", "資產負債表"),
     ("income", "t164sb04", "綜合損益表"),
     ("cash_flow", "t164sb05", "現金流量表"),
+    ("equity_changes", "t164sb06", "權益變動表"),
 )
 _LATEST_URLS = {
     "TWSE": "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci",
@@ -70,6 +73,10 @@ class FinancialArtifact:
     official_filed_at: None
     mime_type: Literal["text/html"]
     path: Path
+    statement_scope: Literal["consolidated", "individual", "unknown"] = "unknown"
+    period_basis: Literal[
+        "point_in_time", "single_period", "single_and_ytd", "year_to_date"
+    ] = "year_to_date"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,12 +113,22 @@ class MopsTransport:
         }
         self._preloaded: set[str] = set()
 
+    def _read(self, request: urllib.request.Request) -> bytes:
+        for attempt in range(2):
+            try:
+                with self.opener.open(request, timeout=30) as response:
+                    return response.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code != 307 or attempt == 1:
+                    raise
+                time.sleep(1)
+        raise AssertionError("unreachable")
+
     def preload(self, endpoint: str) -> None:
         if endpoint in self._preloaded:
             return
         request = urllib.request.Request(_BASE_URL + endpoint, headers=self.headers)
-        with self.opener.open(request, timeout=30) as response:
-            response.read()
+        self._read(request)
         self._preloaded.add(endpoint)
 
     def post(self, endpoint: str, payload: dict[str, str]) -> bytes:
@@ -120,8 +137,7 @@ class MopsTransport:
             data=urllib.parse.urlencode(payload).encode(),
             headers=self.headers,
         )
-        with self.opener.open(request, timeout=30) as response:
-            return response.read()
+        return self._read(request)
 
 
 def trailing_quarters(latest: Period, count: int = 20) -> tuple[Period, ...]:
@@ -179,10 +195,42 @@ def _validate_body(
         raise SourceArtifactError("MOPS security/interstitial response")
     if company_name not in text and company_short_name not in text:
         raise SourceArtifactError("official response company identity mismatch")
-    if f"民國{period.roc_year}年第{period.quarter}季" not in text:
+    period_markers = [f"民國{period.roc_year}年第{period.quarter}季"]
+    if period.quarter == 4:
+        period_markers.append(f"民國{period.roc_year}年度")
+    elif title == "權益變動表" and period.quarter == 2:
+        period_markers.append(f"民國{period.roc_year}年上半年度")
+    elif title == "權益變動表" and period.quarter == 3:
+        period_markers.append(f"民國{period.roc_year}年前3季")
+    if not any(marker in text for marker in period_markers):
         raise SourceArtifactError("official response period mismatch")
     if title not in text or "<table" not in text.lower():
         raise SourceArtifactError("official response statement type mismatch")
+
+
+def _scope_and_basis(
+    body: bytes, report: Report, period: str
+) -> tuple[
+    Literal["consolidated", "individual", "unknown"],
+    Literal["point_in_time", "single_period", "single_and_ytd", "year_to_date"],
+]:
+    text = body.decode("utf-8", "replace")
+    if any(title in text for title in ("合併資產負債表", "合併綜合損益表", "合併現金流量表", "合併權益變動表")):
+        scope: Literal["consolidated", "individual", "unknown"] = "consolidated"
+    elif any(title in text for title in ("個體資產負債表", "個體綜合損益表", "個體現金流量表", "個體權益變動表")):
+        scope = "individual"
+    else:
+        scope = "unknown"
+    quarter = int(period[-1])
+    if report == "balance":
+        basis: Literal[
+            "point_in_time", "single_period", "single_and_ytd", "year_to_date"
+        ] = "point_in_time"
+    elif report == "income":
+        basis = "single_and_ytd" if quarter in (2, 3) else "single_period"
+    else:
+        basis = "year_to_date"
+    return scope, basis
 
 
 class MopsFinancialCollector:
@@ -196,6 +244,7 @@ class MopsFinancialCollector:
 
     @staticmethod
     def _stored_artifact(stored: StoredStatement) -> FinancialArtifact:
+        scope, basis = _scope_and_basis(stored.path.read_bytes(), stored.report, stored.period)  # type: ignore[arg-type]
         return FinancialArtifact(
             artifact_id=(
                 f"{stored.market}:{stored.security_code}:{stored.period}:"
@@ -215,6 +264,8 @@ class MopsFinancialCollector:
             official_filed_at=None,
             mime_type="text/html",
             path=stored.path,
+            statement_scope=scope,
+            period_basis=basis,
         )
 
     def collect_period(
@@ -305,6 +356,7 @@ class MopsFinancialCollector:
                 temporary.write_bytes(body)
                 os.replace(temporary, destination)
             digest = hashlib.sha256(body).hexdigest()
+            scope, basis = _scope_and_basis(body, report, period.key)
             artifacts.append(
                 FinancialArtifact(
                     artifact_id=(
@@ -324,6 +376,8 @@ class MopsFinancialCollector:
                     official_filed_at=None,
                     mime_type="text/html",
                     path=destination,
+                    statement_scope=scope,
+                    period_basis=basis,
                 )
             )
         return PeriodCollection("available", tuple(artifacts), 1.0)

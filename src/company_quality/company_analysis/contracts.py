@@ -13,6 +13,8 @@ from decimal import Decimal
 import re
 from typing import Literal, Sequence
 
+from company_quality.company_analysis.checklist_contracts import ChecklistAssessment
+
 
 Market = Literal["TWSE", "TPEx"]
 SourceTier = Literal["official", "issuer_primary", "trusted_secondary"]
@@ -137,6 +139,11 @@ class FinancialTrendMetric:
     ratio_sequential_change: Decimal | None
     direction: FinancialTrendDirection
     evidence_ids: tuple[str, ...]
+    turnover_days: Decimal | None = None
+    prior_turnover_days: Decimal | None = None
+    period_days: int | None = None
+    prior_period_days: int | None = None
+    turnover_basis: Literal["average_balance"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,9 +211,10 @@ class SingleCompanyResearchReport:
     valuation: ValuationCase | None = None
     downside_sections: tuple[DownsideSection, ...] = ()
     financial_deterioration: FinancialDeteriorationSection | None = None
+    checklist_assessment: ChecklistAssessment | None = None
     status: PublicationStatus = "complete"
-    schema_version: Literal["SingleCompanyResearchReport.v3"] = (
-        "SingleCompanyResearchReport.v3"
+    schema_version: Literal["SingleCompanyResearchReport.v4"] = (
+        "SingleCompanyResearchReport.v4"
     )
 
 
@@ -597,6 +605,7 @@ def build_single_company_research_report(
     valuation: ValuationCase | None = None,
     financial_deterioration: FinancialDeteriorationSection | None = None,
     downside_sections: Sequence[DownsideSection] = (),
+    checklist_assessment: ChecklistAssessment | None = None,
     status: PublicationStatus | None = None,
 ) -> SingleCompanyResearchReport:
     """Validate and bind one evidence-first report without blending its cases."""
@@ -691,6 +700,8 @@ def build_single_company_research_report(
         expected_generation=generation,
         evidence_ids=evidence_ids,
     )
+    if checklist_assessment is not None and checklist_assessment.generation_id != generation:
+        raise CompanyAnalysisContractError("checklist assessment generation mismatch")
     normalized_sections = tuple(downside_sections) or _placeholder_sections(
         generation, publication_status
     )
@@ -715,6 +726,7 @@ def build_single_company_research_report(
         valuation=normalized_valuation,
         downside_sections=normalized_sections,
         financial_deterioration=financial_deterioration,
+        checklist_assessment=checklist_assessment,
         status=publication_status,
     )
 

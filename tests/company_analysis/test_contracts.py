@@ -134,7 +134,7 @@ def _build(**overrides):
 def test_report_keeps_evidence_first_downside_and_upside_cases_independent() -> None:
     report = _build()
 
-    assert report.schema_version == "SingleCompanyResearchReport.v3"
+    assert report.schema_version == "SingleCompanyResearchReport.v4"
     assert report.request.security_code == "2330"
     assert report.downside.headline != report.upside.headline
     assert report.downside.twelve_month_drawdown_probability.point is None

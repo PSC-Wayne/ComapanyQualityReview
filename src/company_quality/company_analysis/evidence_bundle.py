@@ -27,6 +27,7 @@ from company_quality.identity import (
     resolve_identity,
 )
 from company_quality.filing_store import FilingStore, FilingStoreStats
+from company_quality.facts.financial import CanonicalFinancialFacts, FinancialFactParser
 from company_quality.sources.financial import (
     ArtifactConflictError,
     MopsFinancialCollector,
@@ -36,10 +37,18 @@ from company_quality.sources.financial import (
     latest_published_period,
     trailing_quarters,
 )
+from company_quality.sources.monthly_revenue import (
+    MonthlyRevenueArtifact,
+    MonthlyRevenueError,
+    MopsMonthlyRevenueCollector,
+    RevenueMonth,
+    trailing_months,
+)
 
 
 _TAIPEI = ZoneInfo("Asia/Taipei")
 _EXPECTED_REPORTS = frozenset({"balance", "income", "cash_flow"})
+_EXPECTED_EQUITY_REPORTS = frozenset({"equity_changes"})
 
 
 class CompanyEvidenceBundleError(RuntimeError):
@@ -54,6 +63,10 @@ class AuditCollector(Protocol):
     def collect_period(self, **kwargs: object) -> AuditFilingInventory: ...
 
 
+class MonthlyRevenueCollector(Protocol):
+    def collect_month(self, **kwargs: object) -> MonthlyRevenueArtifact: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PeriodEvidence:
     period: str
@@ -61,6 +74,7 @@ class PeriodEvidence:
     financial: PeriodCollection | None
     audit: AuditFilingInventory | None
     missing_reasons: tuple[str, ...]
+    canonical_financial: CanonicalFinancialFacts | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,10 +83,11 @@ class CompanyEvidenceBundle:
     identity: CompanyIdentity
     retrieved_at: str
     periods: tuple[PeriodEvidence, ...]
+    monthly_revenue: tuple[MonthlyRevenueArtifact, ...]
     source_coverage: tuple[SourceCoverage, ...]
     status: Literal["available", "partial", "blocked"]
     filing_store_stats: FilingStoreStats | None = None
-    schema_version: Literal["CompanyEvidenceBundle.v1"] = "CompanyEvidenceBundle.v1"
+    schema_version: Literal["CompanyEvidenceBundle.v2"] = "CompanyEvidenceBundle.v2"
 
 
 def _instant(value: str, field: str) -> datetime:
@@ -102,6 +117,20 @@ def _reason(prefix: str, period: Period, exc: BaseException) -> str:
     return f"{period.key}:{prefix}:{type(exc).__name__}:{detail or 'no_detail'}"
 
 
+def _month_reason(prefix: str, month: RevenueMonth, exc: BaseException) -> str:
+    detail = " ".join(str(exc).split())[:300]
+    return f"{month.key}:{prefix}:{type(exc).__name__}:{detail or 'no_detail'}"
+
+
+def _latest_revenue_month(as_of: datetime) -> RevenueMonth:
+    # Listed issuers normally file prior-month revenue by the 10th. A late
+    # filing remains an explicit source gap rather than being treated as zero.
+    offset = 1 if as_of.day >= 11 else 2
+    absolute = as_of.year * 12 + as_of.month - 1 - offset
+    year, zero_based_month = divmod(absolute, 12)
+    return RevenueMonth(year - 1911, zero_based_month + 1)
+
+
 def _coverage_reason(period: str, category: str, detail: str) -> str:
     return f"{period}:{category}:{detail}"
 
@@ -116,6 +145,8 @@ def collect_company_evidence_bundle(
     periods: Sequence[Period] | None = None,
     financial_collector: FinancialCollector | None = None,
     audit_collector: AuditCollector | None = None,
+    monthly_revenue_collector: MonthlyRevenueCollector | None = None,
+    revenue_months: Sequence[RevenueMonth] | None = None,
     retrieved_at: str | None = None,
     issuer_type: Literal[
         "domestic_general", "foreign_primary", "foreign_secondary"
@@ -147,14 +178,57 @@ def collect_company_evidence_bundle(
         filing_store=filing_store
     )
     audit_source = audit_collector or MopsAuditInventoryCollector(filing_store=filing_store)
+    revenue_source = monthly_revenue_collector or MopsMonthlyRevenueCollector(
+        filing_store=filing_store
+    )
 
     collected: list[PeriodEvidence] = []
     statement_missing: list[str] = []
+    equity_missing: list[str] = []
     audit_missing: list[str] = []
     annual_missing: list[str] = []
     statement_count = 0
+    equity_count = 0
     audit_pdf_count = 0
     annual_pdf_count = 0
+
+    selected_revenue_months = (
+        tuple(revenue_months)
+        if revenue_months is not None
+        else trailing_months(_latest_revenue_month(decision_time))
+    )
+    if len(selected_revenue_months) != 60 or len(set(selected_revenue_months)) != 60:
+        raise CompanyEvidenceBundleError("monthly revenue requires exactly 60 unique months")
+    monthly_revenue: list[MonthlyRevenueArtifact] = []
+    monthly_revenue_missing: list[str] = []
+    for month in selected_revenue_months:
+        try:
+            artifact = revenue_source.collect_month(
+                security_code=identity.security_code,
+                company_name=identity.company_name,
+                company_short_name=identity.short_name,
+                issuer_id=identity.issuer_id,
+                market=identity.market,
+                month=month,
+                retrieved_at=retrieved,
+                as_of=decision_time.isoformat(),
+            )
+            if _instant(artifact.available_at, "monthly revenue available_at") > decision_time:
+                monthly_revenue_missing.append(
+                    f"{month.key}:monthly_revenue_html:artifact_after_as_of"
+                )
+            else:
+                monthly_revenue.append(artifact)
+        except (
+            MonthlyRevenueError,
+            OSError,
+            HTTPException,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            monthly_revenue_missing.append(
+                _month_reason("monthly_revenue_html", month, exc)
+            )
 
     collection_order = tuple(
         sorted(selected_periods, key=lambda item: (item.quarter != 4, item.roc_year, item.quarter))
@@ -200,15 +274,26 @@ def collect_company_evidence_bundle(
                 )
                 statement_missing.append(reason)
                 reasons.append(reason)
+                equity_reason = _coverage_reason(
+                    period.key, "equity_changes_html", rejected[0].reason
+                )
+                equity_missing.append(equity_reason)
+                reasons.append(equity_reason)
             elif future:
                 reason = _coverage_reason(
                     period.key, "three_statement_html", "artifact_after_as_of"
                 )
                 statement_missing.append(reason)
                 reasons.append(reason)
+                equity_reason = _coverage_reason(
+                    period.key, "equity_changes_html", "artifact_after_as_of"
+                )
+                equity_missing.append(equity_reason)
+                reasons.append(equity_reason)
             else:
                 financial = candidate
                 statement_count += len(reports & _EXPECTED_REPORTS)
+                equity_count += len(reports & _EXPECTED_EQUITY_REPORTS)
                 missing_reports = sorted(_EXPECTED_REPORTS - reports)
                 if missing_reports:
                     reason = _coverage_reason(
@@ -217,6 +302,15 @@ def collect_company_evidence_bundle(
                         "missing_" + "_".join(missing_reports),
                     )
                     statement_missing.append(reason)
+                    reasons.append(reason)
+                missing_equity = sorted(_EXPECTED_EQUITY_REPORTS - reports)
+                if missing_equity:
+                    reason = _coverage_reason(
+                        period.key,
+                        "equity_changes_html",
+                        "missing_" + "_".join(missing_equity),
+                    )
+                    equity_missing.append(reason)
                     reasons.append(reason)
         except (
             SourceArtifactError,
@@ -229,6 +323,16 @@ def collect_company_evidence_bundle(
             reason = _reason("three_statement_html", period, exc)
             statement_missing.append(reason)
             reasons.append(reason)
+            equity_reason = _reason("equity_changes_html", period, exc)
+            equity_missing.append(equity_reason)
+            reasons.append(equity_reason)
+
+        canonical_financial: CanonicalFinancialFacts | None = None
+        if financial is not None:
+            try:
+                canonical_financial = FinancialFactParser().parse(financial.artifacts)
+            except (OSError, RuntimeError, ValueError) as exc:
+                reasons.append(_reason("canonical_financial_facts", period, exc))
 
         audit: AuditFilingInventory | None = None
         try:
@@ -314,6 +418,7 @@ def collect_company_evidence_bundle(
                 financial=financial,
                 audit=audit,
                 missing_reasons=tuple(reasons),
+                canonical_financial=canonical_financial,
             )
         )
 
@@ -323,6 +428,12 @@ def collect_company_evidence_bundle(
             required=60,
             available=statement_count,
             missing_reasons=tuple(statement_missing),
+        ),
+        SourceCoverage(
+            family="equity_changes_html",
+            required=20,
+            available=equity_count,
+            missing_reasons=tuple(equity_missing),
         ),
         SourceCoverage(
             family="audit_or_review_pdf",
@@ -336,10 +447,22 @@ def collect_company_evidence_bundle(
             available=annual_pdf_count,
             missing_reasons=tuple(annual_missing),
         ),
+        SourceCoverage(
+            family="monthly_revenue_html",
+            required=60,
+            available=len(monthly_revenue),
+            missing_reasons=tuple(monthly_revenue_missing),
+        ),
     )
     if statement_count == 0 and audit_pdf_count == 0:
         status: Literal["available", "partial", "blocked"] = "blocked"
-    elif statement_count == 60 and audit_pdf_count == 20 and annual_pdf_count == 5:
+    elif (
+        statement_count == 60
+        and equity_count == 20
+        and audit_pdf_count == 20
+        and annual_pdf_count == 5
+        and len(monthly_revenue) == 60
+    ):
         status = "available"
     else:
         status = "partial"
@@ -355,6 +478,7 @@ def collect_company_evidence_bundle(
         identity=identity,
         retrieved_at=retrieved,
         periods=tuple(collected),
+        monthly_revenue=tuple(monthly_revenue),
         source_coverage=coverage,
         status=status,
         filing_store_stats=filing_store.stats() if filing_store is not None else None,

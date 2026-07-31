@@ -118,9 +118,21 @@ class _TableParser(HTMLParser):
 _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "balance": (
         ("balance.cash_and_cash_equivalents", ("現金及約當現金",)),
+        ("balance.restricted_cash", ("受限制資產－流動", "受限制銀行存款")),
         ("balance.accounts_receivable_net", ("應收帳款淨額",)),
         ("balance.inventories", ("存貨",)),
+        ("balance.contract_assets", ("合約資產－流動", "合約資產")),
+        ("balance.accounts_payable", ("應付帳款",)),
+        ("balance.current_assets", ("流動資產合計",)),
+        ("balance.current_liabilities", ("流動負債合計",)),
+        ("balance.short_term_borrowings", ("短期借款",)),
+        (
+            "balance.current_portion_long_term_debt",
+            ("一年或一營業週期內到期長期負債", "一年內到期之長期負債"),
+        ),
         ("balance.property_plant_equipment", ("不動產、廠房及設備",)),
+        ("balance.goodwill", ("商譽",)),
+        ("balance.intangible_assets", ("無形資產",)),
         ("balance.total_assets", ("資產總額",)),
         ("balance.long_term_borrowings", ("長期借款",)),
         ("balance.total_liabilities", ("負債總額",)),
@@ -128,6 +140,7 @@ _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "income": (
         ("income.revenue", ("營業收入合計", "營業收入")),
+        ("income.cost_of_revenue", ("營業成本合計", "營業成本")),
         ("income.gross_profit", ("營業毛利（毛損）", "營業毛利（毛損）淨額")),
         ("income.operating_income", ("營業利益（損失）",)),
         (
@@ -139,15 +152,35 @@ _CONCEPTS: dict[Report, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         ("income.net_income", ("本期淨利（淨損）", "繼續營業單位本期淨利（淨損）")),
+        (
+            "income.net_income_attributable_to_owners",
+            ("母公司業主（淨利∕損）", "母公司業主（淨利／損）"),
+        ),
+        ("income.income_tax_expense", ("所得稅費用（利益）", "所得稅費用（利益）合計")),
+        ("income.interest_expense", ("利息費用",)),
+        ("income.basic_eps", ("基本每股盈餘",)),
+        ("income.diluted_eps", ("稀釋每股盈餘",)),
     ),
     "cash_flow": (
         ("cash_flow.operating_cash_flow", ("營業活動之淨現金流入（流出）",)),
         ("cash_flow.investing_cash_flow", ("投資活動之淨現金流入（流出）",)),
         ("cash_flow.financing_cash_flow", ("籌資活動之淨現金流入（流出）",)),
         ("cash_flow.acquisition_of_ppe", ("取得不動產、廠房及設備",)),
+        ("cash_flow.cash_dividends_paid", ("支付之現金股利", "發放現金股利")),
         ("cash_flow.ending_cash", ("期末現金及約當現金餘額",)),
     ),
+    "equity_changes": (),
 }
+_EQUITY_COLUMNS = (
+    ("equity.common_stock", "普通股股本"),
+    ("equity.total_share_capital", "股本合計"),
+    ("equity.capital_surplus", "資本公積"),
+    ("equity.retained_earnings", "保留盈餘合計"),
+    ("equity.treasury_stock", "庫藏股票"),
+    ("equity.owners_equity", "歸屬於母公司業主之權益總計"),
+    ("equity.non_controlling_interests", "非控制權益"),
+    ("equity.total_equity", "權益總額"),
+)
 _PERIOD = re.compile(r"^(\d{2,3})Q([1-4])$")
 
 
@@ -219,7 +252,6 @@ class FinancialFactParser:
         canonical_keys: set[tuple[str, str | None, str]] = set()
 
         for artifact in artifacts:
-            expected += len(_CONCEPTS[artifact.report])
             raw = artifact.path.read_bytes()
             digest = hashlib.sha256(raw).hexdigest()
             if digest != artifact.content_sha256:
@@ -231,6 +263,23 @@ class FinancialFactParser:
             if period_match is None:
                 raise FinancialFactParseError(f"invalid artifact period: {artifact.period}")
             roc_year, quarter = map(int, period_match.groups())
+            if artifact.report == "equity_changes":
+                expected += len(_EQUITY_COLUMNS)
+                equity_facts, equity_missing = self._parse_equity_changes(
+                    artifact, text, digest, roc_year, quarter
+                )
+                for fact in equity_facts:
+                    key = (fact.concept_id, fact.period_start, fact.period_end)
+                    if key in canonical_keys:
+                        raise FinancialFactConflictError(
+                            f"duplicate canonical fact: {fact.concept_id}"
+                        )
+                    canonical_keys.add(key)
+                facts.extend(equity_facts)
+                covered += sum(item.value is not None for item in equity_facts)
+                missing.extend(equity_missing)
+                continue
+            expected += len(_CONCEPTS[artifact.report])
             parser = _TableParser()
             parser.feed(text)
             table_index, table, header_index = self._financial_table(parser.tables)
@@ -256,7 +305,10 @@ class FinancialFactParser:
                     matches = [
                         (header_index + 2 + offset, row)
                         for offset, row in enumerate(rows)
-                        if row and row[0].text == alias
+                        if row
+                        and row[0].text == alias
+                        and column_index < len(row)
+                        and row[column_index].text.strip() not in ("", "-", "—", "--")
                     ]
                     if len(matches) > 1:
                         raise FinancialFactConflictError(
@@ -331,6 +383,99 @@ class FinancialFactParser:
             missing_concepts=ordered_missing,
             fact_coverage=coverage,
         )
+
+    @staticmethod
+    def _parse_equity_changes(
+        artifact: FinancialArtifact,
+        text: str,
+        digest: str,
+        roc_year: int,
+        quarter: int,
+    ) -> tuple[list[CanonicalFinancialFact], list[str]]:
+        current_marker = text.find("<b>本期</b>")
+        prior_marker = text.find("<b>去年同期</b>")
+        if current_marker < 0 or prior_marker <= current_marker:
+            raise FinancialFactParseError("equity current/prior table markers missing")
+        parser = _TableParser()
+        parser.feed(text)
+        candidates: list[tuple[int, list[list[_Cell]], int]] = []
+        for table_index, table in enumerate(parser.tables):
+            for row_index, row in enumerate(table):
+                headings = _expand(row)
+                if "會計項目" in headings and "權益總額" in headings:
+                    candidates.append((table_index, table, row_index))
+                    break
+        if len(candidates) < 2:
+            raise FinancialFactParseError("equity current/prior tables not found")
+        table_index, table, header_index = candidates[0]
+        headings = _expand(table[header_index])
+        ending_rows = [
+            (index, _expand(row))
+            for index, row in enumerate(table)
+            if _expand(row) and _expand(row)[0] == "期末餘額"
+        ]
+        if len(ending_rows) != 1:
+            raise FinancialFactParseError("equity ending balance row is not unique")
+        row_index, ending = ending_rows[0]
+        year = roc_year + 1911
+        end_month = quarter * 3
+        period_start = f"{year:04d}-01-01"
+        period_end = (
+            f"{year:04d}-{end_month:02d}-"
+            f"{calendar.monthrange(year, end_month)[1]:02d}"
+        )
+        result: list[CanonicalFinancialFact] = []
+        missing: list[str] = []
+        for concept_id, heading in _EQUITY_COLUMNS:
+            columns = [index for index, value in enumerate(headings) if value == heading]
+            if len(columns) != 1:
+                missing.append(concept_id)
+                continue
+            column_index = columns[0]
+            if column_index >= len(ending):
+                raise FinancialFactParseError(
+                    f"equity ending row lacks target column: {concept_id}"
+                )
+            source_value = ending[column_index]
+            value, failure_reason = _decimal(source_value)
+            if value is None:
+                missing.append(concept_id)
+            lineage_payload = {
+                "concept_id": concept_id,
+                "period_start": period_start,
+                "period_end": period_end,
+                "source_artifact_id": artifact.artifact_id,
+                "source_artifact_sha256": digest,
+                "table": table_index,
+                "row": row_index,
+                "column": column_index,
+                "source_label": heading,
+                "source_value": source_value,
+                "parser_version": PARSER_VERSION,
+            }
+            lineage_hash = _lineage(lineage_payload)
+            result.append(
+                CanonicalFinancialFact(
+                    fact_id=f"{artifact.issuer_id}:{concept_id}:{period_end}:{lineage_hash[:16]}",
+                    concept_id=concept_id,
+                    value=value,
+                    unit="TWD_thousands",
+                    period_start=period_start,
+                    period_end=period_end,
+                    source_artifact_id=artifact.artifact_id,
+                    source_artifact_sha256=digest,
+                    source_table_index=table_index,
+                    source_row_index=row_index,
+                    source_column_index=column_index,
+                    source_label=heading,
+                    source_value=source_value,
+                    available_at=artifact.available_at,
+                    lineage_hash=lineage_hash,
+                    conflict_state="clear",
+                    failure_reason=failure_reason,
+                )
+            )
+        return result, missing
 
     @staticmethod
     def _financial_table(

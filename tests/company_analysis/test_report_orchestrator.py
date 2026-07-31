@@ -102,6 +102,7 @@ def _bundle(tmp_path: Path) -> CompanyEvidenceBundle:
                 missing_reasons=("115Q1:audit_or_review_pdf:missing",),
             ),
         ),
+        monthly_revenue=(),
         source_coverage=(
             SourceCoverage("three_statement_html", 60, 60, ()),
             SourceCoverage("audit_or_review_pdf", 20, 3, ("audit gaps",)),
@@ -305,7 +306,7 @@ def _financial_trend_bundle(
         previous = current
 
     interim = (
-        (290, 130, 60, 45, 35, -20, 170, 190, 540, 300, 530, 670)
+        (290, 130, 60, 45, 35, -20, 110, 190, 540, 300, 530, 670)
         if isolated_revenue_decline
         else (260, 80, 20, 10, 15, -30, 190, 210, 500, 350, 600, 650)
     )
@@ -314,10 +315,10 @@ def _financial_trend_bundle(
         _table_artifact(
             tmp_path, period="115Q1", report="income",
             rows=(
-                ("營業收入合計", str(revenue), "100", str(revenue), "100", "300", "100", "300", "100"),
-                ("營業毛利（毛損）", str(gross), str(gross * 100 / revenue), str(gross), str(gross * 100 / revenue), "120", "40", "120", "40"),
-                ("營業利益（損失）", str(operating), str(operating * 100 / revenue), str(operating), str(operating * 100 / revenue), "50", "16.667", "50", "16.667"),
-                ("本期淨利（淨損）", str(net), str(net * 100 / revenue), str(net), str(net * 100 / revenue), "40", "13.333", "40", "13.333"),
+                ("營業收入合計", str(revenue), "100", "300", "100"),
+                ("營業毛利（毛損）", str(gross), str(gross * 100 / revenue), "120", "40"),
+                ("營業利益（損失）", str(operating), str(operating * 100 / revenue), "50", "16.667"),
+                ("本期淨利（淨損）", str(net), str(net * 100 / revenue), "40", "13.333"),
             ),
         ),
         _table_artifact(
@@ -374,7 +375,9 @@ def test_builds_valid_blocked_report_without_inventing_narrative(tmp_path: Path)
         generated_at=GENERATED_AT,
     )
 
-    assert report.schema_version == "SingleCompanyResearchReport.v3"
+    assert report.schema_version == "SingleCompanyResearchReport.v4"
+    assert report.checklist_assessment is not None
+    assert report.checklist_assessment.detailed_check_complete is False
     assert report.downside.status == "blocked"
     assert report.upside.status == "blocked"
     assert report.upside.positive_return_probability.status == "unavailable"
@@ -585,6 +588,12 @@ def test_financial_deterioration_locks_five_years_and_latest_interim(
     latest = {metric.metric_id: metric for metric in section.periods[-1].metrics}
     assert latest["revenue"].absolute_value == Decimal("260")
     assert latest["revenue"].yoy_change == Decimal("-0.1333333333333333333333333333")
+    assert latest["receivables"].turnover_basis == "average_balance"
+    assert latest["receivables"].period_days == 90
+    assert latest["receivables"].prior_period_days == 90
+    assert latest["receivables"].turnover_days is not None
+    assert latest["receivables"].prior_turnover_days is not None
+    assert latest["receivables"].turnover_days > latest["receivables"].prior_turnover_days
     assert latest["gross_profit"].ratio == Decimal("80") / Decimal("260")
     assert latest["simplified_free_cash_flow"].absolute_value == Decimal("-15")
     assert latest["liquidity"].sequential_change is not None
@@ -945,7 +954,7 @@ def test_hermes_synthesis_can_only_annotate_locked_financial_values(tmp_path: Pa
     candidate = _candidate(
         candidate_id="hermes:financial-deterioration:synthesis",
         statement="多項獲利與現金流指標同步惡化，應持續監測。",
-        verbatim_quote="營業收入合計 | 260 | 100 | 260 | 100 | 300 | 100 | 300 | 100",
+        verbatim_quote="營業收入合計 | 260 | 100 | 300 | 100",
         value="260",
         unit="營業收入合計",
         evidence_id="TWSE:2330:115Q1:income:fixture:row:trend-revenue",
@@ -1442,7 +1451,7 @@ def test_each_non_core_source_only_marks_its_own_section_partial(
             _candidate(
                 candidate_id="hermes:financial-deterioration:synthesis",
                 statement="財務趨勢需持續監測。",
-                verbatim_quote="營業收入合計 | 260 | 100 | 260 | 100 | 300 | 100 | 300 | 100",
+                verbatim_quote="營業收入合計 | 260 | 100 | 300 | 100",
                 value="260",
                 unit="營業收入合計",
                 evidence_id="TWSE:2330:115Q1:income:fixture:row:trend-revenue",
