@@ -18,6 +18,8 @@ def test_authoritative_checklist_is_a_first_class_dashboard_section() -> None:
     assert "查核與KAM" in INDEX_HTML
     assert "最低附註" in INDEX_HTML
     assert "overviewTable(a.financial_overview)" in INDEX_HTML
+    assert "cash_conversion_cycle_days:'現金轉換週期'" in INDEX_HTML
+    assert "common_stock_capital:'普通股股本'" in INDEX_HTML
 
 
 def test_dashboard_rejects_pre_v4_or_cross_generation_checklist() -> None:

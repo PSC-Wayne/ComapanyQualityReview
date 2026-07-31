@@ -1,6 +1,13 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
+
+from company_quality.company_analysis.checklist_analysis import (
+    _CANONICAL_GROWTH_METRICS,
+    _CANONICAL_RISK_METRICS,
+    _ids,
+)
 
 from company_quality.company_analysis.checklist_contracts import (
     AUDIT_CHECK_IDS,
@@ -146,6 +153,18 @@ def test_complete_general_company_requires_all_authoritative_dimensions() -> Non
     assert assessment.detailed_check_complete is True
     assert assessment.detailed_check_status == "complete"
     assert assessment.unresolved_reasons == ()
+
+
+def test_evidence_id_collection_supports_audit_inventory_tuple() -> None:
+    assert _ids((SimpleNamespace(evidence_ids=("audit:receipt", "audit:pdf")),)) == (
+        "audit:receipt",
+        "audit:pdf",
+    )
+
+
+def test_canonical_growth_metric_mapping_uses_only_authority_dimensions() -> None:
+    assert set(_CANONICAL_GROWTH_METRICS) == set(GROWTH_DIMENSIONS)
+    assert set(_CANONICAL_RISK_METRICS).issubset(RISK_DIMENSIONS)
 
 
 def test_missing_twelve_quarters_fails_closed() -> None:

@@ -30,12 +30,39 @@ from company_quality.company_analysis.checklist_metrics import build_financial_o
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 
 
+_CANONICAL_GROWTH_METRICS = {
+    "revenue_momentum": ("revenue", "營收趨勢"),
+    "margin_and_product_mix": ("gross_margin", "毛利率趨勢"),
+    "operating_leverage": ("operating_margin", "營業利益率趨勢"),
+    "earnings_quality": ("cfo_to_net_income", "CFO／淨利品質"),
+    "cash_conversion": ("cash_conversion_cycle_days", "現金轉換週期"),
+    "reinvestment_and_roic": ("roic", "ROIC"),
+    "per_share_value_and_dilution": ("diluted_eps", "稀釋每股盈餘"),
+}
+_CANONICAL_RISK_METRICS = {
+    "liquidity_and_refinancing": ("current_ratio", ("流動比率", "一年內到期債務")),
+    "receivables_and_collection": ("dso_days", ("平均餘額DSO", "應收成長相對營收")),
+    "inventory_and_impairment": ("inventory_days", ("平均存貨週轉天數", "跌價損失")),
+    "contract_assets_and_revenue_recognition": ("contract_assets", ("合約資產", "收入認列政策")),
+    "earnings_quality": ("cfo_to_net_income", ("CFO／淨利", "自由現金流")),
+    "shareholder_dilution_and_capital_allocation": (
+        "common_stock_capital", ("股本", "完全稀釋股數")
+    ),
+}
+
+
 def _ids(values: Iterable[object]) -> tuple[str, ...]:
     result: list[str] = []
     for value in values:
-        candidate = getattr(value, "artifact_id", None) or getattr(value, "filing_id", None)
-        if isinstance(candidate, str) and candidate and candidate not in result:
-            result.append(candidate)
+        candidates = (
+            getattr(value, "artifact_id", None),
+            getattr(value, "filing_id", None),
+            getattr(value, "evidence_id", None),
+            *(getattr(value, "evidence_ids", ()) or ()),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate and candidate not in result:
+                result.append(candidate)
     return tuple(result)
 
 
@@ -717,16 +744,7 @@ def build_checklist_assessment(
             if judgement != "unresolved":
                 growth[dimension] = _growth_resolved(dimension, judgement, (label,), evidence_ids)
 
-    canonical_growth = {
-        "revenue_momentum": ("revenue", "營收趨勢"),
-        "margin_and_product_mix": ("gross_margin", "毛利率趨勢"),
-        "operating_leverage": ("operating_margin", "營業利益率趨勢"),
-        "earnings_quality": ("cfo_to_net_income", "CFO／淨利品質"),
-        "cash_conversion": ("cash_conversion_cycle_days", "現金轉換週期"),
-        "reinvestment_efficiency": ("roic", "ROIC"),
-        "per_share_value": ("diluted_eps", "稀釋每股盈餘"),
-    }
-    for dimension, (metric_id, label) in canonical_growth.items():
+    for dimension, (metric_id, label) in _CANONICAL_GROWTH_METRICS.items():
         metric = _overview_metric(overview, metric_id)
         if metric is None or metric.trend_status == "unresolved":
             continue
@@ -761,15 +779,7 @@ def build_checklist_assessment(
                     dimension, judgement, label, getattr(metric, "evidence_ids", ()), monitoring
                 )
 
-    canonical_risks = {
-        "liquidity_and_refinancing": ("current_ratio", ("流動比率", "一年內到期債務")),
-        "receivables_and_collection": ("dso_days", ("平均餘額DSO", "應收成長相對營收")),
-        "inventory_and_impairment": ("inventory_days", ("平均存貨週轉天數", "跌價損失")),
-        "contract_assets_and_revenue_recognition": ("contract_assets", ("合約資產", "收入認列政策")),
-        "earnings_quality": ("cfo_to_net_income", ("CFO／淨利", "自由現金流")),
-        "capital_structure_and_dilution": ("common_stock_capital", ("股本", "完全稀釋股數")),
-    }
-    for dimension, (metric_id, monitoring) in canonical_risks.items():
+    for dimension, (metric_id, monitoring) in _CANONICAL_RISK_METRICS.items():
         metric = _overview_metric(overview, metric_id)
         if metric is None or metric.trend_status == "unresolved":
             continue

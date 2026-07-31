@@ -6,6 +6,8 @@ import hashlib
 import http.cookiejar
 import json
 import os
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -111,12 +113,22 @@ class MopsTransport:
         }
         self._preloaded: set[str] = set()
 
+    def _read(self, request: urllib.request.Request) -> bytes:
+        for attempt in range(2):
+            try:
+                with self.opener.open(request, timeout=30) as response:
+                    return response.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code != 307 or attempt == 1:
+                    raise
+                time.sleep(1)
+        raise AssertionError("unreachable")
+
     def preload(self, endpoint: str) -> None:
         if endpoint in self._preloaded:
             return
         request = urllib.request.Request(_BASE_URL + endpoint, headers=self.headers)
-        with self.opener.open(request, timeout=30) as response:
-            response.read()
+        self._read(request)
         self._preloaded.add(endpoint)
 
     def post(self, endpoint: str, payload: dict[str, str]) -> bytes:
@@ -125,8 +137,7 @@ class MopsTransport:
             data=urllib.parse.urlencode(payload).encode(),
             headers=self.headers,
         )
-        with self.opener.open(request, timeout=30) as response:
-            return response.read()
+        return self._read(request)
 
 
 def trailing_quarters(latest: Period, count: int = 20) -> tuple[Period, ...]:
@@ -187,6 +198,10 @@ def _validate_body(
     period_markers = [f"民國{period.roc_year}年第{period.quarter}季"]
     if period.quarter == 4:
         period_markers.append(f"民國{period.roc_year}年度")
+    elif title == "權益變動表" and period.quarter == 2:
+        period_markers.append(f"民國{period.roc_year}年上半年度")
+    elif title == "權益變動表" and period.quarter == 3:
+        period_markers.append(f"民國{period.roc_year}年前3季")
     if not any(marker in text for marker in period_markers):
         raise SourceArtifactError("official response period mismatch")
     if title not in text or "<table" not in text.lower():

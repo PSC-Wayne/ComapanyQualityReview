@@ -317,17 +317,18 @@ def test_query_http_job_poll_same_generation_result_for_five_general_cases(
         with urlopen(base + "/", timeout=5) as response:
             html = response.read().decode()
         for label in (
-            "財報惡化",
-            "無法解釋財報異常",
-            "近期負面新聞",
-            "KAM問題",
+            "財報趨勢與惡化",
+            "重大財報異常",
+            "近期負面事件與新聞",
+            "三年關鍵查核事項（KAM）",
             "上漲潛力",
-            "估值情境（research_only）",
-            "報酬機率",
+            "估值情境",
+            "12個月絕對正報酬",
         ):
             assert label in html
         assert "currentGeneration" in html
-        assert "legacy fallback" in html
+        assert "SingleCompanyResearchReport.v4" in html
+        assert "legacy fallback" not in html
         assert "星等" not in html and "表情" not in html
 
         for code, (_, _, _, _, expected_status) in PROFILES.items():
