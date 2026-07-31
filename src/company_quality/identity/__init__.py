@@ -54,6 +54,7 @@ class CompanyIdentity:
     market: Market
     valid_from: str
     valid_to: None = None
+    industry_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +65,7 @@ class OfficialIdentityCandidate:
     short_name: str
     market: Market
     evidence_url: str
+    industry_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +147,7 @@ def _candidate(
         short_name=row["short_name"].strip(),
         market=source.market,
         evidence_url=source.url,
+        industry_code=str(row.get("industry_code", "")).strip() or None,
     )
 
 
@@ -208,6 +211,7 @@ def fetch_official_identity_sources() -> tuple[OfficialIdentitySource, ...]:
             "short_name": row["公司簡稱"].strip(),
             "issuer_id": row["營利事業統一編號"].strip(),
             "listing_date": row["上市日期"].strip(),
+            "industry_code": row["產業別"].strip(),
         }
         for row in twse_raw
     )
@@ -218,6 +222,7 @@ def fetch_official_identity_sources() -> tuple[OfficialIdentitySource, ...]:
             "short_name": row["CompanyAbbreviation"].strip(),
             "issuer_id": row["UnifiedBusinessNo."].strip(),
             "listing_date": row["DateOfListing"].strip(),
+            "industry_code": row["SecuritiesIndustryCode"].strip(),
         }
         for row in tpex_raw
     )
@@ -325,6 +330,7 @@ def resolve_identity(
         short_name=row["short_name"].strip(),
         market=source.market,
         valid_from=_listing_instant(row["listing_date"]),
+        industry_code=str(row.get("industry_code", "")).strip() or None,
     )
     return IdentityResolution(
         identifier,

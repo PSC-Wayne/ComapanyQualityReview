@@ -137,6 +137,11 @@ class FinancialTrendMetric:
     ratio_sequential_change: Decimal | None
     direction: FinancialTrendDirection
     evidence_ids: tuple[str, ...]
+    turnover_days: Decimal | None = None
+    prior_turnover_days: Decimal | None = None
+    period_days: int | None = None
+    prior_period_days: int | None = None
+    turnover_basis: Literal["average_balance"] | None = None
 
 
 @dataclass(frozen=True, slots=True)

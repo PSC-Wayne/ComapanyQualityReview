@@ -36,6 +36,13 @@ from company_quality.sources.financial import (
     latest_published_period,
     trailing_quarters,
 )
+from company_quality.sources.monthly_revenue import (
+    MonthlyRevenueArtifact,
+    MonthlyRevenueError,
+    MopsMonthlyRevenueCollector,
+    RevenueMonth,
+    trailing_months,
+)
 
 
 _TAIPEI = ZoneInfo("Asia/Taipei")
@@ -55,6 +62,10 @@ class AuditCollector(Protocol):
     def collect_period(self, **kwargs: object) -> AuditFilingInventory: ...
 
 
+class MonthlyRevenueCollector(Protocol):
+    def collect_month(self, **kwargs: object) -> MonthlyRevenueArtifact: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PeriodEvidence:
     period: str
@@ -70,10 +81,11 @@ class CompanyEvidenceBundle:
     identity: CompanyIdentity
     retrieved_at: str
     periods: tuple[PeriodEvidence, ...]
+    monthly_revenue: tuple[MonthlyRevenueArtifact, ...]
     source_coverage: tuple[SourceCoverage, ...]
     status: Literal["available", "partial", "blocked"]
     filing_store_stats: FilingStoreStats | None = None
-    schema_version: Literal["CompanyEvidenceBundle.v1"] = "CompanyEvidenceBundle.v1"
+    schema_version: Literal["CompanyEvidenceBundle.v2"] = "CompanyEvidenceBundle.v2"
 
 
 def _instant(value: str, field: str) -> datetime:
@@ -103,6 +115,20 @@ def _reason(prefix: str, period: Period, exc: BaseException) -> str:
     return f"{period.key}:{prefix}:{type(exc).__name__}:{detail or 'no_detail'}"
 
 
+def _month_reason(prefix: str, month: RevenueMonth, exc: BaseException) -> str:
+    detail = " ".join(str(exc).split())[:300]
+    return f"{month.key}:{prefix}:{type(exc).__name__}:{detail or 'no_detail'}"
+
+
+def _latest_revenue_month(as_of: datetime) -> RevenueMonth:
+    # Listed issuers normally file prior-month revenue by the 10th. A late
+    # filing remains an explicit source gap rather than being treated as zero.
+    offset = 1 if as_of.day >= 11 else 2
+    absolute = as_of.year * 12 + as_of.month - 1 - offset
+    year, zero_based_month = divmod(absolute, 12)
+    return RevenueMonth(year - 1911, zero_based_month + 1)
+
+
 def _coverage_reason(period: str, category: str, detail: str) -> str:
     return f"{period}:{category}:{detail}"
 
@@ -117,6 +143,8 @@ def collect_company_evidence_bundle(
     periods: Sequence[Period] | None = None,
     financial_collector: FinancialCollector | None = None,
     audit_collector: AuditCollector | None = None,
+    monthly_revenue_collector: MonthlyRevenueCollector | None = None,
+    revenue_months: Sequence[RevenueMonth] | None = None,
     retrieved_at: str | None = None,
     issuer_type: Literal[
         "domestic_general", "foreign_primary", "foreign_secondary"
@@ -148,6 +176,9 @@ def collect_company_evidence_bundle(
         filing_store=filing_store
     )
     audit_source = audit_collector or MopsAuditInventoryCollector(filing_store=filing_store)
+    revenue_source = monthly_revenue_collector or MopsMonthlyRevenueCollector(
+        filing_store=filing_store
+    )
 
     collected: list[PeriodEvidence] = []
     statement_missing: list[str] = []
@@ -158,6 +189,44 @@ def collect_company_evidence_bundle(
     equity_count = 0
     audit_pdf_count = 0
     annual_pdf_count = 0
+
+    selected_revenue_months = (
+        tuple(revenue_months)
+        if revenue_months is not None
+        else trailing_months(_latest_revenue_month(decision_time))
+    )
+    if len(selected_revenue_months) != 60 or len(set(selected_revenue_months)) != 60:
+        raise CompanyEvidenceBundleError("monthly revenue requires exactly 60 unique months")
+    monthly_revenue: list[MonthlyRevenueArtifact] = []
+    monthly_revenue_missing: list[str] = []
+    for month in selected_revenue_months:
+        try:
+            artifact = revenue_source.collect_month(
+                security_code=identity.security_code,
+                company_name=identity.company_name,
+                company_short_name=identity.short_name,
+                issuer_id=identity.issuer_id,
+                market=identity.market,
+                month=month,
+                retrieved_at=retrieved,
+                as_of=decision_time.isoformat(),
+            )
+            if _instant(artifact.available_at, "monthly revenue available_at") > decision_time:
+                monthly_revenue_missing.append(
+                    f"{month.key}:monthly_revenue_html:artifact_after_as_of"
+                )
+            else:
+                monthly_revenue.append(artifact)
+        except (
+            MonthlyRevenueError,
+            OSError,
+            HTTPException,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            monthly_revenue_missing.append(
+                _month_reason("monthly_revenue_html", month, exc)
+            )
 
     collection_order = tuple(
         sorted(selected_periods, key=lambda item: (item.quarter != 4, item.roc_year, item.quarter))
@@ -368,6 +437,12 @@ def collect_company_evidence_bundle(
             available=annual_pdf_count,
             missing_reasons=tuple(annual_missing),
         ),
+        SourceCoverage(
+            family="monthly_revenue_html",
+            required=60,
+            available=len(monthly_revenue),
+            missing_reasons=tuple(monthly_revenue_missing),
+        ),
     )
     if statement_count == 0 and audit_pdf_count == 0:
         status: Literal["available", "partial", "blocked"] = "blocked"
@@ -376,6 +451,7 @@ def collect_company_evidence_bundle(
         and equity_count == 20
         and audit_pdf_count == 20
         and annual_pdf_count == 5
+        and len(monthly_revenue) == 60
     ):
         status = "available"
     else:
@@ -392,6 +468,7 @@ def collect_company_evidence_bundle(
         identity=identity,
         retrieved_at=retrieved,
         periods=tuple(collected),
+        monthly_revenue=tuple(monthly_revenue),
         source_coverage=coverage,
         status=status,
         filing_store_stats=filing_store.stats() if filing_store is not None else None,

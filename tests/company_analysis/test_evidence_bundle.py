@@ -11,6 +11,7 @@ from company_quality.company_analysis.evidence_bundle import (
 )
 from company_quality.identity import OfficialIdentitySource
 from company_quality.sources.financial import Period
+from company_quality.sources.monthly_revenue import RevenueMonth, trailing_months
 
 
 AS_OF = "2026-07-29T12:00:00+08:00"
@@ -83,7 +84,25 @@ class FakeAuditCollector:
         )
 
 
-def _collect(tmp_path, *, financial=None, audit=None):
+class FakeMonthlyRevenueCollector:
+    def __init__(self, missing: set[str] | None = None) -> None:
+        self.calls: list[RevenueMonth] = []
+        self.missing = missing or set()
+
+    def collect_month(self, **kwargs):
+        month = kwargs["month"]
+        self.calls.append(month)
+        if month.key in self.missing:
+            raise RuntimeError("monthly revenue unavailable")
+        return SimpleNamespace(
+            month=month.key,
+            available_at=kwargs["retrieved_at"],
+            security_code=kwargs["security_code"],
+            market=kwargs["market"],
+        )
+
+
+def _collect(tmp_path, *, financial=None, audit=None, monthly=None):
     return collect_company_evidence_bundle(
         identifier="2330",
         requested_market=None,
@@ -103,6 +122,8 @@ def _collect(tmp_path, *, financial=None, audit=None):
         ),
         financial_collector=financial or FakeFinancialCollector(),
         audit_collector=audit or FakeAuditCollector(),
+        monthly_revenue_collector=monthly or FakeMonthlyRevenueCollector(),
+        revenue_months=trailing_months(RevenueMonth(115, 6)),
         retrieved_at=AS_OF,
     )
 
@@ -110,8 +131,9 @@ def _collect(tmp_path, *, financial=None, audit=None):
 def test_collects_twenty_quarters_and_five_annual_audit_pdfs(tmp_path) -> None:
     financial = FakeFinancialCollector()
     audit = FakeAuditCollector()
+    monthly = FakeMonthlyRevenueCollector()
 
-    bundle = _collect(tmp_path, financial=financial, audit=audit)
+    bundle = _collect(tmp_path, financial=financial, audit=audit, monthly=monthly)
 
     assert bundle.status == "available"
     assert bundle.identity.security_code == "2330"
@@ -119,6 +141,8 @@ def test_collects_twenty_quarters_and_five_annual_audit_pdfs(tmp_path) -> None:
     assert len(bundle.periods) == 20
     assert len(financial.calls) == 20
     assert len(audit.calls) == 20
+    assert len(monthly.calls) == 60
+    assert len(bundle.monthly_revenue) == 60
     assert sum(len(period.financial.artifacts) for period in bundle.periods) == 80
     assert [period.period for period in bundle.periods if period.is_annual] == [
         "110Q4", "111Q4", "112Q4", "113Q4", "114Q4"
@@ -129,6 +153,7 @@ def test_collects_twenty_quarters_and_five_annual_audit_pdfs(tmp_path) -> None:
     assert (coverage["equity_changes_html"].available, coverage["equity_changes_html"].required) == (20, 20)
     assert (coverage["audit_or_review_pdf"].available, coverage["audit_or_review_pdf"].required) == (20, 20)
     assert (coverage["annual_audit_pdf"].available, coverage["annual_audit_pdf"].required) == (5, 5)
+    assert (coverage["monthly_revenue_html"].available, coverage["monthly_revenue_html"].required) == (60, 60)
 
 
 def test_missing_period_is_partial_with_exact_coverage_reasons(tmp_path) -> None:

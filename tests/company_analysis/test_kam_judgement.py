@@ -94,6 +94,7 @@ def _bundle(tmp_path: Path, periods: tuple[str, ...] = ("112Q4", "113Q4", "114Q4
         periods=tuple(
             PeriodEvidence(period, True, None, audits[period], ()) for period in periods
         ),
+        monthly_revenue=(),
         source_coverage=(SourceCoverage("annual_audit_pdf", 3, len(periods), ("111Q4:pdf_missing",) if len(periods) < 3 else ()),),
         status="available" if len(periods) == 3 else "partial",
     )

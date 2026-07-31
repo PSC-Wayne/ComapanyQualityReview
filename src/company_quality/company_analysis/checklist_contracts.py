@@ -22,6 +22,7 @@ CompanyRoute = Literal[
     "life_insurer",
     "property_insurer",
     "securities_firm",
+    "financial_institution_unrouted",
 ]
 
 
