@@ -71,6 +71,10 @@ class FinancialArtifact:
     official_filed_at: None
     mime_type: Literal["text/html"]
     path: Path
+    statement_scope: Literal["consolidated", "individual", "unknown"] = "unknown"
+    period_basis: Literal[
+        "point_in_time", "single_period", "single_and_ytd", "year_to_date"
+    ] = "year_to_date"
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +190,31 @@ def _validate_body(
         raise SourceArtifactError("official response statement type mismatch")
 
 
+def _scope_and_basis(
+    body: bytes, report: Report, period: str
+) -> tuple[
+    Literal["consolidated", "individual", "unknown"],
+    Literal["point_in_time", "single_period", "single_and_ytd", "year_to_date"],
+]:
+    text = body.decode("utf-8", "replace")
+    if any(title in text for title in ("合併資產負債表", "合併綜合損益表", "合併現金流量表", "合併權益變動表")):
+        scope: Literal["consolidated", "individual", "unknown"] = "consolidated"
+    elif any(title in text for title in ("個體資產負債表", "個體綜合損益表", "個體現金流量表", "個體權益變動表")):
+        scope = "individual"
+    else:
+        scope = "unknown"
+    quarter = int(period[-1])
+    if report == "balance":
+        basis: Literal[
+            "point_in_time", "single_period", "single_and_ytd", "year_to_date"
+        ] = "point_in_time"
+    elif report == "income":
+        basis = "single_and_ytd" if quarter in (2, 3) else "single_period"
+    else:
+        basis = "year_to_date"
+    return scope, basis
+
+
 class MopsFinancialCollector:
     def __init__(
         self,
@@ -197,6 +226,7 @@ class MopsFinancialCollector:
 
     @staticmethod
     def _stored_artifact(stored: StoredStatement) -> FinancialArtifact:
+        scope, basis = _scope_and_basis(stored.path.read_bytes(), stored.report, stored.period)  # type: ignore[arg-type]
         return FinancialArtifact(
             artifact_id=(
                 f"{stored.market}:{stored.security_code}:{stored.period}:"
@@ -216,6 +246,8 @@ class MopsFinancialCollector:
             official_filed_at=None,
             mime_type="text/html",
             path=stored.path,
+            statement_scope=scope,
+            period_basis=basis,
         )
 
     def collect_period(
@@ -306,6 +338,7 @@ class MopsFinancialCollector:
                 temporary.write_bytes(body)
                 os.replace(temporary, destination)
             digest = hashlib.sha256(body).hexdigest()
+            scope, basis = _scope_and_basis(body, report, period.key)
             artifacts.append(
                 FinancialArtifact(
                     artifact_id=(
@@ -325,6 +358,8 @@ class MopsFinancialCollector:
                     official_filed_at=None,
                     mime_type="text/html",
                     path=destination,
+                    statement_scope=scope,
+                    period_basis=basis,
                 )
             )
         return PeriodCollection("available", tuple(artifacts), 1.0)

@@ -375,7 +375,9 @@ def test_builds_valid_blocked_report_without_inventing_narrative(tmp_path: Path)
         generated_at=GENERATED_AT,
     )
 
-    assert report.schema_version == "SingleCompanyResearchReport.v3"
+    assert report.schema_version == "SingleCompanyResearchReport.v4"
+    assert report.checklist_assessment is not None
+    assert report.checklist_assessment.detailed_check_complete is False
     assert report.downside.status == "blocked"
     assert report.upside.status == "blocked"
     assert report.upside.positive_return_probability.status == "unavailable"

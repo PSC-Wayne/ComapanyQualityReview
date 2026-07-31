@@ -17,6 +17,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from company_quality.audit.inventory import AuditFilingInventory
+from company_quality.company_analysis.checklist_analysis import build_checklist_assessment
 from company_quality.company_analysis.contracts import (
     CaseProbability,
     DownsideCase,
@@ -1255,6 +1256,7 @@ def _with_hermes_candidates(
             f"Hermes候選抽取：{status}{detail}。",
         ),
         financial_deterioration=financial_deterioration,
+        checklist_assessment=report.checklist_assessment,
     )
 
 
@@ -1275,6 +1277,7 @@ def build_report_from_evidence(
         raise ReportOrchestrationError("invalid generated_at") from exc
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
+    checklist_assessment = build_checklist_assessment(bundle, generation_id, None)
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
         None,
@@ -1305,6 +1308,7 @@ def build_report_from_evidence(
                 confidence=Decimal("0"),
             ),
             limitations=("core_three_statements_incomplete",),
+            checklist_assessment=checklist_assessment,
             status="blocked",
         )
     audit_available, audit_required = _coverage(bundle, "audit_or_review_pdf")
@@ -1314,6 +1318,9 @@ def build_report_from_evidence(
     )
     financial_deterioration, financial_citations = build_financial_deterioration(
         bundle, generation_id
+    )
+    checklist_assessment = build_checklist_assessment(
+        bundle, generation_id, financial_deterioration
     )
     detailed = build_detailed_analysis(bundle)
     if detailed.available:
@@ -1350,6 +1357,7 @@ def build_report_from_evidence(
             ),
             limitations=tuple(limitations),
             financial_deterioration=financial_deterioration,
+            checklist_assessment=checklist_assessment,
         )
         return _with_hermes_candidates(
             report=report, candidate_adapter=candidate_adapter
@@ -1414,6 +1422,7 @@ def build_report_from_evidence(
         ),
         limitations=tuple(limitations),
         financial_deterioration=financial_deterioration,
+        checklist_assessment=checklist_assessment,
     )
     return _with_hermes_candidates(report=report, candidate_adapter=candidate_adapter)
 
@@ -1527,6 +1536,7 @@ def attach_recent_negative_news(
         limitations=(*report.limitations, limitation),
         financial_deterioration=report.financial_deterioration,
         downside_sections=report.downside_sections,
+        checklist_assessment=report.checklist_assessment,
     )
 
 
@@ -1779,6 +1789,7 @@ def publish_four_downside_sections(
         limitations=limitations,
         financial_deterioration=report.financial_deterioration,
         downside_sections=sections,
+        checklist_assessment=report.checklist_assessment,
         status=status,
     )
 
