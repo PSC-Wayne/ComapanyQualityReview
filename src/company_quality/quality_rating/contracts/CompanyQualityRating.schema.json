@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "CompanyQualityRating.v1",
+  "title": "CompanyQualityRating.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issuer_id", "security_code", "market", "generation_id", "decision_date",
+    "data_as_of", "status", "score", "base_score", "extra_points", "confidence",
+    "pillars", "missing_primary_pillars", "drivers", "kam_focuses",
+    "official_source_ids", "extra_source_ids", "checklist_unresolved_ids",
+    "cohort_issuer_count", "cohort_scope", "source_policy_version", "model_scope",
+    "predicts_price_or_adverse_event", "rating_disposition", "schema_version",
+    "model_version"
+  ],
+  "$defs": {
+    "evidenceIds": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "pillarResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "metric_scores", "evidence_ids"],
+      "properties": {
+        "score": {"type": "number", "minimum": 0, "maximum": 100},
+        "metric_scores": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 100}
+        },
+        "evidence_ids": {"$ref": "#/$defs/evidenceIds"}
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pillar", "direction", "summary", "evidence_ids"],
+      "properties": {
+        "pillar": {
+          "type": ["string", "null"],
+          "enum": [
+            "earnings_quality", "financial_reliability", "cash_balance",
+            "capital_efficiency", "industry_financial", null
+          ]
+        },
+        "direction": {"enum": ["positive", "negative", "context"]},
+        "summary": {"type": "string", "minLength": 1},
+        "evidence_ids": {"$ref": "#/$defs/evidenceIds"}
+      }
+    },
+    "kamFocus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic", "evidence_ids", "linked_metric_ids"],
+      "properties": {
+        "topic": {"type": "string", "minLength": 1},
+        "evidence_ids": {"$ref": "#/$defs/evidenceIds"},
+        "linked_metric_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "properties": {
+    "issuer_id": {"type": "string", "minLength": 1},
+    "security_code": {"type": "string", "minLength": 1},
+    "market": {"enum": ["TWSE", "TPEx"]},
+    "generation_id": {"type": "string", "minLength": 1},
+    "decision_date": {"type": "string", "format": "date"},
+    "data_as_of": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["formal", "research_only"]},
+    "score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "base_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "extra_points": {"type": "number", "minimum": 0},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "pillars": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "earnings_quality": {"$ref": "#/$defs/pillarResult"},
+        "financial_reliability": {"$ref": "#/$defs/pillarResult"},
+        "cash_balance": {"$ref": "#/$defs/pillarResult"},
+        "capital_efficiency": {"$ref": "#/$defs/pillarResult"},
+        "industry_financial": {"$ref": "#/$defs/pillarResult"}
+      }
+    },
+    "missing_primary_pillars": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "earnings_quality", "financial_reliability", "cash_balance",
+          "capital_efficiency", "industry_financial"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "drivers": {"type": "array", "items": {"$ref": "#/$defs/driver"}},
+    "kam_focuses": {"type": "array", "items": {"$ref": "#/$defs/kamFocus"}},
+    "official_source_ids": {"$ref": "#/$defs/evidenceIds"},
+    "extra_source_ids": {"$ref": "#/$defs/evidenceIds"},
+    "checklist_unresolved_ids": {"$ref": "#/$defs/evidenceIds"},
+    "cohort_issuer_count": {"type": "integer", "minimum": 5},
+    "cohort_scope": {"type": "string", "minLength": 1},
+    "source_policy_version": {"const": "OfficialDisclosureRatingPolicy.v1"},
+    "model_scope": {"const": "descriptive_official_financial_quality"},
+    "predicts_price_or_adverse_event": {"const": false},
+    "rating_disposition": {"enum": ["FORMAL", "RESEARCH_ONLY"]},
+    "schema_version": {"const": "CompanyQualityRating.v1"},
+    "model_version": {"const": "official-peer-percentile-equal-pillar.v1"}
+  }
+}
