@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.checklist_contracts import (
     AUDIT_CHECK_IDS,
     GROWTH_CHECK_IDS,
@@ -27,6 +28,9 @@ from company_quality.company_analysis.checklist_contracts import (
 )
 from company_quality.company_analysis.contracts import FinancialDeteriorationSection
 from company_quality.company_analysis.checklist_metrics import build_financial_overview
+from company_quality.company_analysis.checklist_evidence import (
+    collect_checklist_document_evidence,
+)
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
 
 
@@ -80,6 +84,20 @@ def _audit_artifacts(bundle: CompanyEvidenceBundle) -> tuple[object, ...]:
         period.audit
         for period in bundle.periods
         if period.audit is not None and period.audit.pdf_path is not None
+    )
+
+
+def _annual_audit_filings(
+    bundle: CompanyEvidenceBundle,
+) -> tuple[AuditFilingInventory, ...]:
+    return tuple(
+        period.audit
+        for period in bundle.periods
+        if period.is_annual
+        and period.audit is not None
+        and period.audit.pdf_path is not None
+        and period.audit.pdf_sha256 is not None
+        and period.audit.pdf_source_url is not None
     )
 
 
@@ -346,25 +364,6 @@ def _placeholder_checks(
     )
 
 
-_QUANTITATIVE_CHECKS = {
-    "G01": "revenue", "G05": "gross_profit", "G06": "gross_margin",
-    "G07": "operating_income", "G08": "operating_margin",
-    "G09": "net_income", "G10": "net_margin", "G12": "dso_days",
-    "G14": "inventory_days", "G15": "cfo_to_net_income",
-    "G16": "free_cash_flow", "G17": "capex", "G18": "capex",
-    "G19": "roic", "G20": "common_stock_capital",
-    "G21": "diluted_weighted_average_shares",
-    "R01": "current_ratio", "R02": "current_ratio", "R03": "cash",
-    "R04": "restricted_cash", "R05": "debt_due_within_year",
-    "R06": "interest_bearing_debt", "R09": "receivables",
-    "R10": "dso_days", "R14": "inventory", "R15": "inventory_days",
-    "R18": "contract_assets", "R21": "cfo_to_net_income",
-    "R22": "free_cash_flow", "R27": "goodwill_and_intangibles",
-    "R43": "common_stock_capital", "R44": "diluted_weighted_average_shares",
-    "R46": "cash_dividends_paid", "R47": "roic",
-}
-
-
 def _overview_metric(overview: FinancialOverview | None, metric_id: str):
     if overview is None:
         return None
@@ -380,42 +379,309 @@ def _quantitative_checks(
         item.check_id: item
         for item in _placeholder_checks(unresolved_reason, industry_route)
     }
-    for check_id, metric_id in _QUANTITATIVE_CHECKS.items():
-        metric = _overview_metric(overview, metric_id)
-        if metric is None:
-            continue
-        available = [item for item in metric.values[-4:] if item.status == "available"]
-        if len(available) < 2:
-            continue
-        previous, latest = available[-2:]
-        assert previous.value is not None and latest.value is not None
-        domain = "growth" if check_id.startswith("G") else "risk"
-        deterioration = metric.trend_status == "deteriorating"
-        rows[check_id] = ChecklistCheckResult(
-            check_id=check_id,
-            domain=domain,
-            applicability="triggered",
-            status="evaluated",
-            first_detectable_at=None,
-            financial_period=latest.period,
-            observations=(
-                f"{metric_id}由{previous.value}變為{latest.value}；趨勢={metric.trend_status}",
-                f"formula_id={metric.formula_id}",
-            ),
-            evidence_ids=tuple(dict.fromkeys((*previous.evidence_ids, *latest.evidence_ids))),
-            supporting_evidence=("量化趨勢改善或持平。",) if not deterioration else (),
-            counterevidence=("量化趨勢惡化。",) if deterioration else (),
-            inference_chain=(f"canonical facts → {metric.formula_id} → 趨勢判定",),
-            mechanism=f"追蹤{metric_id}對成長品質或風險承受力的變化。",
-            leading_warnings=(f"{metric_id}連續惡化",),
-            buffers=(f"{metric_id}改善或維持",),
-            monitoring_metrics=(metric_id,),
-            monitoring_date=None,
-            invalidation_or_resolution_conditions=("下一期同口徑資料使趨勢反轉。",),
-            severity=("high" if deterioration else "low") if domain == "risk" else "not_applicable",
-            confidence="medium",
-            unresolved_reasons=(),
+
+    def comparison(metric_ids: tuple[str, ...]):
+        metrics = {item: _overview_metric(overview, item) for item in metric_ids}
+        if any(item is None for item in metrics.values()) or overview is None:
+            return None
+        by_metric = {
+            metric_id: {
+                value.period: value
+                for value in metric.values
+                if value.status == "available"
+            }
+            for metric_id, metric in metrics.items()
+            if metric is not None
+        }
+        common = [
+            period
+            for period in overview.periods
+            if all(period in values for values in by_metric.values())
+        ]
+        if len(common) < 2:
+            return None
+        previous_period, latest_period = common[-2:]
+        previous = {item: values[previous_period] for item, values in by_metric.items()}
+        latest = {item: values[latest_period] for item, values in by_metric.items()}
+        return previous_period, latest_period, previous, latest
+
+    def evidence(previous: dict[str, Any], latest: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                item
+                for value in (*previous.values(), *latest.values())
+                for item in value.evidence_ids
+            )
         )
+
+    def not_triggered(
+        check_id: str,
+        domain: str,
+        period: str,
+        observations: tuple[str, ...],
+        evidence_ids: tuple[str, ...],
+        monitoring: tuple[str, ...],
+    ) -> None:
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id, domain=domain,  # type: ignore[arg-type]
+            applicability="not_triggered", status="evaluated",
+            first_detectable_at=None, financial_period=period,
+            observations=observations, evidence_ids=evidence_ids,
+            supporting_evidence=(), counterevidence=("未達本題量化觸發條件。",),
+            inference_chain=("同口徑canonical facts → 量化觸發條件",),
+            mechanism="本期未觸發；新資料仍須重新檢查。",
+            leading_warnings=monitoring, buffers=("目前量化條件未觸發",),
+            monitoring_metrics=monitoring, monitoring_date=None,
+            invalidation_or_resolution_conditions=("後續同口徑數值達觸發條件。",),
+            severity="low" if domain == "risk" else "not_applicable",
+            confidence="medium", unresolved_reasons=(),
+        )
+
+    def triggered(
+        check_id: str,
+        domain: str,
+        period: str,
+        observations: tuple[str, ...],
+        evidence_ids: tuple[str, ...],
+        monitoring: tuple[str, ...],
+        reason: str,
+    ) -> None:
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id, domain=domain,  # type: ignore[arg-type]
+            applicability="triggered", status="unresolved",
+            first_detectable_at=None, financial_period=period,
+            observations=observations, evidence_ids=evidence_ids,
+            supporting_evidence=(), counterevidence=(),
+            inference_chain=("同口徑canonical facts → 量化異常觸發",),
+            mechanism="量化異常已觸發，必須完成權威文件與反證查核。",
+            leading_warnings=monitoring, buffers=(), monitoring_metrics=monitoring,
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("完成指定附註、KAM與期後證據查核。",),
+            severity="medium" if domain == "risk" else "not_applicable",
+            confidence="low", unresolved_reasons=(reason,),
+        )
+
+    def value(items: dict[str, Any], metric_id: str):
+        result = items[metric_id].value
+        assert result is not None
+        return result
+
+    def growth(previous: dict[str, Any], latest: dict[str, Any], metric_id: str):
+        base = value(previous, metric_id)
+        if base <= 0:
+            return None
+        return value(latest, metric_id) / base - 1
+
+    def faster_growth(
+        previous: dict[str, Any], latest: dict[str, Any], left: str, right: str
+    ) -> bool | None:
+        left_growth = growth(previous, latest, left)
+        right_growth = growth(previous, latest, right)
+        if left_growth is None or right_growth is None:
+            return None
+        return left_growth > right_growth
+
+    def evaluate(
+        check_id: str,
+        domain: str,
+        metric_ids: tuple[str, ...],
+        predicate: Any,
+        reason: str,
+        monitoring: tuple[str, ...],
+    ) -> None:
+        compared = comparison(metric_ids)
+        if compared is None:
+            return
+        _, period, previous, latest = compared
+        outcome = predicate(previous, latest)
+        if outcome is None:
+            return
+        observations = tuple(
+            f"{item}由{previous[item].value}變為{latest[item].value}"
+            for item in metric_ids
+        )
+        args = (
+            check_id, domain, period, observations,
+            evidence(previous, latest), monitoring,
+        )
+        triggered(*args, reason) if outcome else not_triggered(*args)
+
+    evaluate(
+        "G01", "growth", ("revenue",),
+        lambda p, l: value(l, "revenue") > value(p, "revenue"),
+        "營收增加已觸發；尚須拆分數量、價格、產品組合、匯率、併購與有機成長。",
+        ("營收YoY/QoQ/TTM", "月營收"),
+    )
+    evaluate(
+        "G03", "growth", ("revenue", "gross_margin"),
+        lambda p, l: value(l, "revenue") > value(p, "revenue")
+        and value(l, "gross_margin") < value(p, "gross_margin"),
+        "營收增而毛利率降；尚須查產品組合、成本、存貨跌價、新廠與匯率。",
+        ("營收", "毛利率", "產品組合"),
+    )
+    evaluate(
+        "G04", "growth", ("revenue", "gross_margin"),
+        lambda p, l: value(l, "revenue") > value(p, "revenue")
+        and value(l, "gross_margin") > value(p, "gross_margin"),
+        "營收與毛利率同升；尚須排除跌價回轉、原料與匯率短期效果。",
+        ("營收", "毛利率", "營業利益率", "營業現金流"),
+    )
+    evaluate(
+        "G05", "growth", ("gross_margin", "operating_margin"),
+        lambda p, l: value(l, "gross_margin") > value(p, "gross_margin")
+        and value(l, "operating_margin") <= value(p, "operating_margin"),
+        "毛利率改善但營益率未改善；尚須查研發、銷售、管理與股份給付。",
+        ("毛利率", "營業利益率", "費用率"),
+    )
+    evaluate(
+        "G06", "growth", ("revenue", "operating_income"),
+        lambda p, l: faster_growth(p, l, "operating_income", "revenue"),
+        "營業利益成長快於營收；尚須驗證固定成本攤薄及必要費用未被延後。",
+        ("營收成長", "營業利益成長", "研發與費用率"),
+    )
+    evaluate(
+        "G07", "growth", ("operating_income", "net_income"),
+        lambda p, l: faster_growth(p, l, "net_income", "operating_income"),
+        "淨利成長快於營業利益；尚須分離匯兌、處分、評價、投資與稅務利益。",
+        ("營業利益成長", "淨利成長", "業外與稅率"),
+    )
+    evaluate(
+        "G09", "growth",
+        ("net_income", "diluted_eps", "diluted_weighted_average_shares"),
+        lambda p, l: value(l, "net_income") > value(p, "net_income")
+        and (
+            value(l, "diluted_eps") <= value(p, "diluted_eps")
+            or value(l, "diluted_weighted_average_shares")
+            > value(p, "diluted_weighted_average_shares")
+        ),
+        "淨利增加但每股成果落後；尚須查增資、可轉債、員工認股與併購發股。",
+        ("淨利", "稀釋EPS", "稀釋加權股數"),
+    )
+    for check_id, predicate, reason in (
+        (
+            "G10",
+            lambda p, l: value(l, "net_income") > value(p, "net_income")
+            and value(l, "operating_cash_flow") > value(p, "operating_cash_flow"),
+            "OCF與淨利同步增加；尚須確認現金來自收款而非延後付款或一次性預收。",
+        ),
+        (
+            "G11",
+            lambda p, l: value(l, "net_income") > value(p, "net_income")
+            and value(l, "operating_cash_flow") < value(p, "operating_cash_flow"),
+            "淨利增加但OCF下降；尚須定位應收、存貨、合約資產、預付款或應付變化。",
+        ),
+        (
+            "G12",
+            lambda p, l: value(l, "operating_cash_flow") > value(p, "operating_cash_flow")
+            and value(l, "net_income") <= value(p, "net_income"),
+            "OCF增加但淨利未增；尚須區分收款改善與一次性營運資金釋放。",
+        ),
+    ):
+        evaluate(
+            check_id, "growth", ("net_income", "operating_cash_flow"),
+            predicate, reason, ("淨利", "營業現金流", "營運資金"),
+        )
+    evaluate(
+        "G13", "growth", ("capex",),
+        lambda p, l: abs(value(l, "capex")) > abs(value(p, "capex")),
+        "CAPEX增加；尚須查用途、完工日、預算、資金來源、訂單與稼動率。",
+        ("CAPEX", "在建工程", "產能與稼動率"),
+    )
+    evaluate(
+        "G22", "growth", ("roe",),
+        lambda p, l: value(l, "roe") > value(p, "roe"),
+        "ROE上升；尚須用利潤率、週轉、槓桿與權益變化做杜邦拆解。",
+        ("ROE", "淨利率", "槓桿", "權益"),
+    )
+    evaluate(
+        "G23", "growth", ("roic",),
+        lambda p, l: value(l, "roic") > value(p, "roic"),
+        "ROIC上升；尚須固定NOPAT與投入資本口徑並比較資金成本。",
+        ("ROIC", "NOPAT", "投入資本"),
+    )
+    evaluate(
+        "G24", "growth", ("cash_dividends_paid", "free_cash_flow"),
+        lambda p, l: abs(value(l, "cash_dividends_paid"))
+        > abs(value(p, "cash_dividends_paid")),
+        "現金股利增加；尚須驗證FCF、淨利、淨負債及投資需求的可持續性。",
+        ("現金股利", "FCF", "淨利", "淨負債"),
+    )
+
+    evaluate(
+        "R01", "risk", ("receivables", "revenue", "dso_days", "operating_cash_flow"),
+        lambda p, l: value(l, "receivables") > value(p, "receivables"),
+        "應收增加已觸發；尚須完成應收帳款附註、帳齡、備抵、集中度、KAM與期後收款查核。",
+        ("應收帳款相對營收", "DSO", "營業現金流"),
+    )
+    evaluate(
+        "R02", "risk", ("contract_assets", "revenue", "operating_cash_flow"),
+        lambda p, l: value(l, "contract_assets") > value(p, "contract_assets"),
+        "合約資產增加；尚須查未開票原因、驗收、轉應收、減損與期後收現。",
+        ("合約資產相對營收", "轉應收速度", "營業現金流"),
+    )
+    evaluate(
+        "R03", "risk", ("inventory", "revenue", "inventory_days", "gross_margin"),
+        lambda p, l: value(l, "inventory") > value(p, "inventory"),
+        "存貨增加已觸發；尚須完成存貨附註、組成、庫齡、跌價、KAM與期後銷售查核。",
+        ("存貨相對營收", "存貨週轉天數", "毛利率"),
+    )
+    evaluate(
+        "R10", "risk", ("interest_bearing_debt", "cash", "operating_cash_flow"),
+        lambda p, l: value(l, "interest_bearing_debt") > value(p, "interest_bearing_debt"),
+        "有息負債增加；尚須拆短期借款用途、利率、幣別、擔保、到期與展期。",
+        ("有息負債", "現金", "營業現金流"),
+    )
+    evaluate(
+        "R11", "risk", ("debt_due_within_year", "cash", "operating_cash_flow"),
+        lambda p, l: value(l, "debt_due_within_year") > value(p, "debt_due_within_year"),
+        "一年內到期債務增加；尚須逐筆查到期日、契約、再融資與正式授信。",
+        ("一年內到期債務", "現金", "營業現金流"),
+    )
+    evaluate(
+        "R12", "risk", ("interest_bearing_debt", "capex", "roic"),
+        lambda p, l: value(l, "interest_bearing_debt") > value(p, "interest_bearing_debt"),
+        "長期融資風險可能觸發；尚須拆長短債、資產匹配、浮動利率與壓力情境。",
+        ("有息負債", "CAPEX", "ROIC"),
+    )
+    evaluate(
+        "R15", "risk", ("debt_ratio", "total_liabilities"),
+        lambda p, l: value(l, "debt_ratio") < value(p, "debt_ratio"),
+        "負債比下降；尚須確認來自還債、增資、重估或保留盈餘。",
+        ("負債比", "負債絕對額", "權益來源"),
+    )
+    evaluate(
+        "R19", "risk",
+        ("revenue", "receivables", "contract_assets", "operating_cash_flow"),
+        lambda p, l: value(l, "revenue") > value(p, "revenue")
+        and (
+            value(l, "receivables") > value(p, "receivables")
+            or value(l, "contract_assets") > value(p, "contract_assets")
+            or value(l, "operating_cash_flow") < value(p, "operating_cash_flow")
+        ),
+        "營收與收款可能背離；尚須查收入截止、驗收、退貨、應收／合約資產及期後收款。",
+        ("營收", "應收", "合約資產", "營業現金流"),
+    )
+    evaluate(
+        "R29", "risk", ("goodwill_and_intangibles",),
+        lambda p, l: value(l, "goodwill_and_intangibles")
+        > value(p, "goodwill_and_intangibles"),
+        "商譽與無形資產增加；尚須拆企業合併、CGU、折現率、成長率與實績。",
+        ("商譽與無形資產", "併購實績", "減損假設"),
+    )
+    evaluate(
+        "R43", "risk", ("common_stock_capital", "roic"),
+        lambda p, l: value(l, "common_stock_capital")
+        > value(p, "common_stock_capital"),
+        "股本增加；尚須確認是否現金增資、用途、股數增幅與後續ROIC。",
+        ("股本", "增資用途", "ROIC"),
+    )
+    evaluate(
+        "R46", "risk", ("cash_dividends_paid", "free_cash_flow"),
+        lambda p, l: abs(value(l, "cash_dividends_paid"))
+        > max(value(l, "free_cash_flow"), 0),
+        "現金股利超過簡化FCF；尚須查是否由借款、出售資產或暫時營運資金波動支應。",
+        ("現金股利", "FCF", "借款", "現金"),
+    )
     return tuple(
         rows[item]
         for item in (
@@ -431,6 +697,7 @@ def _quantitative_checks(
 def _document_checks(
     checks: tuple[ChecklistCheckResult, ...],
     document_evidence: object | None,
+    detailed_analysis: object | None = None,
 ) -> tuple[ChecklistCheckResult, ...]:
     rows = {item.check_id: item for item in checks}
     for check_id, citation in getattr(document_evidence, "note_citations", ()):
@@ -551,6 +818,281 @@ def _document_checks(
             invalidation_or_resolution_conditions=("新年度KAM取代目前比較。",),
             severity="medium", confidence="high", unresolved_reasons=(),
         )
+
+    findings = {
+        item.finding_id: item
+        for item in (
+            *getattr(detailed_analysis, "downside_findings", ()),
+            *getattr(detailed_analysis, "upside_findings", ()),
+        )
+        if getattr(item, "kind", None) == "fact"
+    }
+
+    def documented_finding(
+        check_id: str,
+        finding_id: str,
+        mechanism: str,
+        monitoring: tuple[str, ...],
+        severity: str,
+    ) -> None:
+        finding = findings.get(finding_id)
+        if finding is None or not finding.evidence_ids:
+            return
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id,
+            domain=rows[check_id].domain,
+            applicability="triggered",
+            status="evaluated",
+            first_detectable_at=None,
+            financial_period=None,
+            observations=(finding.statement,),
+            evidence_ids=tuple(finding.evidence_ids),
+            supporting_evidence=(finding.statement,),
+            counterevidence=(),
+            inference_chain=("官方附註／KAM原文 → 結構化fact → 權威題目",),
+            mechanism=mechanism,
+            leading_warnings=monitoring,
+            buffers=(),
+            monitoring_metrics=monitoring,
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("新一期官方文件更新本項事實。",),
+            severity=severity,  # type: ignore[arg-type]
+            confidence="high",
+            unresolved_reasons=(),
+        )
+
+    documented_finding(
+        "R38",
+        "downside:long-term-commitments",
+        "不可取消或長期採購、設備及能源承諾會形成未來固定現金需求。",
+        ("未付款承諾", "取消條款", "資金來源", "產能利用率"),
+        "medium",
+    )
+    documented_finding(
+        "R39",
+        "downside:customer-concentration",
+        "客戶集中會放大單一客戶需求、議價及信用事件的營收與收款衝擊。",
+        ("最大客戶營收占比", "前十大客戶應收占比", "期後收款"),
+        "high",
+    )
+    repeated_kam = findings.get("downside:repeated-kam")
+    if repeated_kam is not None and any(
+        keyword in repeated_kam.statement for keyword in ("設備", "廠房", "折舊", "減損")
+    ):
+        documented_finding(
+            "R31",
+            "downside:repeated-kam",
+            "設備、廠房、折舊或減損估計持續被列為KAM，須追蹤稼動與可回收性。",
+            ("稼動率", "折舊開始時點", "資產減損", "KAM跨年變化"),
+            "medium",
+        )
+
+    note_by_id = dict(getattr(document_evidence, "note_citations", ()))
+    commitment_note = note_by_id.get("N13_commitments")
+    if commitment_note is not None:
+        for check_id, monitoring in (
+            ("R38", ("未付款承諾", "取消條款", "資金來源")),
+            ("I-MFG-03", ("原料長約", "不可取消承諾", "預付款", "成本轉嫁")),
+        ):
+            if (
+                check_id == "I-MFG-03"
+                and not any(
+                    keyword in commitment_note.verbatim_excerpt
+                    for keyword in ("原料", "採購", "不可取消", "預付", "長約", "設備承諾")
+                )
+            ):
+                continue
+            if check_id not in rows or rows[check_id].status == "evaluated":
+                continue
+            rows[check_id] = ChecklistCheckResult(
+                check_id=check_id,
+                domain=rows[check_id].domain,
+                applicability="triggered",
+                status="evaluated",
+                first_detectable_at=commitment_note.available_at,
+                financial_period=commitment_note.period,
+                observations=(commitment_note.verbatim_excerpt,),
+                evidence_ids=(commitment_note.evidence_id,),
+                supporting_evidence=("已取得官方重大承諾附註原文。",),
+                counterevidence=(),
+                inference_chain=("官方重大承諾附註 → 長約／承諾題",),
+                mechanism="長約、採購或其他不可取消承諾形成未來固定現金需求。",
+                leading_warnings=monitoring,
+                buffers=(),
+                monitoring_metrics=monitoring,
+                monitoring_date=None,
+                invalidation_or_resolution_conditions=("新一期官方附註更新承諾內容。",),
+                severity="medium",
+                confidence="high",
+                unresolved_reasons=(),
+            )
+    working = findings.get("downside:working-capital-discipline")
+    if working is not None and working.direction == "counter":
+        for check_id, note_id, monitoring in (
+            ("R01", "N02_receivables", ("應收相對營收", "DSO", "期後收款")),
+            ("R03", "N03_inventory", ("存貨相對營收", "週轉天數", "跌價與期後銷售")),
+        ):
+            current = rows[check_id]
+            citation = note_by_id.get(note_id)
+            if current.applicability != "triggered" or citation is None:
+                continue
+            rows[check_id] = ChecklistCheckResult(
+                check_id=check_id,
+                domain="risk",
+                applicability="triggered",
+                status="evaluated",
+                first_detectable_at=citation.available_at,
+                financial_period=current.financial_period,
+                observations=(*current.observations, working.statement, citation.verbatim_excerpt),
+                evidence_ids=tuple(dict.fromkeys((*current.evidence_ids, *working.evidence_ids, citation.evidence_id))),
+                supporting_evidence=("已讀取對應官方附註原文。",),
+                counterevidence=(working.statement,),
+                inference_chain=("量化觸發 → 年度相對增速比對 → 官方附註原文",),
+                mechanism=current.mechanism,
+                leading_warnings=monitoring,
+                buffers=("目前相對營收增速未達營運資金red flag門檻。",),
+                monitoring_metrics=monitoring,
+                monitoring_date=None,
+                invalidation_or_resolution_conditions=("後續相對增速、週轉或期後回收惡化。",),
+                severity="low",
+                confidence="medium",
+                unresolved_reasons=(),
+            )
+
+    def partial_check(
+        check_id: str,
+        observations: tuple[str, ...],
+        evidence_ids: tuple[str, ...],
+        reason: str,
+        monitoring: tuple[str, ...],
+    ) -> None:
+        if check_id not in rows or not evidence_ids:
+            return
+        rows[check_id] = ChecklistCheckResult(
+            check_id=check_id,
+            domain=rows[check_id].domain,
+            applicability="triggered",
+            status="unresolved",
+            first_detectable_at=None,
+            financial_period=None,
+            observations=observations,
+            evidence_ids=tuple(dict.fromkeys(evidence_ids)),
+            supporting_evidence=("已取得部分官方證據。",),
+            counterevidence=(),
+            inference_chain=("官方文件／canonical facts → 權威題目部分證據",),
+            mechanism="目前只完成部分證據鏈，尚不能形成最終判定。",
+            leading_warnings=monitoring,
+            buffers=(),
+            monitoring_metrics=monitoring,
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("補齊本題所有指定營運與財務證據。",),
+            severity="not_applicable",
+            confidence="low",
+            unresolved_reasons=(reason,),
+        )
+
+    if "I-MFG-03" in rows:
+        documented_finding(
+            "I-MFG-03",
+            "downside:long-term-commitments",
+            "關鍵原料、設備或能源長約及不可取消承諾形成固定採購與現金義務。",
+            ("原料長約", "不可取消承諾", "預付款", "成本轉嫁"),
+            "medium",
+        )
+
+    capex_finding = findings.get("downside:capex-intensity")
+    if capex_finding is not None:
+        kam_evidence = repeated_kam.evidence_ids if repeated_kam is not None else ()
+        kam_statement = (repeated_kam.statement,) if repeated_kam is not None else ()
+        partial_check(
+            "I-MFG-01",
+            (capex_finding.statement, *kam_statement),
+            (*capex_finding.evidence_ids, *kam_evidence),
+            "已取得CAPEX／設備與折舊KAM，但尚缺產能、稼動率及良率同期間原始數據。",
+            ("產能", "稼動率", "良率", "折舊負擔"),
+        )
+
+    inventory_note = note_by_id.get("N03_inventory")
+    if inventory_note is not None:
+        partial_check(
+            "I-MFG-02",
+            (inventory_note.verbatim_excerpt,),
+            (inventory_note.evidence_id,),
+            "已讀存貨附註，但尚未取得原料、在製品、製成品的完整跨期拆分與庫齡。",
+            ("原料", "在製品", "製成品", "庫齡與跌價"),
+        )
+
+    concentration = findings.get("downside:customer-concentration")
+    if concentration is not None:
+        partial_check(
+            "I-MFG-04",
+            (concentration.statement,),
+            tuple(concentration.evidence_ids),
+            "已取得客戶集中證據，但尚缺終端應用分布與替代客戶驗證。",
+            ("最大客戶占比", "終端應用分布", "替代客戶"),
+        )
+
+    financial_instruments = note_by_id.get("N15_financial_instruments")
+    if financial_instruments is not None:
+        partial_check(
+            "I-MFG-06",
+            (financial_instruments.verbatim_excerpt,),
+            (financial_instruments.evidence_id,),
+            "已讀金融工具附註，但尚未拆分匯率對營收、毛利與業外的不同影響。",
+            ("交易幣別", "營收匯率影響", "毛利匯率影響", "業外匯兌"),
+        )
+
+    quarter_guidance = findings.get("upside:guidance:issuer:quarter-guidance")
+    annual_guidance = findings.get("upside:guidance:issuer:annual-growth-guidance")
+    guidance_items = tuple(
+        item for item in (quarter_guidance, annual_guidance) if item is not None
+    )
+    if guidance_items:
+        guidance_observations = tuple(item.statement for item in guidance_items)
+        guidance_evidence = tuple(
+            evidence_id for item in guidance_items for evidence_id in item.evidence_ids
+        )
+        partial_check(
+            "G02",
+            guidance_observations,
+            guidance_evidence,
+            "已取得公司成長指引，但尚缺需求、訂單與產能三端交叉驗證。",
+            ("月營收加速度", "訂單／backlog", "產能利用率", "guidance達成率"),
+        )
+        partial_check(
+            "G25",
+            guidance_observations,
+            guidance_evidence,
+            "目前只有最新一期指引，尚未建立多期指引與Actual的命中紀錄。",
+            ("指引中位數", "Actual", "命中率", "修正方向"),
+        )
+
+    product_roadmap = findings.get("upside:guidance:issuer:product-roadmap")
+    if product_roadmap is not None:
+        partial_check(
+            "G19",
+            (product_roadmap.statement,),
+            tuple(product_roadmap.evidence_ids),
+            "已取得產品design-in／量產路線圖，但尚缺新品營收與毛利貢獻拆分。",
+            ("design-in", "production-ready", "ramp-up", "新品營收占比", "新品毛利率"),
+        )
+        partial_check(
+            "I-MFG-05",
+            (product_roadmap.statement,),
+            tuple(product_roadmap.evidence_ids),
+            "已取得產品路線圖，但尚缺客戶認證、design-win與量產收入的完整轉換證據。",
+            ("客戶認證", "design-win", "ramp-up", "量產收入"),
+        )
+
+    fx_one_time = findings.get("upside:guidance:issuer:fx-one-time")
+    if fx_one_time is not None:
+        partial_check(
+            "R21",
+            (fx_one_time.statement,),
+            tuple(fx_one_time.evidence_ids),
+            "已確認一次性匯兌影響，但尚缺業外各項金額占淨利的完整拆分。",
+            ("匯兌損益", "業外占淨利", "本業營業利益"),
+        )
     return tuple(rows[item.check_id] for item in checks)
 
 
@@ -610,6 +1152,10 @@ def build_checklist_assessment(
     overview = build_financial_overview(bundle)
     industry_route = _industry_route(bundle, route)
     document_evidence = getattr(detailed_analysis, "checklist_document_evidence", None)
+    if document_evidence is None:
+        document_evidence = collect_checklist_document_evidence(
+            _annual_audit_filings(bundle)
+        )
 
     if route != "general_non_financial":
         reason = "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
@@ -721,7 +1267,6 @@ def build_checklist_assessment(
         "growth_drivers_have_evidence_counterevidence_invalidation_and_monitoring": "需求至現金的成長鏈仍有未解項目。",
         "risks_have_mechanism_warning_buffer_threshold_and_monitoring": "各風險的機制、緩衝、門檻及監控尚未全部建立。",
         "history_peer_seasonality_and_business_model_considered": "同業、季節性與商業模式比較尚未全部准入。",
-        "missing_evidence_preserved_as_unresolved": "目前仍有未解證據；已保留為未解而非零風險。",
     }
     coverage.update({key: _unresolved(key, reason) for key, reason in fixed_unresolved.items()})
 
@@ -797,6 +1342,111 @@ def build_checklist_assessment(
             monitoring,
         )
 
+    checks = _document_checks(
+        _quantitative_checks(
+            overview,
+            "該題尚未完成權威逐項 producer 與反證准入。",
+            industry_route,
+        ),
+        document_evidence,
+        detailed_analysis,
+    )
+    transmission = _transmission_from_overview(overview)
+    growth_rows = tuple(item for item in checks if item.domain == "growth")
+    risk_rows = tuple(item for item in checks if item.domain == "risk")
+    growth_complete = (
+        all(item.status == "evaluated" for item in growth_rows)
+        and all(
+            item.status in {"verified", "partially_verified", "not_applicable"}
+            for item in transmission
+        )
+        and all(
+            item.judgement != "unresolved"
+            and bool(item.evidence_ids)
+            and bool(item.counterevidence)
+            and bool(item.invalidation_conditions)
+            and bool(item.monitoring_metrics)
+            for item in growth.values()
+        )
+    )
+    risk_complete = (
+        all(item.status == "evaluated" for item in risk_rows)
+        and all(
+            item.judgement != "unresolved"
+            and bool(item.evidence_ids)
+            and bool(item.leading_warnings)
+            and bool(item.buffers_and_counterevidence)
+            and bool(item.stress_transmission)
+            and bool(item.resolution_conditions)
+            and bool(item.monitoring_metrics)
+            for item in risks.values()
+        )
+    )
+    completion_evidence = tuple(
+        dict.fromkeys((*financial_ids, *monthly_ids, *audit_ids, *note_evidence_ids))
+    )
+    coverage["growth_drivers_have_evidence_counterevidence_invalidation_and_monitoring"] = (
+        _complete(
+            "growth_drivers_have_evidence_counterevidence_invalidation_and_monitoring",
+            completion_evidence,
+        )
+        if growth_complete
+        else _unresolved(
+            "growth_drivers_have_evidence_counterevidence_invalidation_and_monitoring",
+            "需求至現金的成長鏈仍有未解項目。",
+        )
+    )
+    coverage["risks_have_mechanism_warning_buffer_threshold_and_monitoring"] = (
+        _complete(
+            "risks_have_mechanism_warning_buffer_threshold_and_monitoring",
+            completion_evidence,
+        )
+        if risk_complete
+        else _unresolved(
+            "risks_have_mechanism_warning_buffer_threshold_and_monitoring",
+            "各風險的機制、緩衝、門檻及監控尚未全部建立。",
+        )
+    )
+    coverage["missing_evidence_preserved_as_unresolved"] = _complete(
+        "missing_evidence_preserved_as_unresolved", completion_evidence
+    )
+    detailed_findings = (
+        *getattr(detailed_analysis, "downside_findings", ()),
+        *getattr(detailed_analysis, "upside_findings", ()),
+    )
+    business_findings = tuple(
+        item
+        for item in detailed_findings
+        if item.finding_id == "upside:guidance:issuer:business-model"
+    )
+    context_evidence = tuple(
+        dict.fromkeys(
+            (
+                *financial_ids,
+                *monthly_ids,
+                *(
+                    evidence_id
+                    for item in business_findings
+                    for evidence_id in item.evidence_ids
+                ),
+            )
+        )
+    )
+    context_gaps: list[str] = []
+    if len(annual) < 5:
+        context_gaps.append("五年歷史")
+    if len(bundle.monthly_revenue) < 36:
+        context_gaps.append("36個月季節性")
+    if not business_findings:
+        context_gaps.append("官方商業模式")
+    context_gaps.append("同市場同業財務比較尚未接入runtime")
+    coverage["history_peer_seasonality_and_business_model_considered"] = ChecklistCoverage(
+        item_id="history_peer_seasonality_and_business_model_considered",
+        status="unresolved",
+        evidence_ids=context_evidence,
+        unresolved_reason="；".join(context_gaps),
+    )
+
     return ChecklistAssessment(
         generation_id=generation_id,
         route=route,
@@ -805,15 +1455,8 @@ def build_checklist_assessment(
         risks=tuple(risks[item] for item in RISK_DIMENSIONS),
         basis_records=basis_records,
         financial_overview=overview,
-        checks=_document_checks(
-            _quantitative_checks(
-                overview,
-                "該題尚未完成權威逐項 producer 與反證准入。",
-                industry_route,
-            ),
-            document_evidence,
-        ),
-        growth_transmission=_transmission_from_overview(overview),
+        checks=checks,
+        growth_transmission=transmission,
         industry_route=industry_route,
     )
 

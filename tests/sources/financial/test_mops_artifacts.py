@@ -1,4 +1,6 @@
 import hashlib
+import io
+import json
 from email.message import Message
 from urllib.error import HTTPError
 
@@ -10,6 +12,7 @@ from company_quality.sources.financial import (
     MopsTransport,
     Period,
     SourceArtifactError,
+    latest_published_period,
     trailing_quarters,
 )
 
@@ -42,6 +45,24 @@ def test_trailing_five_years_is_exactly_twenty_quarters() -> None:
     assert len(periods) == 20
     assert periods[0] == Period(110, 2)
     assert periods[-1] == Period(115, 1)
+
+
+def test_latest_period_falls_back_when_company_has_not_filed_market_latest_quarter(
+    monkeypatch,
+) -> None:
+    rows = [
+        {
+            "Year": "115",
+            "Season": "2",
+            "SecuritiesCompanyCode": "1234",
+        }
+    ]
+    monkeypatch.setattr(
+        "company_quality.sources.financial.urllib.request.urlopen",
+        lambda *_args, **_kwargs: io.BytesIO(json.dumps(rows).encode()),
+    )
+
+    assert latest_published_period("TPEx", "5274") == Period(115, 1)
 
 
 def test_mops_transport_retries_one_temporary_redirect(monkeypatch) -> None:

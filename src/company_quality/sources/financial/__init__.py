@@ -172,9 +172,17 @@ def latest_published_period(market: Market, security_code: str) -> Period:
         if str(row.get(year_field, "")).isdigit()
         and str(row.get(quarter_field, "")).isdigit()
     }
-    if not candidates:
-        raise SourceArtifactError("company has no official published financial quarter")
-    return max(candidates)
+    if candidates:
+        return max(candidates)
+    market_candidates = {
+        Period(int(row[year_field]), int(row[quarter_field]))
+        for row in rows
+        if str(row.get(year_field, "")).isdigit()
+        and str(row.get(quarter_field, "")).isdigit()
+    }
+    if not market_candidates:
+        raise SourceArtifactError("official latest-quarter source has no valid period")
+    return trailing_quarters(max(market_candidates), 2)[0]
 
 
 def _now() -> str:
