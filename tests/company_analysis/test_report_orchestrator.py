@@ -17,6 +17,10 @@ from company_quality.company_analysis.forecast_capital import (
     FormalForecast,
     assess_forecast_dividend_capital,
 )
+from company_quality.company_analysis.solvency_commitment_risk import (
+    SolvencyPeriodFacts,
+    assess_solvency_commitment_risk,
+)
 from company_quality.company_analysis.probability_calibration import (
     EmpiricalProbabilityCalibration,
     SingleCompanyProbabilityCalibration,
@@ -522,6 +526,42 @@ def test_forecast_capital_assessment_enters_report_and_reuses_dashboard_contract
             generated_at=GENERATED_AT,
             forecast_capital_assessment=replace(assessment, citations=()),
         )
+
+
+def test_solvency_commitment_assessment_enters_generic_report_and_dashboard_contract(
+    tmp_path: Path,
+) -> None:
+    assessment = assess_solvency_commitment_risk(
+        current=SolvencyPeriodFacts(period="115Q1"),
+        prior=SolvencyPeriodFacts(period="114Q1"),
+        as_of=AS_OF,
+        monitoring_date="2026-11-14",
+        debt_classes_complete=False,
+        maturity_schedule_complete=False,
+        cash_restrictions_complete=False,
+        long_debt_use_linked=None,
+        equity_bridge=None,
+        facility_roster_complete=False,
+        covenant_roster_complete=False,
+        lease_terms=None,
+        commitment_roster_complete=False,
+    )
+
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        solvency_commitment_assessment=assessment,
+    )
+
+    assert report.checklist_assessment is not None
+    rendered = {
+        item["check_id"]: item
+        for item in asdict(report)["checklist_assessment"]["checks"]
+    }
+    assert rendered["R10"]["status"] == "unresolved"
+    assert "總有息負債不得替代" in rendered["R10"]["unresolved_reasons"][0]
+    assert rendered["R38"]["monitoring_date"] == "2026-11-14"
 
 
 def test_same_generation_formal_calibration_enters_upside_probabilities(tmp_path: Path) -> None:
