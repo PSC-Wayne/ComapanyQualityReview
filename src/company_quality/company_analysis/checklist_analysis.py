@@ -45,6 +45,9 @@ from company_quality.company_analysis.history_context import (
     HistoricalContextAssessment,
     build_bundle_history_context,
 )
+from company_quality.company_analysis.impairment_capital_risk import (
+    ImpairmentCapitalRiskAssessment,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -52,6 +55,7 @@ from company_quality.company_analysis.solvency_commitment_risk import (
 if TYPE_CHECKING:
     from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
     from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
+    from company_quality.company_analysis.manufacturing import ManufacturingAssessment
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1250,6 +1254,44 @@ def _apply_growth_check_assessment(
     return tuple(rows[item.check_id] for item in checks)
 
 
+def _apply_manufacturing_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: ManufacturingAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Apply I-MFG-01..06 while retaining older official context when unresolved."""
+
+    if assessment is None:
+        return checks
+    rows = {item.check_id: item for item in checks}
+    for incoming in assessment.checks:
+        current = rows.get(incoming.check_id)
+        if current is None:
+            continue
+        if incoming.status == "evaluated":
+            rows[incoming.check_id] = incoming
+            continue
+        rows[incoming.check_id] = replace(
+            incoming,
+            applicability=(
+                "triggered"
+                if "triggered" in {incoming.applicability, current.applicability}
+                else "unresolved"
+            ),
+            observations=tuple(dict.fromkeys((*current.observations, *incoming.observations))),
+            evidence_ids=tuple(dict.fromkeys((*current.evidence_ids, *incoming.evidence_ids))),
+            supporting_evidence=tuple(
+                dict.fromkeys((*current.supporting_evidence, *incoming.supporting_evidence))
+            ),
+            counterevidence=tuple(
+                dict.fromkeys((*current.counterevidence, *incoming.counterevidence))
+            ),
+            unresolved_reasons=tuple(
+                dict.fromkeys((*current.unresolved_reasons, *incoming.unresolved_reasons))
+            ),
+        )
+    return tuple(rows[item.check_id] for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1267,9 +1309,11 @@ def build_checklist_assessment(
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
     growth_check_assessment: GrowthCheckAssessment | None = None,
+    impairment_capital_assessment: ImpairmentCapitalRiskAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
     historical_context: HistoricalContextAssessment | None = None,
+    manufacturing_assessment: ManufacturingAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1495,6 +1539,14 @@ def build_checklist_assessment(
         ),
         esg_legal_evidence,
     )
+    if industry_route == "manufacturing_hardware":
+        if manufacturing_assessment is None:
+            from company_quality.company_analysis.manufacturing import (
+                build_manufacturing_assessment,
+            )
+
+            manufacturing_assessment = build_manufacturing_assessment(())
+        checks = _apply_manufacturing_assessment(checks, manufacturing_assessment)
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
@@ -1507,6 +1559,15 @@ def build_checklist_assessment(
         from company_quality.sources.governance_insiders import apply_governance_checks
 
         checks = apply_governance_checks(checks, governance_evidence)
+    if impairment_capital_assessment is not None:
+        # Owns only residual R29--R36; capital-event R43--R48 stay with #124.
+        replacements = impairment_capital_assessment.by_check_id
+        checks = tuple(replacements.get(item.check_id, item) for item in checks)
+        capital_conclusion = (
+            impairment_capital_assessment.shareholder_dilution_and_capital_allocation
+        )
+        if capital_conclusion is not None:
+            risks[capital_conclusion.dimension] = capital_conclusion
     if solvency_commitment_assessment is not None:
         replacements = solvency_commitment_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)

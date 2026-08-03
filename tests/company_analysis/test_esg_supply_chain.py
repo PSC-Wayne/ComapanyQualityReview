@@ -188,7 +188,8 @@ def test_key_material_row_rejects_esg_heading_and_requires_actual_terms() -> Non
 
     assert unresolved.status == "unresolved"
     assert "實際合約" in unresolved.unresolved_reasons[0]
-    assert (triggered.status, triggered.applicability) == ("evaluated", "triggered")
+    assert (triggered.status, triggered.applicability) == ("unresolved", "triggered")
+    assert "單一附註不能完成本題" in triggered.unresolved_reasons[0]
 
 
 def test_anti_competition_zero_is_only_metric_year_and_not_no_litigation() -> None:
