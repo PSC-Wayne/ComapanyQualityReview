@@ -57,6 +57,7 @@ from company_quality.company_analysis.probability_provider import (
     calibrate_current_generation,
 )
 from company_quality.sources.financial import FinancialArtifact, MopsFinancialCollector, Period
+from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
 from company_quality.identity import (
     CompanyIdentity,
     OfficialIdentitySource,
@@ -1472,6 +1473,7 @@ def build_report_from_evidence(
     calibration_unavailable_reason: str | None = None,
     candidate_adapter: HermesCandidateAdapter | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    governance_evidence: GovernanceEvidenceCollection | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1484,6 +1486,7 @@ def build_report_from_evidence(
     checklist_assessment = build_checklist_assessment(
         bundle, generation_id, None,
         peer_financial_comparison=peer_financial_comparison,
+        governance_evidence=governance_evidence,
     )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
@@ -1530,6 +1533,7 @@ def build_report_from_evidence(
     checklist_assessment = build_checklist_assessment(
         bundle, generation_id, financial_deterioration, detailed,
         peer_financial_comparison,
+        governance_evidence,
     )
     if detailed.available:
         limitations = [
