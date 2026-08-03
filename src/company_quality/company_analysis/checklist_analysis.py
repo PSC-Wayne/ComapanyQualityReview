@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, Iterable, Literal
 
 from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.checklist_contracts import (
@@ -53,6 +55,83 @@ _CANONICAL_RISK_METRICS = {
         "common_stock_capital", ("股本", "完全稀釋股數")
     ),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class PeerFinancialComparison:
+    """Same-market, exact-official-industry comparison from MOPS facts."""
+
+    status: Literal["available", "partial", "blocked"]
+    current_period: str | None
+    prior_period: str | None
+    peer_security_codes: tuple[str, ...]
+    target_inventory_change: Decimal | None
+    peer_median_inventory_change: Decimal | None
+    target_revenue_change: Decimal | None
+    peer_median_revenue_change: Decimal | None
+    evidence_ids: tuple[str, ...]
+    source_urls: tuple[str, ...]
+    unresolved_reasons: tuple[str, ...]
+
+
+def _direction(value: Decimal) -> int:
+    return 1 if value > 0 else -1 if value < 0 else 0
+
+
+def _percent(value: Decimal | None) -> str:
+    return "unavailable" if value is None else f"{value:.2%}"
+
+
+def _apply_peer_financial_comparison(
+    checks: tuple[ChecklistCheckResult, ...],
+    comparison: PeerFinancialComparison | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    rows = {item.check_id: item for item in checks}
+    if "I-MFG-07" not in rows or comparison is None or comparison.status != "available":
+        return checks
+    if (
+        comparison.target_inventory_change is None
+        or comparison.peer_median_inventory_change is None
+        or not comparison.evidence_ids
+    ):
+        return checks
+    diverges = _direction(comparison.target_inventory_change) != _direction(
+        comparison.peer_median_inventory_change
+    )
+    observation = (
+        f"{comparison.current_period}較{comparison.prior_period}：公司存貨"
+        f"{_percent(comparison.target_inventory_change)}、同市場同官方產業同業中位數"
+        f"{_percent(comparison.peer_median_inventory_change)}；公司營收"
+        f"{_percent(comparison.target_revenue_change)}、同業營收中位數"
+        f"{_percent(comparison.peer_median_revenue_change)}。"
+    )
+    rows["I-MFG-07"] = ChecklistCheckResult(
+        check_id="I-MFG-07",
+        domain="industry",
+        applicability="triggered" if diverges else "not_triggered",
+        status="evaluated",
+        first_detectable_at=None,
+        financial_period=comparison.current_period,
+        observations=(observation,),
+        evidence_ids=comparison.evidence_ids,
+        supporting_evidence=("已取得同市場、同官方產業分類同業的同期間MOPS canonical facts。",),
+        counterevidence=((
+            "公司與同業存貨方向相反，可能是公司特有因素。"
+            if diverges
+            else "公司與同業存貨方向一致，仍須結合公司營收與跌價證據。"
+        ),),
+        inference_chain=("官方產業身分 → 同期間MOPS財務facts → 同業中位數 → 公司對照",),
+        mechanism="公司存貨若與同業方向背離，可能反映公司特有備貨、去化或產品週期差異。",
+        leading_warnings=("公司存貨年增率", "同業存貨年增率中位數", "公司與同業營收年增率"),
+        buffers=("同業比較只作公司特有與產業共同因素辨識，不單獨證明存貨安全。",),
+        monitoring_metrics=("存貨年增率", "營收年增率", "存貨週轉天數", "跌價損失"),
+        monitoring_date=None,
+        invalidation_or_resolution_conditions=("同業樣本少於3家、官方產業分類或同期間口徑改變。",),
+        severity="medium" if diverges else "low",
+        confidence="medium",
+        unresolved_reasons=(),
+    )
+    return tuple(rows[item.check_id] for item in checks)
 
 
 def _ids(values: Iterable[object]) -> tuple[str, ...]:
@@ -1138,6 +1217,7 @@ def build_checklist_assessment(
     generation_id: str,
     financial_section: FinancialDeteriorationSection | None,
     detailed_analysis: object | None = None,
+    peer_financial_comparison: PeerFinancialComparison | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1342,14 +1422,17 @@ def build_checklist_assessment(
             monitoring,
         )
 
-    checks = _document_checks(
-        _quantitative_checks(
-            overview,
-            "該題尚未完成權威逐項 producer 與反證准入。",
-            industry_route,
+    checks = _apply_peer_financial_comparison(
+        _document_checks(
+            _quantitative_checks(
+                overview,
+                "該題尚未完成權威逐項 producer 與反證准入。",
+                industry_route,
+            ),
+            document_evidence,
+            detailed_analysis,
         ),
-        document_evidence,
-        detailed_analysis,
+        peer_financial_comparison,
     )
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")
@@ -1424,6 +1507,7 @@ def build_checklist_assessment(
             (
                 *financial_ids,
                 *monthly_ids,
+                *(peer_financial_comparison.evidence_ids if peer_financial_comparison else ()),
                 *(
                     evidence_id
                     for item in business_findings
@@ -1439,12 +1523,21 @@ def build_checklist_assessment(
         context_gaps.append("36個月季節性")
     if not business_findings:
         context_gaps.append("官方商業模式")
-    context_gaps.append("同市場同業財務比較尚未接入runtime")
-    coverage["history_peer_seasonality_and_business_model_considered"] = ChecklistCoverage(
-        item_id="history_peer_seasonality_and_business_model_considered",
-        status="unresolved",
-        evidence_ids=context_evidence,
-        unresolved_reason="；".join(context_gaps),
+    if peer_financial_comparison is None or peer_financial_comparison.status != "available":
+        context_gaps.extend(
+            peer_financial_comparison.unresolved_reasons
+            if peer_financial_comparison is not None
+            else ("同市場同業財務比較尚未接入runtime",)
+        )
+    coverage["history_peer_seasonality_and_business_model_considered"] = (
+        _complete("history_peer_seasonality_and_business_model_considered", context_evidence)
+        if not context_gaps and context_evidence
+        else ChecklistCoverage(
+            item_id="history_peer_seasonality_and_business_model_considered",
+            status="unresolved",
+            evidence_ids=context_evidence,
+            unresolved_reason="；".join(context_gaps),
+        )
     )
 
     return ChecklistAssessment(
@@ -1461,4 +1554,4 @@ def build_checklist_assessment(
     )
 
 
-__all__ = ["build_checklist_assessment"]
+__all__ = ["PeerFinancialComparison", "build_checklist_assessment"]

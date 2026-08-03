@@ -12,12 +12,16 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import Iterable, Literal, Mapping, Protocol, Sequence
+from statistics import median
+from typing import Any, Iterable, Literal, Mapping, Protocol, Sequence
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from company_quality.audit.inventory import AuditFilingInventory
-from company_quality.company_analysis.checklist_analysis import build_checklist_assessment
+from company_quality.company_analysis.checklist_analysis import (
+    PeerFinancialComparison,
+    build_checklist_assessment,
+)
 from company_quality.company_analysis.contracts import (
     CaseProbability,
     DownsideCase,
@@ -52,9 +56,14 @@ from company_quality.company_analysis.probability_provider import (
     ProbabilitySourceError,
     calibrate_current_generation,
 )
-from company_quality.sources.financial import FinancialArtifact
-from company_quality.identity import CompanyIdentity, OfficialIdentitySource
-from company_quality.filing_store import FilingStoreStats
+from company_quality.sources.financial import FinancialArtifact, MopsFinancialCollector, Period
+from company_quality.identity import (
+    CompanyIdentity,
+    OfficialIdentitySource,
+    fetch_official_identity_sources,
+)
+from company_quality.facts.financial import FinancialFactParser
+from company_quality.filing_store import FilingStore, FilingStoreStats
 
 
 class ReportOrchestrationError(RuntimeError):
@@ -1260,6 +1269,200 @@ def _with_hermes_candidates(
     )
 
 
+def _peer_period(value: str) -> Period:
+    match = re.fullmatch(r"(\d{2,3})Q([1-4])", value)
+    if match is None:
+        raise ValueError("invalid peer comparison period")
+    return Period(int(match.group(1)), int(match.group(2)))
+
+
+def _fact_values(canonical: object) -> dict[str, Any]:
+    return {
+        item.concept_id: item
+        for item in getattr(canonical, "facts", ())
+        if getattr(item, "value", None) is not None
+    }
+
+
+def _growth_rate(current: Decimal, prior: Decimal) -> Decimal | None:
+    return None if prior == 0 else (current - prior) / abs(prior)
+
+
+def _blocked_peer_comparison(reason: str) -> PeerFinancialComparison:
+    return PeerFinancialComparison(
+        status="blocked",
+        current_period=None,
+        prior_period=None,
+        peer_security_codes=(),
+        target_inventory_change=None,
+        peer_median_inventory_change=None,
+        target_revenue_change=None,
+        peer_median_revenue_change=None,
+        evidence_ids=(),
+        source_urls=(),
+        unresolved_reasons=(reason,),
+    )
+
+
+def _collect_peer_financial_comparison(
+    *,
+    bundle: CompanyEvidenceBundle,
+    identity_sources: Sequence[OfficialIdentitySource],
+    output_root: Path,
+    retrieved_at: str,
+    financial_collector: Any | None = None,
+    fact_parser: Any | None = None,
+) -> PeerFinancialComparison:
+    """Collect two same-quarter MOPS periods for exact-industry same-market peers."""
+
+    industry_code = bundle.identity.industry_code
+    if not industry_code or industry_code == "17":
+        return _blocked_peer_comparison("一般公司同業比較不適用或官方產業分類缺失。")
+    decision_time = datetime.fromisoformat(bundle.request.as_of)
+    available_periods = {
+        item.period: item.canonical_financial
+        for item in bundle.periods
+        if item.canonical_financial is not None
+    }
+    if not available_periods:
+        return _blocked_peer_comparison("公司canonical financial facts缺失。")
+    current = max((_peer_period(value) for value in available_periods), key=lambda item: (item.roc_year, item.quarter))
+    prior = Period(current.roc_year - 1, current.quarter)
+    if prior.key not in available_periods:
+        return _blocked_peer_comparison("公司缺少同季去年比較期間。")
+
+    target_current = _fact_values(available_periods[current.key])
+    target_prior = _fact_values(available_periods[prior.key])
+    required = ("balance.inventories", "income.revenue")
+    if any(key not in target_current or key not in target_prior for key in required):
+        return _blocked_peer_comparison("公司存貨或營收canonical facts缺失。")
+    target_inventory = _growth_rate(
+        target_current["balance.inventories"].value,
+        target_prior["balance.inventories"].value,
+    )
+    target_revenue = _growth_rate(
+        target_current["income.revenue"].value,
+        target_prior["income.revenue"].value,
+    )
+    if target_inventory is None or target_revenue is None:
+        return _blocked_peer_comparison("公司同業比較分母為零，無法計算一般成長率。")
+
+    matching_sources = tuple(
+        source
+        for source in identity_sources
+        if source.market == bundle.identity.market
+        and datetime.fromisoformat(source.available_at) <= decision_time
+    )
+    if len(matching_sources) != 1:
+        return _blocked_peer_comparison("同市場官方公司清單來源缺失或衝突。")
+    source = matching_sources[0]
+    candidates = tuple(sorted(
+        (
+            row for row in source.rows
+            if str(row.get("security_code", "")).strip() != bundle.identity.security_code
+            and str(row.get("industry_code", "")).strip() == industry_code
+            and str(row.get("issuer_id", "")).strip()
+        ),
+        key=lambda row: str(row.get("security_code", "")).strip(),
+    ))
+    if len(candidates) < 3:
+        return _blocked_peer_comparison("同市場同官方產業分類候選同業少於3家。")
+
+    collector = financial_collector or MopsFinancialCollector()
+    parser = fact_parser or FinancialFactParser()
+    peer_inventory: list[Decimal] = []
+    peer_revenue: list[Decimal] = []
+    peer_codes: list[str] = []
+    evidence_ids = [
+        f"official-industry:{bundle.identity.market}:{industry_code}:{source.url}",
+        *(target_current[key].fact_id for key in required),
+        *(target_prior[key].fact_id for key in required),
+    ]
+    failures: list[str] = []
+    for row in candidates[:12]:
+        if len(peer_codes) == 5:
+            break
+        code = str(row.get("security_code", "")).strip()
+        facts_by_period: dict[str, dict[str, Any]] = {}
+        try:
+            for period in (prior, current):
+                collected = collector.collect_period(
+                    security_code=code,
+                    company_name=str(row.get("company_name", "")).strip(),
+                    company_short_name=str(row.get("short_name", "")).strip(),
+                    issuer_id=str(row.get("issuer_id", "")).strip(),
+                    market=bundle.identity.market,
+                    period=period,
+                    output_root=output_root / code,
+                    retrieved_at=retrieved_at,
+                    as_of=bundle.request.as_of,
+                )
+                if any(
+                    datetime.fromisoformat(item.available_at) > decision_time
+                    for item in collected.artifacts
+                ):
+                    raise ValueError("peer artifact after analysis as_of")
+                facts_by_period[period.key] = _fact_values(
+                    parser.parse(collected.artifacts)
+                )
+            if any(
+                key not in facts_by_period[period.key]
+                for period in (prior, current)
+                for key in required
+            ):
+                raise ValueError("peer inventory or revenue fact missing")
+            inventory_change = _growth_rate(
+                facts_by_period[current.key]["balance.inventories"].value,
+                facts_by_period[prior.key]["balance.inventories"].value,
+            )
+            revenue_change = _growth_rate(
+                facts_by_period[current.key]["income.revenue"].value,
+                facts_by_period[prior.key]["income.revenue"].value,
+            )
+            if inventory_change is None or revenue_change is None:
+                raise ValueError("peer comparison denominator is zero")
+            peer_inventory.append(inventory_change)
+            peer_revenue.append(revenue_change)
+            peer_codes.append(code)
+            evidence_ids.extend(
+                facts_by_period[period.key][key].fact_id
+                for period in (prior, current)
+                for key in required
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            failures.append(f"{code}:{type(exc).__name__}:{str(exc)[:120]}")
+
+    if len(peer_codes) < 3:
+        return PeerFinancialComparison(
+            status="partial" if peer_codes else "blocked",
+            current_period=current.key,
+            prior_period=prior.key,
+            peer_security_codes=tuple(peer_codes),
+            target_inventory_change=target_inventory,
+            peer_median_inventory_change=None,
+            target_revenue_change=target_revenue,
+            peer_median_revenue_change=None,
+            evidence_ids=tuple(dict.fromkeys(evidence_ids)),
+            source_urls=(source.url,),
+            unresolved_reasons=(
+                f"同期間完整同業僅{len(peer_codes)}/3；" + "；".join(failures[:3]),
+            ),
+        )
+    return PeerFinancialComparison(
+        status="available",
+        current_period=current.key,
+        prior_period=prior.key,
+        peer_security_codes=tuple(peer_codes),
+        target_inventory_change=target_inventory,
+        peer_median_inventory_change=median(peer_inventory),
+        target_revenue_change=target_revenue,
+        peer_median_revenue_change=median(peer_revenue),
+        evidence_ids=tuple(dict.fromkeys(evidence_ids)),
+        source_urls=(source.url,),
+        unresolved_reasons=(),
+    )
+
+
 def build_report_from_evidence(
     *,
     bundle: CompanyEvidenceBundle,
@@ -1268,6 +1471,7 @@ def build_report_from_evidence(
     calibration: SingleCompanyProbabilityCalibration | None = None,
     calibration_unavailable_reason: str | None = None,
     candidate_adapter: HermesCandidateAdapter | None = None,
+    peer_financial_comparison: PeerFinancialComparison | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1277,7 +1481,10 @@ def build_report_from_evidence(
         raise ReportOrchestrationError("invalid generated_at") from exc
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
-    checklist_assessment = build_checklist_assessment(bundle, generation_id, None)
+    checklist_assessment = build_checklist_assessment(
+        bundle, generation_id, None,
+        peer_financial_comparison=peer_financial_comparison,
+    )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
         None,
@@ -1321,7 +1528,8 @@ def build_report_from_evidence(
     )
     detailed = build_detailed_analysis(bundle)
     checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, financial_deterioration, detailed
+        bundle, generation_id, financial_deterioration, detailed,
+        peer_financial_comparison,
     )
     if detailed.available:
         limitations = [
@@ -1808,13 +2016,14 @@ def run_single_company_analysis(
 ) -> CompanyAnalysisResult:
     """Collect current evidence and bind the same generation to a report."""
 
+    source_set = tuple(identity_sources) if identity_sources is not None else fetch_official_identity_sources()
     bundle = collect_company_evidence_bundle(
         identifier=identifier,
         requested_market=requested_market,
         as_of=as_of,
         retrieved_at=retrieved_at,
         output_root=output_root / "evidence",
-        identity_sources=identity_sources,
+        identity_sources=source_set,
         filing_store_root=filing_store_root,
     )
     decision = datetime.fromisoformat(as_of)
@@ -1836,6 +2045,16 @@ def run_single_company_analysis(
         except ProbabilitySourceError as exc:
             calibration_error = str(exc)
     candidate_adapter = HermesApiCandidateAdapter.from_environment(generation_id)
+    peer_collector = MopsFinancialCollector(
+        filing_store=FilingStore(filing_store_root) if filing_store_root is not None else None
+    )
+    peer_financial_comparison = _collect_peer_financial_comparison(
+        bundle=bundle,
+        identity_sources=source_set,
+        output_root=output_root / "evidence" / "peer_financials",
+        retrieved_at=retrieved_at,
+        financial_collector=peer_collector,
+    )
     report = build_report_from_evidence(
         bundle=bundle,
         generation_id=generation_id,
@@ -1843,6 +2062,7 @@ def run_single_company_analysis(
         calibration=calibration,
         calibration_unavailable_reason=calibration_error,
         candidate_adapter=candidate_adapter,
+        peer_financial_comparison=peer_financial_comparison,
     )
     kam_judgement = build_kam_judgement(
         bundle=bundle,
