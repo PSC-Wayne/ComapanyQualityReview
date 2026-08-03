@@ -44,6 +44,9 @@ from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
     collect_company_evidence_bundle,
 )
+from company_quality.company_analysis.forecast_capital import (
+    ForecastDividendCapitalAssessment,
+)
 from company_quality.company_analysis.detailed_analysis import (
     build_detailed_analysis,
     build_financial_deterioration,
@@ -1106,6 +1109,25 @@ def _unique_citations(
     return tuple({item.evidence_id: item for item in citations}.values())
 
 
+def _validate_forecast_capital_citations(
+    assessment: ForecastDividendCapitalAssessment | None,
+) -> None:
+    if assessment is None:
+        return
+    referenced = {
+        evidence_id
+        for check in assessment.checks
+        for evidence_id in check.evidence_ids
+    }
+    cited = {item.evidence_id for item in assessment.citations}
+    missing = sorted(referenced - cited)
+    if missing:
+        raise ReportOrchestrationError(
+            "forecast/capital assessment has missing report citations: "
+            + ",".join(missing)
+        )
+
+
 def _with_hermes_candidates(
     *,
     report: SingleCompanyResearchReport,
@@ -1472,9 +1494,11 @@ def build_report_from_evidence(
     calibration_unavailable_reason: str | None = None,
     candidate_adapter: HermesCandidateAdapter | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
+    _validate_forecast_capital_citations(forecast_capital_assessment)
     try:
         generated = datetime.fromisoformat(generated_at)
     except ValueError as exc:
@@ -1484,6 +1508,7 @@ def build_report_from_evidence(
     checklist_assessment = build_checklist_assessment(
         bundle, generation_id, None,
         peer_financial_comparison=peer_financial_comparison,
+        forecast_capital_assessment=forecast_capital_assessment,
     )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
@@ -1495,7 +1520,11 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=(),
+            citations=(
+                _unique_citations(forecast_capital_assessment.citations)
+                if forecast_capital_assessment is not None
+                else ()
+            ),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -1514,7 +1543,14 @@ def build_report_from_evidence(
                 benchmark_outperform_probability=unavailable,
                 confidence=Decimal("0"),
             ),
-            limitations=("core_three_statements_incomplete",),
+            limitations=(
+                "core_three_statements_incomplete",
+                *(
+                    forecast_capital_assessment.limitations
+                    if forecast_capital_assessment is not None
+                    else ()
+                ),
+            ),
             checklist_assessment=checklist_assessment,
             status="blocked",
         )
@@ -1530,6 +1566,7 @@ def build_report_from_evidence(
     checklist_assessment = build_checklist_assessment(
         bundle, generation_id, financial_deterioration, detailed,
         peer_financial_comparison,
+        forecast_capital_assessment,
     )
     if detailed.available:
         limitations = [
@@ -1542,7 +1579,11 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=_unique_citations((*detailed.citations, *financial_citations)),
+            citations=_unique_citations((
+                *detailed.citations,
+                *financial_citations,
+                *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+            )),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -1563,7 +1604,10 @@ def build_report_from_evidence(
                 benchmark_outperform_probability=outperform,
                 confidence=detailed.upside_confidence,
             ),
-            limitations=tuple(limitations),
+            limitations=tuple((
+                *limitations,
+                *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+            )),
             financial_deterioration=financial_deterioration,
             checklist_assessment=checklist_assessment,
         )
@@ -1604,7 +1648,11 @@ def build_report_from_evidence(
         request=bundle.request,
         generation_id=generation_id,
         generated_at=generated_at,
-        citations=_unique_citations((citation, *financial_citations)),
+        citations=_unique_citations((
+            citation,
+            *financial_citations,
+            *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+        )),
         source_coverage=bundle.source_coverage,
         downside=DownsideCase(
             generation_id=generation_id,
@@ -1628,7 +1676,10 @@ def build_report_from_evidence(
             benchmark_outperform_probability=outperform,
             confidence=Decimal("0.10"),
         ),
-        limitations=tuple(limitations),
+        limitations=tuple((
+            *limitations,
+            *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+        )),
         financial_deterioration=financial_deterioration,
         checklist_assessment=checklist_assessment,
     )

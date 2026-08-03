@@ -12,6 +12,11 @@ from typing import Any, cast
 import pytest
 
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle, PeriodEvidence
+from company_quality.company_analysis.forecast_capital import (
+    ActualResult,
+    FormalForecast,
+    assess_forecast_dividend_capital,
+)
 from company_quality.company_analysis.probability_calibration import (
     EmpiricalProbabilityCalibration,
     SingleCompanyProbabilityCalibration,
@@ -49,7 +54,11 @@ from company_quality.company_analysis.report_orchestrator import (
     build_report_from_evidence,
     publish_four_downside_sections,
 )
-from company_quality.company_analysis.contracts import CompanyAnalysisRequest, SourceCoverage
+from company_quality.company_analysis.contracts import (
+    CompanyAnalysisRequest,
+    EvidenceCitation,
+    SourceCoverage,
+)
 from company_quality.dashboard_server import _INDEX
 from company_quality.identity import CompanyIdentity
 from company_quality.sources.financial import FinancialArtifact, PeriodCollection
@@ -384,6 +393,82 @@ def test_builds_valid_blocked_report_without_inventing_narrative(tmp_path: Path)
     assert report.citations[0].source_format == "html"
     assert "綜合損益表" in report.citations[0].verbatim_excerpt
     assert "KAM" in " ".join(report.limitations)
+
+
+def test_forecast_capital_assessment_enters_report_and_reuses_dashboard_contract(
+    tmp_path: Path,
+) -> None:
+    citations = tuple(
+        EvidenceCitation(
+            evidence_id=evidence_id,
+            source_id=source_id,
+            source_tier="official",
+            url=f"https://official.example/{source_id}",
+            content_sha256=sha256(evidence_id.encode()).hexdigest(),
+            period="115Q2",
+            available_at="2026-05-01T18:00:00+08:00",
+            page=None,
+            coordinate=None,
+            verbatim_excerpt=evidence_id,
+            source_format="json",
+            locator=f"json:{evidence_id}",
+        )
+        for evidence_id, source_id in (
+            ("forecast-window", "twse-openapi:t187ap15_L"),
+            ("forecast-filing", "mops-formal-forecast-filing"),
+            ("forecast-actual", "mops-financial-statement"),
+        )
+    )
+    assessment = assess_forecast_dividend_capital(
+        forecast_window_status="available",
+        formal_forecasts=(FormalForecast(
+            forecast_id="forecast-1",
+            fiscal_period="115Q2",
+            period_basis="year_to_date",
+            metric="pretax_income",
+            lower=Decimal("90"),
+            upper=Decimal("110"),
+            revision_sequence=1,
+            announced_at="2026-05-01T18:00:00+08:00",
+            source_window_evidence_id="forecast-window",
+            original_filing_evidence_id="forecast-filing",
+        ),),
+        actuals=(ActualResult(
+            fiscal_period="115Q2",
+            period_basis="year_to_date",
+            metric="pretax_income",
+            value=Decimal("105"),
+            evidence_id="forecast-actual",
+        ),),
+        citations=citations,
+    )
+
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        forecast_capital_assessment=assessment,
+    )
+
+    assert report.checklist_assessment is not None
+    g25 = next(
+        item for item in report.checklist_assessment.checks if item.check_id == "G25"
+    )
+    assert g25.status == "evaluated"
+    assert g25.evidence_ids == (
+        "forecast-window",
+        "forecast-filing",
+        "forecast-actual",
+    )
+    assert {item.evidence_id for item in report.citations}.issuperset(g25.evidence_ids)
+    assert "正式財測來源視窗或原始申報尚未完成。" not in report.limitations
+    with pytest.raises(ReportOrchestrationError, match="missing report citations"):
+        build_report_from_evidence(
+            bundle=_bundle(tmp_path),
+            generation_id=GENERATION,
+            generated_at=GENERATED_AT,
+            forecast_capital_assessment=replace(assessment, citations=()),
+        )
 
 
 def test_same_generation_formal_calibration_enters_upside_probabilities(tmp_path: Path) -> None:

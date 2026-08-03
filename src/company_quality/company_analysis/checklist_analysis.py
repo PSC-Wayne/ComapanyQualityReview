@@ -34,6 +34,9 @@ from company_quality.company_analysis.checklist_evidence import (
     collect_checklist_document_evidence,
 )
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
+from company_quality.company_analysis.forecast_capital import (
+    ForecastDividendCapitalAssessment,
+)
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1218,6 +1221,7 @@ def build_checklist_assessment(
     financial_section: FinancialDeteriorationSection | None,
     detailed_analysis: object | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1434,6 +1438,9 @@ def build_checklist_assessment(
         ),
         peer_financial_comparison,
     )
+    if forecast_capital_assessment is not None:
+        replacements = forecast_capital_assessment.by_check_id
+        checks = tuple(replacements.get(item.check_id, item) for item in checks)
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")
     risk_rows = tuple(item for item in checks if item.domain == "risk")
