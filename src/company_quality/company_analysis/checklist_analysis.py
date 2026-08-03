@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
     from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
     from company_quality.company_analysis.manufacturing import ManufacturingAssessment
+    from company_quality.company_analysis.ecommerce_epc import EcommerceEpcAssessment
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -412,9 +413,19 @@ def _equity_cross_check_complete(period: object) -> bool:
     return balance is not None and equity is not None and balance == equity
 
 
-def _industry_route(bundle: CompanyEvidenceBundle, route: CompanyRoute) -> IndustryRoute:
+def _industry_route(
+    bundle: CompanyEvidenceBundle,
+    route: CompanyRoute,
+    ecommerce_epc_assessment: EcommerceEpcAssessment | None = None,
+) -> IndustryRoute:
     if route != "general_non_financial":
         return "financial"
+    # E-commerce and EPC are business models, not broad industry-code aliases.
+    if (
+        ecommerce_epc_assessment is not None
+        and ecommerce_epc_assessment.route_status == "routed"
+    ):
+        return ecommerce_epc_assessment.route  # type: ignore[return-value]
     code = bundle.identity.industry_code
     if code == "30":
         return "software_ai"
@@ -1292,6 +1303,18 @@ def _apply_manufacturing_assessment(
     return tuple(rows[item.check_id] for item in checks)
 
 
+def _apply_ecommerce_epc_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: EcommerceEpcAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Apply only rows selected by the official business-model route."""
+
+    if assessment is None or assessment.route_status != "routed":
+        return checks
+    replacements = assessment.by_check_id
+    return tuple(replacements.get(item.check_id, item) for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1314,6 +1337,7 @@ def build_checklist_assessment(
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
     historical_context: HistoricalContextAssessment | None = None,
     manufacturing_assessment: ManufacturingAssessment | None = None,
+    ecommerce_epc_assessment: EcommerceEpcAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1326,7 +1350,7 @@ def build_checklist_assessment(
     audit_ids = _ids(_audit_artifacts(bundle))
     basis_records = _basis_records(bundle)
     overview = build_financial_overview(bundle)
-    industry_route = _industry_route(bundle, route)
+    industry_route = _industry_route(bundle, route, ecommerce_epc_assessment)
     context = historical_context or build_bundle_history_context(bundle)
     if context.issuer_id != bundle.identity.issuer_id:
         raise ValueError("historical context issuer mismatch")
@@ -1547,6 +1571,8 @@ def build_checklist_assessment(
 
             manufacturing_assessment = build_manufacturing_assessment(())
         checks = _apply_manufacturing_assessment(checks, manufacturing_assessment)
+    if industry_route in {"ecommerce_platform", "project_engineering_epc"}:
+        checks = _apply_ecommerce_epc_assessment(checks, ecommerce_epc_assessment)
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
