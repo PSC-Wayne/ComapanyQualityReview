@@ -449,25 +449,24 @@ def build_esg_legal_evidence(
             observations=("OpenAPI供應商稽核欄位僅作供應鏈管理context。",) if supplier_context else (),
         )
 
-    key_claims = tuple(item for item in _claims(claims, "key_material_commitment") if _admitted_key_material(item))
-    if key_claims:
-        key_material = _evaluated(
-            "I-MFG-03",
-            "industry",
-            key_claims[0],
-            mechanism="關鍵原料長約、預付款或不可取消承諾形成固定採購與現金義務。",
-            monitoring=("合約期間", "預付款", "不可取消金額", "需求與成本轉嫁"),
-        )
-    else:
-        key_material = _unresolved(
-            "I-MFG-03",
-            "industry",
-            "ESG標題或一般關鍵字不是實際合約；尚缺年報承諾附註或IR中的關鍵材料長約、預付款或不可取消條款。",
-            evidence_ids=tuple(
-                item.citation.evidence_id
-                for item in _claims(claims, "key_material_commitment")
-            ),
-        )
+    key_material_ids = tuple(
+        item.citation.evidence_id for item in _claims(claims, "key_material_commitment")
+    )
+    admitted_key_material = tuple(
+        item for item in _claims(claims, "key_material_commitment") if _admitted_key_material(item)
+    )
+    key_material = _unresolved(
+        "I-MFG-03",
+        "industry",
+        (
+            "已取得部分關鍵材料合約context，但仍須由製造業producer完成簽署承諾、長期／不可取消／預付款、取消條款與需求支持；單一附註不能完成本題。"
+            if admitted_key_material
+            else "ESG標題、一般關鍵字或current-feed absence不是實際合約；尚缺製造業producer要求的完整條款與需求支持。"
+        ),
+        evidence_ids=key_material_ids,
+        observations=tuple(item.citation.verbatim_excerpt for item in admitted_key_material),
+        applicability="triggered" if any(item.signal == "risk" for item in admitted_key_material) else "unresolved",
+    )
 
     litigation_claims = tuple(item for item in _claims(claims, "litigation_contingency") if _admitted_litigation(item))
     risk_claim = next((item for item in litigation_claims if item.signal == "risk"), None)
