@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
     from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
     from company_quality.company_analysis.manufacturing import ManufacturingAssessment
+    from company_quality.company_analysis.special_industries import SpecialIndustryAssessment
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -420,7 +421,7 @@ def _industry_route(bundle: CompanyEvidenceBundle, route: CompanyRoute) -> Indus
         return "software_ai"
     if code == "22":
         return "biotech"
-    if code == "23":
+    if code in {"23", "35"}:
         return "energy"
     if code in {"01", "02", "03", "04", "05", "06", "08", "09", "10", "11", "12", "21", "24", "25", "26", "27", "28", "31"}:
         return "manufacturing_hardware"
@@ -1292,6 +1293,21 @@ def _apply_manufacturing_assessment(
     return tuple(rows[item.check_id] for item in checks)
 
 
+def _apply_special_industry_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: SpecialIndustryAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Apply the exact routed biotech or energy rows, preserving checklist order."""
+
+    if assessment is None:
+        return checks
+    rows = {item.check_id: item for item in checks}
+    for incoming in assessment.checks:
+        if incoming.check_id in rows:
+            rows[incoming.check_id] = incoming
+    return tuple(rows[item.check_id] for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1314,6 +1330,7 @@ def build_checklist_assessment(
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
     historical_context: HistoricalContextAssessment | None = None,
     manufacturing_assessment: ManufacturingAssessment | None = None,
+    special_industry_assessment: SpecialIndustryAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1327,6 +1344,11 @@ def build_checklist_assessment(
     basis_records = _basis_records(bundle)
     overview = build_financial_overview(bundle)
     industry_route = _industry_route(bundle, route)
+    if special_industry_assessment is not None:
+        if special_industry_assessment.issuer_id != bundle.identity.issuer_id:
+            raise ValueError("special-industry assessment issuer mismatch")
+        if special_industry_assessment.industry_route != industry_route:
+            raise ValueError("special-industry assessment route mismatch")
     context = historical_context or build_bundle_history_context(bundle)
     if context.issuer_id != bundle.identity.issuer_id:
         raise ValueError("historical context issuer mismatch")
@@ -1547,6 +1569,10 @@ def build_checklist_assessment(
 
             manufacturing_assessment = build_manufacturing_assessment(())
         checks = _apply_manufacturing_assessment(checks, manufacturing_assessment)
+    if industry_route in {"biotech", "energy"}:
+        checks = _apply_special_industry_assessment(
+            checks, special_industry_assessment
+        )
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
