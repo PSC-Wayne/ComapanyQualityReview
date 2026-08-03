@@ -128,6 +128,40 @@ def _first_match(
     return None
 
 
+def _first_note_match(
+    audit: AuditFilingInventory,
+    document: fitz.Document,
+    *,
+    slug: str,
+    keywords: tuple[str, ...],
+    following: int,
+) -> EvidenceCitation | None:
+    """Prefer an actual note heading over incidental table/body mentions."""
+    for page_index in range(len(document)):
+        page = document[page_index]
+        blocks = _blocks(page)
+        for index, (_, text) in enumerate(blocks):
+            compact = "".join(text.split())
+            positions = [
+                compact.find("".join(keyword.split()))
+                for keyword in keywords
+                if "".join(keyword.split()) in compact
+            ]
+            if not positions or min(positions) > 16:
+                continue
+            return _citation(
+                audit,
+                slug=slug,
+                page_index=page_index,
+                blocks=blocks,
+                index=index,
+                following=following,
+                page_width=float(page.rect.width),
+                page_height=float(page.rect.height),
+            )
+    return None
+
+
 def _ocr_missing_audit_sections(
     audit: AuditFilingInventory,
     document: fitz.Document,
@@ -294,7 +328,7 @@ def collect_checklist_document_evidence(
                 text_search_complete.append(audit.period)
             if position == len(annual) - 1:
                 for check_id, keywords in _NOTE_KEYWORDS.items():
-                    citation = _first_match(
+                    citation = _first_note_match(
                         audit,
                         document,
                         slug=check_id,

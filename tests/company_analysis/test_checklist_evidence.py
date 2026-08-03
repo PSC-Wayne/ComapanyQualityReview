@@ -8,15 +8,18 @@ from company_quality.company_analysis.checklist_evidence import (
     collect_checklist_document_evidence,
 )
 from company_quality.company_analysis.checklist_analysis import (
+    _annual_audit_filings,
     _document_checks,
     _placeholder_checks,
 )
 
 
-NOTE_TEXT = (
-    "收入認列 應收帳款 存貨 合約資產 不動產、廠房及設備 商譽 借款 "
-    "流動性風險 受限制資產 關係人交易 背書保證 或有事項 重大承諾 "
-    "所得稅 金融工具 股份基礎給付 每股盈餘 部門資訊 期後事項"
+NOTE_HEADINGS = (
+    "一、收入認列", "二、應收帳款", "三、存貨", "四、合約資產",
+    "五、不動產、廠房及設備", "六、商譽", "七、借款", "八、流動性風險",
+    "九、受限制資產", "十、關係人交易", "十一、背書保證", "十二、或有事項",
+    "十三、重大承諾", "十四、所得稅", "十五、金融工具", "十六、股份基礎給付",
+    "十七、每股盈餘", "十八、部門資訊", "十九、期後事項",
 )
 
 
@@ -27,12 +30,11 @@ def _audit(tmp_path, period: str, include_notes: bool = False):
     page.insert_text((50, 100), "關鍵查核事項", fontname="china-ts", fontsize=11)
     page.insert_text((50, 130), "收入認列估計與資產減損係本期關鍵查核事項。", fontname="china-ts", fontsize=11)
     if include_notes:
-        page.insert_textbox(
-            fitz.Rect(50, 170, 540, 780),
-            NOTE_TEXT,
-            fontname="china-ts",
-            fontsize=9,
-        )
+        for index, heading in enumerate(NOTE_HEADINGS):
+            page.insert_text(
+                (50, 170 + index * 20), heading,
+                fontname="china-ts", fontsize=9,
+            )
     path = tmp_path / f"{period}.pdf"
     document.save(path)
     document.close()
@@ -110,3 +112,16 @@ def test_hash_mismatch_is_unreadable_and_never_admitted(tmp_path) -> None:
     assert result.audit_opinion_citations == ()
     assert result.kam_citations == ()
     assert result.note_citations == ()
+
+
+def test_fallback_document_collection_selects_annual_audits_only(tmp_path) -> None:
+    annual = _audit(tmp_path, "114Q4", include_notes=True)
+    quarter = _audit(tmp_path, "115Q1")
+    bundle = SimpleNamespace(
+        periods=(
+            SimpleNamespace(is_annual=True, audit=annual),
+            SimpleNamespace(is_annual=False, audit=quarter),
+        )
+    )
+
+    assert _annual_audit_filings(cast(Any, bundle)) == (annual,)

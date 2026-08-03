@@ -27,6 +27,8 @@ _IR_PAGE = "https://mopsov.twse.com.tw/mops/web/t100sb02_1"
 _IR_QUERY = "https://mopsov.twse.com.tw/mops/web/ajax_t100sb02_1"
 _IR_DOWNLOAD = "https://mopsov.twse.com.tw/server-java/FileDownLoad"
 _CTCI_PARSED_PRESENTATION = "993320260514M001.pdf"
+_TSMC_PARSED_PRESENTATION = "233020260716M001.pdf"
+_ASPEED_PARSED_PRESENTATION = "527420260529M001.pdf"
 _SEC_CTCI_PROFILE = (
     (
         "industry:tsmc:q2-2026-demand",
@@ -470,6 +472,87 @@ def _ctci_guidance_facts(
     return tuple(facts)
 
 
+def _verified_issuer_guidance_facts(
+    security_code: str,
+    pages: tuple[str, ...],
+    artifact: _StoredArtifact,
+    record: _IRRecord,
+) -> tuple[GuidanceFact, ...]:
+    profiles: dict[
+        str,
+        tuple[
+            tuple[
+                str, str, str, Literal["support", "counter", "context"],
+                str, tuple[str, ...],
+            ], ...
+        ],
+    ] = {
+        "2330": (
+            (
+                "issuer:quarter-guidance", "2026年第三季業績展望",
+                "台積公司2026年第三季官方展望：美元營收446億至458億元、毛利率65%至67%、營業利益率56%至58%；屬公司指引而非已實現結果。",
+                "support", "0.95", ("446", "458", "65", "67", "56", "58"),
+            ),
+            (
+                "issuer:annual-growth-guidance", "未來展望",
+                "台積公司官方簡報預期2026年美元合併營收成長略高於40%；實際結果仍受前瞻性風險影響。",
+                "support", "0.95", ("2026", "40%"),
+            ),
+        ),
+        "5274": (
+            (
+                "issuer:quarter-guidance", "2026年第三季營運展望",
+                "信驊官方展望在美元兌新台幣31.6假設下，2026年第三季合併營收41億至43億元、毛利率67%至68%；屬公司指引而非已實現結果。",
+                "support", "0.95", ("31.6", "41", "43", "67%", "68%"),
+            ),
+            (
+                "issuer:product-roadmap", "產品路線圖",
+                "信驊官方產品路線圖逐產品列示Design-in、Production-ready與Ramp-up時程，包含AST2700、AST1700、AST1040、AST1080及AST1840。",
+                "support", "0.92", ("Design-in", "Production-ready", "Ramp-up", "AST2700", "AST1840"),
+            ),
+            (
+                "issuer:business-model", "公司簡介",
+                "信驊官方簡報載明其為無晶圓廠IC設計公司，產品組合涵蓋企業及雲端BMC/BIC/PFR與智慧AV。",
+                "context", "0.95", ("無晶圓廠", "BMC", "智慧AV"),
+            ),
+            (
+                "issuer:fx-one-time", "本期淨利",
+                "信驊官方簡報註明2025年第二季淨利受一次性匯兌損失影響、第三季則有匯兌利益，須與本業營運分開解讀。",
+                "counter", "0.92", ("one-time FX loss", "FX gain"),
+            ),
+        ),
+    }
+    facts: list[GuidanceFact] = []
+    for fact_id, marker, statement, direction, confidence, required in profiles.get(
+        security_code, ()
+    ):
+        found = next(
+            (
+                (page_number, page_text)
+                for page_number, page_text in enumerate(pages, start=1)
+                if marker in page_text
+                and all(value in page_text for value in required)
+            ),
+            None,
+        )
+        if found is None:
+            continue
+        page_number, page_text = found
+        facts.append(
+            _pdf_fact(
+                fact_id=fact_id,
+                statement=statement,
+                direction=direction,
+                confidence=confidence,
+                period=record.event_date.isoformat(),
+                page_number=page_number,
+                page_text=page_text,
+                artifact=artifact,
+            )
+        )
+    return tuple(facts)
+
+
 def _sec_fact(
     *,
     fact_id: str,
@@ -594,12 +677,24 @@ class GuidanceIndustryCollector:
             pages = _pdf_pages(artifact.body)
             if security_code == "9933" and latest.chinese_filename == _CTCI_PARSED_PRESENTATION:
                 facts.extend(_ctci_guidance_facts(pages, artifact, latest))
+            elif (
+                security_code == "2330"
+                and latest.chinese_filename == _TSMC_PARSED_PRESENTATION
+            ) or (
+                security_code == "5274"
+                and latest.chinese_filename == _ASPEED_PARSED_PRESENTATION
+            ):
+                facts.extend(
+                    _verified_issuer_guidance_facts(
+                        security_code, pages, artifact, latest
+                    )
+                )
             elif security_code == "9933":
                 limitations.append(
                     "最新中鼎法說PDF已保存，但版型／數值尚未加入已驗證parser profile，未自動推論。"
                 )
             else:
-                limitations.append("目前guidance結構化抽取僅完成9933 profile；原始法說PDF已保存但未自動推論。")
+                limitations.append("最新法說PDF尚未加入已驗證issuer profile；原始檔已保存但未自動推論。")
 
         if security_code == "9933":
             for fact_id, available_at, source_url, needle in _SEC_CTCI_PROFILE:

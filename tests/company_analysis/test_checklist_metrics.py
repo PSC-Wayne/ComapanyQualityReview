@@ -114,9 +114,13 @@ def test_overview_uses_five_annual_and_four_recent_quarters_with_correct_flows()
     assert diluted_shares.approximation_reason == "Q4單季EPS不能由年度EPS嚴格差分；不提供近似稀釋股數。"
 
     checks = {item.check_id: item for item in _quantitative_checks(overview, "missing")}
-    assert checks["G01"].status == "evaluated"
+    assert checks["G01"].status == "unresolved"
+    assert checks["G01"].applicability == "triggered"
     assert checks["R10"].status == "evaluated"
+    assert checks["R10"].applicability == "not_triggered"
+    assert checks["R10"].monitoring_metrics[0] == "有息負債"
     assert checks["G22"].status == "unresolved"
+    assert checks["G22"].applicability == "triggered"
     assert checks["N01_revenue_recognition"].status == "unresolved"
 
     transmission = {item.stage: item for item in _transmission_from_overview(overview)}
