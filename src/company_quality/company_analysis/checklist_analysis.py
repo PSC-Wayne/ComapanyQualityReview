@@ -59,6 +59,9 @@ if TYPE_CHECKING:
     from company_quality.company_analysis.ecommerce_epc import EcommerceEpcAssessment
     from company_quality.company_analysis.software_ai import SoftwareAIAssessment
     from company_quality.company_analysis.special_industries import SpecialIndustryAssessment
+    from company_quality.company_analysis.financial_institutions import (
+        FinancialInstitutionAssessment,
+    )
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1326,6 +1329,18 @@ def _apply_ecommerce_epc_assessment(
     return tuple(replacements.get(item.check_id, item) for item in checks)
 
 
+def _apply_financial_institution_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: FinancialInstitutionAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Overlay only I-FIN rows from a reliably routed dedicated assessment."""
+
+    if assessment is None or assessment.route_status != "routed":
+        return checks
+    replacements = assessment.by_check_id
+    return tuple(replacements.get(item.check_id, item) for item in checks)
+
+
 def _apply_software_ai_assessment(
     checks: tuple[ChecklistCheckResult, ...],
     assessment: SoftwareAIAssessment | None,
@@ -1381,9 +1396,21 @@ def build_checklist_assessment(
     ecommerce_epc_assessment: EcommerceEpcAssessment | None = None,
     software_ai_assessment: SoftwareAIAssessment | None = None,
     special_industry_assessment: SpecialIndustryAssessment | None = None,
+    financial_institution_assessment: FinancialInstitutionAssessment | None = None,
 ) -> ChecklistAssessment:
+    if financial_institution_assessment is not None:
+        if financial_institution_assessment.issuer_id != bundle.identity.issuer_id:
+            raise ValueError("financial institution assessment issuer mismatch")
+        if financial_institution_assessment.security_code != bundle.identity.security_code:
+            raise ValueError("financial institution assessment security code mismatch")
+        if financial_institution_assessment.as_of != bundle.request.as_of:
+            raise ValueError("financial institution assessment as_of mismatch")
     route: CompanyRoute = (
-        "financial_institution_unrouted"
+        financial_institution_assessment.company_route
+        if bundle.identity.industry_code == "17"
+        and financial_institution_assessment is not None
+        and financial_institution_assessment.route_status == "routed"
+        else "financial_institution_unrouted"
         if bundle.identity.industry_code == "17"
         else "general_non_financial"
     )
@@ -1392,7 +1419,8 @@ def build_checklist_assessment(
     monthly_ids = _ids(bundle.monthly_revenue)
     audit_ids = _ids(_audit_artifacts(bundle))
     basis_records = _basis_records(bundle)
-    overview = build_financial_overview(bundle)
+    # A financial issuer must never execute the general-company quantitative model.
+    overview = build_financial_overview(bundle) if route == "general_non_financial" else None
     context = historical_context or build_bundle_history_context(bundle)
     if context.issuer_id != bundle.identity.issuer_id:
         raise ValueError("historical context issuer mismatch")
@@ -1411,7 +1439,20 @@ def build_checklist_assessment(
         )
 
     if route != "general_non_financial":
-        reason = "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
+        routed = (
+            financial_institution_assessment is not None
+            and financial_institution_assessment.route_status == "routed"
+        )
+        reason = (
+            f"金融issuer已可靠分流為{route}；一般公司量化模型不適用，僅使用subtype專用I-FIN列。"
+            if routed
+            else "金融保險業須使用專用模型；目前尚未可靠細分銀行、壽險、產險或證券。"
+        )
+        checks = _placeholder_checks(reason, industry_route)
+        if routed:
+            checks = _apply_financial_institution_assessment(
+                checks, financial_institution_assessment
+            )
         return ChecklistAssessment(
             generation_id=generation_id,
             route=route,
@@ -1420,7 +1461,7 @@ def build_checklist_assessment(
             risks=tuple(_risk_unresolved(item, reason) for item in RISK_DIMENSIONS),
             basis_records=basis_records,
             financial_overview=overview,
-            checks=_placeholder_checks(reason, industry_route),
+            checks=checks,
             growth_transmission=_transmission(reason),
             industry_route=industry_route,
             historical_context=context,
