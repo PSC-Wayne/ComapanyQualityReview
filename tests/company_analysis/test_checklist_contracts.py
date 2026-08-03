@@ -7,11 +7,17 @@ import pytest
 from company_quality.company_analysis.checklist_analysis import (
     _CANONICAL_GROWTH_METRICS,
     _CANONICAL_RISK_METRICS,
+    PeerFinancialComparison,
+    _apply_peer_financial_comparison,
     _document_checks,
     _placeholder_checks,
     _quantitative_checks,
     _ids,
 )
+from company_quality.company_analysis.report_orchestrator import (
+    _collect_peer_financial_comparison,
+)
+from company_quality.identity import OfficialIdentitySource
 
 from company_quality.company_analysis.checklist_contracts import (
     AUDIT_CHECK_IDS,
@@ -403,3 +409,111 @@ def test_unresolved_check_fails_closed() -> None:
     assessment = _assessment(checks=(first, *_checks()[1:]))
     assert assessment.detailed_check_complete is False
     assert "G01證據不足" in assessment.unresolved_reasons
+
+
+def test_peer_inventory_comparison_evaluates_manufacturing_check() -> None:
+    comparison = PeerFinancialComparison(
+        status="available",
+        current_period="115Q1",
+        prior_period="114Q1",
+        peer_security_codes=("2303", "2454", "3711"),
+        target_inventory_change=Decimal("0.12"),
+        peer_median_inventory_change=Decimal("-0.03"),
+        target_revenue_change=Decimal("0.20"),
+        peer_median_revenue_change=Decimal("0.04"),
+        evidence_ids=("target:inventory", "peer:inventory"),
+        source_urls=("https://official.example/company-list",),
+        unresolved_reasons=(),
+    )
+
+    rows = {
+        item.check_id: item
+        for item in _apply_peer_financial_comparison(
+            _placeholder_checks("missing", "manufacturing_hardware"), comparison
+        )
+    }
+
+    assert rows["I-MFG-07"].status == "evaluated"
+    assert rows["I-MFG-07"].applicability == "triggered"
+    assert "12.00%" in rows["I-MFG-07"].observations[0]
+    assert "-3.00%" in rows["I-MFG-07"].observations[0]
+    assert rows["I-MFG-07"].evidence_ids == comparison.evidence_ids
+
+
+def test_peer_financial_collector_uses_exact_same_market_industry_and_two_periods(tmp_path) -> None:
+    target_facts = {
+        "115Q1": SimpleNamespace(
+            facts=(
+                SimpleNamespace(concept_id="balance.inventories", value=Decimal("112"), fact_id="target:inv:new"),
+                SimpleNamespace(concept_id="income.revenue", value=Decimal("120"), fact_id="target:rev:new"),
+            )
+        ),
+        "114Q1": SimpleNamespace(
+            facts=(
+                SimpleNamespace(concept_id="balance.inventories", value=Decimal("100"), fact_id="target:inv:old"),
+                SimpleNamespace(concept_id="income.revenue", value=Decimal("100"), fact_id="target:rev:old"),
+            )
+        ),
+    }
+    bundle = SimpleNamespace(
+        request=SimpleNamespace(as_of="2026-08-03T12:00:00+08:00"),
+        identity=SimpleNamespace(
+            security_code="2330", issuer_id="22099131", market="TWSE", industry_code="24"
+        ),
+        periods=tuple(
+            SimpleNamespace(period=period, canonical_financial=facts)
+            for period, facts in target_facts.items()
+        ),
+    )
+    rows = (
+        {"security_code": "2330", "issuer_id": "22099131", "company_name": "台灣積體電路製造股份有限公司", "short_name": "台積電", "listing_date": "831205", "industry_code": "24"},
+        {"security_code": "2303", "issuer_id": "47217677", "company_name": "聯華電子股份有限公司", "short_name": "聯電", "listing_date": "740716", "industry_code": "24"},
+        {"security_code": "2454", "issuer_id": "84149961", "company_name": "聯發科技股份有限公司", "short_name": "聯發科", "listing_date": "900723", "industry_code": "24"},
+        {"security_code": "3711", "issuer_id": "55991080", "company_name": "日月光投資控股股份有限公司", "short_name": "日月光投控", "listing_date": "1070430", "industry_code": "24"},
+        {"security_code": "5274", "issuer_id": "16749055", "company_name": "信驊科技股份有限公司", "short_name": "信驊", "listing_date": "1020430", "industry_code": "24"},
+        {"security_code": "9999", "issuer_id": "00000000", "company_name": "其他產業", "short_name": "其他", "listing_date": "1020430", "industry_code": "25"},
+    )
+    source = OfficialIdentitySource(
+        market="TWSE",
+        url="https://official.example/company-list",
+        available_at="2026-08-03T00:00:00+08:00",
+        rows=rows,
+    )
+
+    class Collector:
+        def collect_period(self, **kwargs):
+            return SimpleNamespace(
+                artifacts=(SimpleNamespace(
+                    security_code=kwargs["security_code"], period=kwargs["period"].key,
+                    available_at="2026-08-03T09:00:00+08:00",
+                ),)
+            )
+
+    class Parser:
+        def parse(self, artifacts):
+            artifact = artifacts[0]
+            current = artifact.period == "115Q1"
+            code = artifact.security_code
+            base = {"2303": Decimal("100"), "2454": Decimal("200"), "3711": Decimal("300"), "5274": Decimal("400")}[code]
+            inventory = base * (Decimal("1.10") if current else Decimal("1"))
+            revenue = base * (Decimal("1.05") if current else Decimal("1"))
+            return SimpleNamespace(facts=(
+                SimpleNamespace(concept_id="balance.inventories", value=inventory, fact_id=f"{code}:inv:{artifact.period}"),
+                SimpleNamespace(concept_id="income.revenue", value=revenue, fact_id=f"{code}:rev:{artifact.period}"),
+            ))
+
+    result = _collect_peer_financial_comparison(
+        bundle=bundle,
+        identity_sources=(source,),
+        output_root=tmp_path,
+        retrieved_at="2026-08-03T10:00:00+08:00",
+        financial_collector=Collector(),
+        fact_parser=Parser(),
+    )
+
+    assert result.status == "available"
+    assert result.peer_security_codes == ("2303", "2454", "3711", "5274")
+    assert result.target_inventory_change == Decimal("0.12")
+    assert result.peer_median_inventory_change == Decimal("0.10")
+    assert result.peer_median_revenue_change == Decimal("0.05")
+    assert all("9999" not in evidence_id for evidence_id in result.evidence_ids)
