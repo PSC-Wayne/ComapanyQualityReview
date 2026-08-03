@@ -53,6 +53,10 @@ from company_quality.company_analysis.contracts import CompanyAnalysisRequest, S
 from company_quality.dashboard_server import _INDEX
 from company_quality.identity import CompanyIdentity
 from company_quality.sources.financial import FinancialArtifact, PeriodCollection
+from company_quality.sources.governance_insiders import (
+    GovernanceInsiderProducer,
+    MaterialEventHistory,
+)
 
 
 AS_OF = "2026-07-29T13:30:00+08:00"
@@ -397,6 +401,63 @@ def test_same_generation_formal_calibration_enters_upside_probabilities(tmp_path
     assert report.upside.positive_return_probability.status == "formal"
     assert report.upside.positive_return_probability.point == Decimal("0.88")
     assert report.upside.benchmark_outperform_probability.point == Decimal("0.77")
+
+
+def test_governance_checks_flow_through_report_and_generic_dashboard_json(
+    tmp_path: Path,
+) -> None:
+    class EmptyTransport:
+        def fetch(self, url: str) -> bytes:
+            return b"[]"
+
+    history = MaterialEventHistory(
+        window_start="2021-07-29",
+        window_end="2026-07-29",
+        complete=True,
+        records=tuple(
+            {
+                "market": "TWSE",
+                "security_code": "2330",
+                "company_name": "台積電",
+                "announced_at": f"202{index + 2}-05-01T18:30:00+08:00",
+                "effective_date": f"202{index + 2}-05-01",
+                "subject": subject,
+                "detail": f"事實發生日：202{index + 2}-05-01；{subject}",
+                "source_locator": f"sii:2330:serial:{index + 1}",
+            }
+            for index, subject in enumerate(("公告財務主管異動", "公告稽核主管異動"))
+        ),
+    )
+    producer = GovernanceInsiderProducer(
+        transport=EmptyTransport(), material_event_history=history
+    )
+    producer.produce(
+        issuer_id="22099131",
+        security_code="2330",
+        reported_company_name="台積電",
+        market="TWSE",
+        as_of=AS_OF,
+    )
+    assert producer.last_collection is not None
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        governance_evidence=producer.last_collection,
+    )
+
+    assert report.checklist_assessment is not None
+    checks = {
+        item.check_id: item for item in report.checklist_assessment.checks
+    }
+    assert checks["R42"].applicability == "triggered"
+    assert len(checks["R42"].evidence_ids) == 2
+    # The existing generic Dashboard checklist renderer consumes these same fields.
+    rendered = {
+        item["check_id"]: item
+        for item in asdict(report)["checklist_assessment"]["checks"]
+    }
+    assert "https://mops.twse.com.tw/" in rendered["R42"]["observations"][0]
 
 
 def test_builds_detailed_research_cases_from_financial_evidence(tmp_path: Path) -> None:
