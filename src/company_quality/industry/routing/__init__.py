@@ -20,7 +20,8 @@ _URLS = {
     "TWSE": "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
     "TPEx": "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O",
 }
-_EXCLUDED = {"14", "15", "17", "22"}
+_EXCLUDED = {"14", "15", "17"}
+_SPECIAL_INDUSTRIES = {"22": "biotech", "23": "energy", "35": "energy"}
 _SECTORS = {
     "materials": {"01", "03", "08", "09", "10", "11", "21"},
     "consumer": {"02", "04", "12", "16", "18", "32", "34", "37"},
@@ -51,6 +52,22 @@ class IndustryAuthority:
     available_at: str
     retrieved_at: str
     rows: tuple[Mapping[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CompanyLevelRouteEvidence:
+    """Company evidence used to refine a specialised official route.
+
+    Names are deliberately absent: a legal or short company name is identity
+    provenance, not evidence of the issuer's business model.
+    """
+
+    issuer_id: str
+    business_model: str
+    products: tuple[str, ...]
+    end_markets: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    available_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +188,8 @@ def _blocked(
     authority: IndustryAuthority,
     reason: str,
     industry_code: str = "unknown",
+    evidence_ids: tuple[str, ...] = (),
+    route_coverage: Decimal = Decimal("0"),
 ) -> IndustryRoute:
     assert identity.identity is not None
     return IndustryRoute(
@@ -186,8 +205,9 @@ def _blocked(
         evidence_ids=(
             f"identity:{identity.identity.security_id}",
             f"authority:{authority.content_sha256}",
+            *evidence_ids,
         ),
-        route_coverage=Decimal("0"),
+        route_coverage=route_coverage,
         decision_time=identity.decision_time,
         authority_url=authority.url,
         authority_sha256=authority.content_sha256,
@@ -199,6 +219,8 @@ def _blocked(
 def route_industry(
     identity: IdentityResolution,
     authority: IndustryAuthority,
+    *,
+    company_business_evidence: CompanyLevelRouteEvidence | None = None,
 ) -> IndustryRoute:
     if identity.status != "resolved" or identity.identity is None:
         raise IndustryRouteError("industry routing requires a resolved identity")
@@ -219,12 +241,11 @@ def route_industry(
     )
     if not code_rows:
         return _blocked(identity, authority, "official_industry_route_not_found")
+    # Security code + issuer ID are the official identity join.  Legal-name and
+    # short-name aliases are source provenance and never classify a route.
     matching = tuple(
         row for row in code_rows
         if row.get("issuer_id", "").strip() == company.issuer_id
-        and company.company_name in {
-            row.get("company_name", "").strip(), row.get("short_name", "").strip()
-        }
     )
     if not matching:
         return _blocked(identity, authority, "industry_identity_mismatch")
@@ -240,6 +261,79 @@ def route_industry(
     sector = _sector(industry_code)
     cyclicality = _cyclicality(industry_code)
     unsupported = industry_code in _EXCLUDED
+    specialised = _SPECIAL_INDUSTRIES.get(industry_code)
+    business_evidence_ids: tuple[str, ...] = ()
+    business_tags: tuple[str, ...] = ()
+    route_available_at = authority.available_at
+    if specialised is not None:
+        if company_business_evidence is None:
+            return _blocked(
+                identity,
+                authority,
+                "company_level_business_evidence_required",
+                industry_code,
+            )
+        business_evidence_ids = tuple(
+            dict.fromkeys(company_business_evidence.evidence_ids)
+        )
+        populated = sum(
+            (
+                bool(company_business_evidence.business_model.strip()),
+                bool(company_business_evidence.products),
+                bool(company_business_evidence.end_markets),
+            )
+        )
+        coverage = Decimal(populated) / Decimal("3")
+        if company_business_evidence.issuer_id != company.issuer_id:
+            return _blocked(
+                identity,
+                authority,
+                "company_business_evidence_issuer_mismatch",
+                industry_code,
+                business_evidence_ids,
+                coverage,
+            )
+        business_available = _instant(
+            company_business_evidence.available_at,
+            "company business evidence available_at",
+        )
+        if business_available > decision_time:
+            return _blocked(
+                identity,
+                authority,
+                "company_business_evidence_not_available_at_decision_time",
+                industry_code,
+                business_evidence_ids,
+                coverage,
+            )
+        if (
+            populated != 3
+            or not business_evidence_ids
+            or any(
+                not item.strip()
+                for item in (
+                    *company_business_evidence.products,
+                    *company_business_evidence.end_markets,
+                )
+            )
+        ):
+            return _blocked(
+                identity,
+                authority,
+                "company_level_business_evidence_incomplete",
+                industry_code,
+                business_evidence_ids,
+                coverage,
+            )
+        route_available_at = max(available_at, business_available).isoformat(
+            timespec="seconds"
+        )
+        business_tags = (
+            f"specialised_route:{specialised}",
+            "company_business_model_evidenced",
+            "company_products_evidenced",
+            "company_end_markets_evidenced",
+        )
     return IndustryRoute(
         status="unsupported_scope" if unsupported else "routed",
         reason="owner_excluded_v1_industry" if unsupported else None,
@@ -249,6 +343,7 @@ def route_industry(
         business_model_tags=(
             ("unsupported_specialised_route" if unsupported else "general_operating_company"),
             f"sector:{sector}",
+            *business_tags,
         ),
         cyclicality=cyclicality,
         peer_rule_id=(
@@ -259,11 +354,12 @@ def route_industry(
         evidence_ids=(
             f"identity:{company.security_id}",
             f"authority:{authority.content_sha256}",
+            *business_evidence_ids,
         ),
         route_coverage=Decimal("1"),
         decision_time=identity.decision_time,
         authority_url=authority.url,
         authority_sha256=authority.content_sha256,
-        available_at=authority.available_at,
+        available_at=route_available_at,
         retrieved_at=authority.retrieved_at,
     )
