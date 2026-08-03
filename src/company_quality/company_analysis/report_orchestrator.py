@@ -51,6 +51,7 @@ from company_quality.company_analysis.forecast_capital import (
 from company_quality.company_analysis.growth_check_producers import (
     GrowthCheckAssessment,
 )
+from company_quality.company_analysis.history_context import HistoricalContextAssessment
 from company_quality.company_analysis.manufacturing import ManufacturingAssessment
 from company_quality.company_analysis.impairment_capital_risk import (
     ImpairmentCapitalRiskAssessment,
@@ -1514,6 +1515,7 @@ def build_report_from_evidence(
     impairment_capital_assessment: ImpairmentCapitalRiskAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
+    historical_context: HistoricalContextAssessment | None = None,
     manufacturing_assessment: ManufacturingAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
@@ -1537,6 +1539,7 @@ def build_report_from_evidence(
         impairment_capital_assessment=impairment_capital_assessment,
         solvency_commitment_assessment=solvency_commitment_assessment,
         working_capital_risk=working_capital_risk,
+        historical_context=historical_context,
         manufacturing_assessment=manufacturing_assessment,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
@@ -1640,6 +1643,7 @@ def build_report_from_evidence(
         solvency_commitment_assessment=solvency_commitment_assessment,
         working_capital_risk=working_capital_risk,
         manufacturing_assessment=manufacturing_assessment,
+        historical_context=historical_context,
     )
     if detailed.available:
         limitations = [
