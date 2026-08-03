@@ -44,6 +44,7 @@ from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
     collect_company_evidence_bundle,
 )
+from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
@@ -1495,6 +1496,7 @@ def build_report_from_evidence(
     calibration_unavailable_reason: str | None = None,
     candidate_adapter: HermesCandidateAdapter | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
 ) -> SingleCompanyResearchReport:
@@ -1508,11 +1510,15 @@ def build_report_from_evidence(
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
     checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, None,
+        bundle,
+        generation_id,
+        None,
         peer_financial_comparison=peer_financial_comparison,
+        esg_legal_evidence=esg_legal_evidence,
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
     )
+    esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
         None,
@@ -1524,9 +1530,10 @@ def build_report_from_evidence(
             generation_id=generation_id,
             generated_at=generated_at,
             citations=(
-                _unique_citations(forecast_capital_assessment.citations)
-                if forecast_capital_assessment is not None
-                else ()
+                _unique_citations((
+                    *esg_citations,
+                    *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                ))
             ),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
@@ -1567,8 +1574,12 @@ def build_report_from_evidence(
     )
     detailed = build_detailed_analysis(bundle)
     checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, financial_deterioration, detailed,
+        bundle,
+        generation_id,
+        financial_deterioration,
+        detailed,
         peer_financial_comparison,
+        esg_legal_evidence,
         forecast_capital_assessment,
         governance_evidence,
     )
@@ -1583,11 +1594,14 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=_unique_citations((
-                *detailed.citations,
-                *financial_citations,
-                *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
-            )),
+            citations=_unique_citations(
+                (
+                    *detailed.citations,
+                    *financial_citations,
+                    *esg_citations,
+                    *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                )
+            ),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -1655,6 +1669,7 @@ def build_report_from_evidence(
         citations=_unique_citations((
             citation,
             *financial_citations,
+            *esg_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
         )),
         source_coverage=bundle.source_coverage,
