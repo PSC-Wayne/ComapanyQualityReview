@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 from company_quality.audit.inventory import AuditFilingInventory
 from company_quality.company_analysis.checklist_contracts import (
@@ -37,6 +37,9 @@ from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBund
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
+
+if TYPE_CHECKING:
+    from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1222,6 +1225,7 @@ def build_checklist_assessment(
     detailed_analysis: object | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
+    governance_evidence: GovernanceEvidenceCollection | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1441,6 +1445,12 @@ def build_checklist_assessment(
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
+    if governance_evidence is not None:
+        # Local import keeps the source producer independent from the checklist
+        # builder while giving the authoritative assessment one narrow hook.
+        from company_quality.sources.governance_insiders import apply_governance_checks
+
+        checks = apply_governance_checks(checks, governance_evidence)
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")
     risk_rows = tuple(item for item in checks if item.domain == "risk")
