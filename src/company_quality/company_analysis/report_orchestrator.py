@@ -65,6 +65,7 @@ from company_quality.company_analysis.probability_provider import (
 )
 from company_quality.sources.financial import FinancialArtifact, MopsFinancialCollector, Period
 from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
+from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
 from company_quality.identity import (
     CompanyIdentity,
     OfficialIdentitySource,
@@ -1503,6 +1504,7 @@ def build_report_from_evidence(
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
+    working_capital_risk: WorkingCapitalRiskEvidence | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1522,12 +1524,16 @@ def build_report_from_evidence(
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
         solvency_commitment_assessment=solvency_commitment_assessment,
+        working_capital_risk=working_capital_risk,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     solvency_citations = (
         solvency_commitment_assessment.citations
         if solvency_commitment_assessment is not None
         else ()
+    )
+    working_capital_citations = (
+        working_capital_risk.citations if working_capital_risk is not None else ()
     )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
@@ -1543,6 +1549,7 @@ def build_report_from_evidence(
                 _unique_citations((
                     *esg_citations,
                     *solvency_citations,
+                    *working_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                 ))
             ),
@@ -1599,6 +1606,7 @@ def build_report_from_evidence(
         forecast_capital_assessment,
         governance_evidence,
         solvency_commitment_assessment,
+        working_capital_risk,
     )
     if detailed.available:
         limitations = [
@@ -1617,6 +1625,7 @@ def build_report_from_evidence(
                     *financial_citations,
                     *esg_citations,
                     *solvency_citations,
+                    *working_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                 )
             ),
@@ -1690,6 +1699,7 @@ def build_report_from_evidence(
             *financial_citations,
             *esg_citations,
             *solvency_citations,
+            *working_capital_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
         )),
         source_coverage=bundle.source_coverage,

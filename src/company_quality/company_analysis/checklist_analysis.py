@@ -44,6 +44,7 @@ from company_quality.company_analysis.solvency_commitment_risk import (
 
 if TYPE_CHECKING:
     from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
+    from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1244,6 +1245,7 @@ def build_checklist_assessment(
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
+    working_capital_risk: WorkingCapitalRiskEvidence | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1474,6 +1476,9 @@ def build_checklist_assessment(
         checks = apply_governance_checks(checks, governance_evidence)
     if solvency_commitment_assessment is not None:
         replacements = solvency_commitment_assessment.by_check_id
+        checks = tuple(replacements.get(item.check_id, item) for item in checks)
+    if working_capital_risk is not None:
+        replacements = working_capital_risk.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")
