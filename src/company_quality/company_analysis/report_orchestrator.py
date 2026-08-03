@@ -48,6 +48,9 @@ from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
+from company_quality.company_analysis.growth_check_producers import (
+    GrowthCheckAssessment,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1503,6 +1506,7 @@ def build_report_from_evidence(
     esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
+    growth_check_assessment: GrowthCheckAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
 ) -> SingleCompanyResearchReport:
@@ -1523,6 +1527,7 @@ def build_report_from_evidence(
         esg_legal_evidence=esg_legal_evidence,
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
+        growth_check_assessment=growth_check_assessment,
         solvency_commitment_assessment=solvency_commitment_assessment,
         working_capital_risk=working_capital_risk,
     )
@@ -1551,6 +1556,7 @@ def build_report_from_evidence(
                     *solvency_citations,
                     *working_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                    *(growth_check_assessment.citations if growth_check_assessment else ()),
                 ))
             ),
             source_coverage=bundle.source_coverage,
@@ -1578,6 +1584,7 @@ def build_report_from_evidence(
                     if forecast_capital_assessment is not None
                     else ()
                 ),
+                *(growth_check_assessment.limitations if growth_check_assessment else ()),
                 *(
                     solvency_commitment_assessment.limitations
                     if solvency_commitment_assessment is not None
@@ -1605,6 +1612,7 @@ def build_report_from_evidence(
         esg_legal_evidence,
         forecast_capital_assessment,
         governance_evidence,
+        growth_check_assessment,
         solvency_commitment_assessment,
         working_capital_risk,
     )
@@ -1627,6 +1635,7 @@ def build_report_from_evidence(
                     *solvency_citations,
                     *working_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                    *(growth_check_assessment.citations if growth_check_assessment else ()),
                 )
             ),
             source_coverage=bundle.source_coverage,
@@ -1652,6 +1661,7 @@ def build_report_from_evidence(
             limitations=tuple((
                 *limitations,
                 *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+                *(growth_check_assessment.limitations if growth_check_assessment else ()),
                 *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
             )),
             financial_deterioration=financial_deterioration,
@@ -1701,6 +1711,7 @@ def build_report_from_evidence(
             *solvency_citations,
             *working_capital_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+            *(growth_check_assessment.citations if growth_check_assessment else ()),
         )),
         source_coverage=bundle.source_coverage,
         downside=DownsideCase(
@@ -1728,6 +1739,7 @@ def build_report_from_evidence(
         limitations=tuple((
             *limitations,
             *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+            *(growth_check_assessment.limitations if growth_check_assessment else ()),
             *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
         )),
         financial_deterioration=financial_deterioration,

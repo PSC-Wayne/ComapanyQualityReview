@@ -38,6 +38,9 @@ from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
+from company_quality.company_analysis.growth_check_producers import (
+    GrowthCheckAssessment,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1228,6 +1231,21 @@ def _apply_esg_legal_evidence(
     return tuple(rows[item.check_id] for item in checks)
 
 
+def _apply_growth_check_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: GrowthCheckAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Overlay only the eight dedicated growth rows, preserving checklist order."""
+
+    if assessment is None:
+        return checks
+    rows = {item.check_id: item for item in checks}
+    for incoming in assessment.checks:
+        if incoming.check_id in rows:
+            rows[incoming.check_id] = incoming
+    return tuple(rows[item.check_id] for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1244,6 +1262,7 @@ def build_checklist_assessment(
     esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
+    growth_check_assessment: GrowthCheckAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
 ) -> ChecklistAssessment:
@@ -1468,6 +1487,9 @@ def build_checklist_assessment(
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
+    # Dedicated claim-complete G21 supersedes the capital-event-only G21 row;
+    # capital and risk rows remain owned by their existing producers.
+    checks = _apply_growth_check_assessment(checks, growth_check_assessment)
     if governance_evidence is not None:
         # Local import keeps the source producer independent from the checklist
         # builder while giving the authoritative assessment one narrow hook.
