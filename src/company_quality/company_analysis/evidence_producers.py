@@ -62,6 +62,11 @@ class MultiSourceEvidence:
 
     evidence_id: str
     evidence_handle: str
+    issuer_id: str
+    security_code: str
+    reported_company_name: str
+    dataset_id: str
+    source_locator: str
     source_url: str
     source_family: SourceFamily
     market: Market
@@ -79,6 +84,11 @@ class MultiSourceEvidence:
         required = {
             "evidence_id": self.evidence_id,
             "evidence_handle": self.evidence_handle,
+            "issuer_id": self.issuer_id,
+            "security_code": self.security_code,
+            "reported_company_name": self.reported_company_name,
+            "dataset_id": self.dataset_id,
+            "source_locator": self.source_locator,
             "source_url": self.source_url,
             "observed_period": self.observed_period,
         }
@@ -94,10 +104,17 @@ class MultiSourceEvidence:
 
 
 class EvidenceProducer(Protocol):
+    producer_id: str
     source_family: SourceFamily
 
     def produce(
-        self, *, market: Market, as_of: str
+        self,
+        *,
+        issuer_id: str,
+        security_code: str,
+        reported_company_name: str,
+        market: Market,
+        as_of: str,
     ) -> Sequence[MultiSourceEvidence]: ...
 
 
@@ -125,17 +142,28 @@ class EvidenceProducerRegistry:
     """Registry allowing source modules to be independently owned and tested."""
 
     def __init__(self) -> None:
-        self._producers: dict[SourceFamily, EvidenceProducer] = {}
+        self._producers: dict[str, tuple[SourceFamily, EvidenceProducer]] = {}
 
     def register(self, producer: EvidenceProducer) -> None:
         family = _family(producer.source_family)
-        if family in self._producers:
-            raise ProducerRegistryError(f"source family already registered: {family}")
-        self._producers[family] = producer
+        try:
+            producer_id = producer.producer_id.strip()
+        except AttributeError as exc:
+            raise ProducerRegistryError("producer_id must be a non-empty string") from exc
+        if not producer_id:
+            raise ProducerRegistryError("producer_id must be a non-empty string")
+        if producer_id in self._producers:
+            raise ProducerRegistryError(
+                f"producer identity already registered: {producer_id}"
+            )
+        self._producers[producer_id] = (family, producer)
 
     def collect(
         self,
         *,
+        issuer_id: str,
+        security_code: str,
+        reported_company_name: str,
         market: Market,
         as_of: str,
         required_families: Sequence[SourceFamily] = (),
@@ -143,17 +171,39 @@ class EvidenceProducerRegistry:
         decision_time = _instant(as_of, "as_of")
         if market not in {"TWSE", "TPEx"}:
             raise ProducerRegistryError(f"unsupported market: {market}")
+        identity = {
+            "issuer_id": issuer_id,
+            "security_code": security_code,
+            "reported_company_name": reported_company_name,
+        }
+        missing_identity = tuple(
+            name for name, value in identity.items() if not value.strip()
+        )
+        if missing_identity:
+            raise ProducerRegistryError(
+                "missing collection identity fields: " + ",".join(missing_identity)
+            )
         required = tuple(_family(item) for item in required_families)
         if len(set(required)) != len(required):
             raise ProducerRegistryError("required source families must be unique")
 
         evidence: list[MultiSourceEvidence] = []
         reasons: list[str] = []
-        for family, producer in self._producers.items():
+        for producer_id, (family, producer) in self._producers.items():
             try:
-                candidates = tuple(producer.produce(market=market, as_of=as_of))
+                candidates = tuple(
+                    producer.produce(
+                        issuer_id=issuer_id,
+                        security_code=security_code,
+                        reported_company_name=reported_company_name,
+                        market=market,
+                        as_of=as_of,
+                    )
+                )
             except (OSError, RuntimeError, ValueError) as exc:
-                reasons.append(f"producer_error:{family}:{type(exc).__name__}")
+                reasons.append(
+                    f"producer_error:{producer_id}:{family}:{type(exc).__name__}"
+                )
                 continue
             for item in candidates:
                 if item.source_family != family:
@@ -161,6 +211,19 @@ class EvidenceProducerRegistry:
                     continue
                 if item.market != market:
                     reasons.append(f"market_mismatch:{family}:{item.evidence_id}")
+                    continue
+                if item.issuer_id != issuer_id:
+                    reasons.append(f"issuer_id_mismatch:{family}:{item.evidence_id}")
+                    continue
+                if item.security_code != security_code:
+                    reasons.append(
+                        f"security_code_mismatch:{family}:{item.evidence_id}"
+                    )
+                    continue
+                if item.reported_company_name != reported_company_name:
+                    reasons.append(
+                        f"reported_company_name_mismatch:{family}:{item.evidence_id}"
+                    )
                     continue
                 if _instant(item.as_of, "evidence as_of") != decision_time:
                     reasons.append(f"as_of_mismatch:{family}:{item.evidence_id}")
@@ -178,7 +241,7 @@ class EvidenceProducerRegistry:
         reasons.extend(f"conflict:{item}" for item in sorted(conflicts))
 
         temporal: list[MultiSourceEvidence] = []
-        for item in evidence:
+        for item in by_id.values():
             if item.evidence_id in conflicts:
                 continue
             if _instant(item.available_at, "available_at") > decision_time:
@@ -216,7 +279,7 @@ class EvidenceProducerRegistry:
         return ProducerEvidenceResult(
             market=market,
             as_of=as_of,
-            evidence=tuple(evidence),
+            evidence=tuple(temporal),
             discovery_evidence_ids=discovery_ids,
             substantive_evidence_ids=substantive_ids,
             unresolved_reasons=unresolved,
