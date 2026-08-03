@@ -160,7 +160,11 @@ def test_checklist_hook_routes_by_assessment_and_overlays_only_selected_rows() -
     # Code 32 alone is not a route; the official business-model assessment is.
     bundle = SimpleNamespace(identity=SimpleNamespace(industry_code="32"))
     assert _industry_route(bundle, "general_non_financial") == "not_applicable"  # type: ignore[arg-type]
-    assert _industry_route(bundle, "general_non_financial", assessment) == "ecommerce_platform"  # type: ignore[arg-type]
+    assert _industry_route(
+        bundle,
+        "general_non_financial",
+        ecommerce_epc_assessment=assessment,
+    ) == "ecommerce_platform"  # type: ignore[arg-type]
 
     placeholders = _placeholder_checks("尚未准入", "ecommerce_platform")
     overlaid = _apply_ecommerce_epc_assessment(placeholders, assessment)
