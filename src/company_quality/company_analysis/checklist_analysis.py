@@ -41,6 +41,7 @@ from company_quality.company_analysis.forecast_capital import (
 
 if TYPE_CHECKING:
     from company_quality.sources.governance_insiders import GovernanceEvidenceCollection
+    from company_quality.company_analysis.working_capital_risk import WorkingCapitalRiskEvidence
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1240,6 +1241,7 @@ def build_checklist_assessment(
     esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
+    working_capital_risk: WorkingCapitalRiskEvidence | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1468,6 +1470,9 @@ def build_checklist_assessment(
         from company_quality.sources.governance_insiders import apply_governance_checks
 
         checks = apply_governance_checks(checks, governance_evidence)
+    if working_capital_risk is not None:
+        replacements = working_capital_risk.by_check_id
+        checks = tuple(replacements.get(item.check_id, item) for item in checks)
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")
     risk_rows = tuple(item for item in checks if item.domain == "risk")
