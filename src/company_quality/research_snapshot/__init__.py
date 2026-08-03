@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Literal, Mapping, Sequence, cast
 
+from company_quality.company_analysis.rating_evidence_policy import (
+    RatingDimension,
+    RatingEvidenceDecision,
+    admit_rating_evidence,
+)
 from company_quality.industry.model_route import IndustryModelRoute
 from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
 
@@ -95,6 +100,21 @@ class OfficialMaterialEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class RatingEvidenceSummary:
+    dimension: RatingDimension
+    core_rating_eligible: bool
+    ineligibility_reason: str | None
+    core_evidence_ids: list[str]
+    core_disclosure_kinds: list[str]
+    supplemental_evidence_ids: list[str]
+    extra_points: float
+    unavailable_inputs: list[str]
+    checklist_unresolved_ids: list[str]
+    policy_as_of: str
+    policy_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class CompanyResearchSnapshot:
     issuer_id: str
     security_code: str | None
@@ -107,14 +127,13 @@ class CompanyResearchSnapshot:
     quality: QualityCoreResult
     upside: UpsideCoreResult
     downside: DownsideCoreResult
+    rating_evidence: dict[RatingDimension, RatingEvidenceSummary]
     twelve_month_return: TwelveMonthReturnLabel | None
     industry_route: IndustryModelRoute | None = None
     official_events: list[OfficialMaterialEvent] = field(default_factory=list)
-    rating_disposition: Literal["NO_RATING_NOT_APPLICABLE"] = (
-        "NO_RATING_NOT_APPLICABLE"
-    )
-    schema_version: Literal["CompanyResearchSnapshot.v1"] = (
-        "CompanyResearchSnapshot.v1"
+    rating_disposition: Literal["FORMAL", "RESEARCH_ONLY"] = "RESEARCH_ONLY"
+    schema_version: Literal["CompanyResearchSnapshot.v2"] = (
+        "CompanyResearchSnapshot.v2"
     )
 
 
@@ -153,6 +172,7 @@ def build_company_research_snapshot(
     twelve_month_return: TwelveMonthReturnLabel | None = None,
     industry_route: IndustryModelRoute | None = None,
     official_events: Sequence[OfficialMaterialEvent] = (),
+    rating_evidence: Mapping[RatingDimension, RatingEvidenceDecision] | None = None,
 ) -> CompanyResearchSnapshot:
     """Bind independent existing results without recomputing or merging their values."""
     generations = {
@@ -165,6 +185,20 @@ def build_company_research_snapshot(
             "all core results must bind the same successful generation"
         )
     generation_id = next(iter(generations))
+    if rating_evidence is None:
+        rating_evidence = {
+            dimension: admit_rating_evidence(
+                dimension=dimension,
+                issuer_id=issuer_id,
+                as_of=generated_at,
+                evidence=(),
+            )
+            for dimension in ("quality", "upside", "downside")
+        }
+    if set(rating_evidence) != {"quality", "upside", "downside"}:
+        raise CompanyResearchSnapshotError(
+            "quality, upside and downside rating evidence required"
+        )
     if twelve_month_return is not None and (
         twelve_month_return.generation_id != generation_id
         or twelve_month_return.market != market
@@ -275,6 +309,19 @@ def build_company_research_snapshot(
         if not result.model_version:
             raise CompanyResearchSnapshotError(f"{name} model_version required")
         _day(result.data_as_of, f"{name} data_as_of")
+        decision = rating_evidence[cast(RatingDimension, name)]
+        if decision.dimension != name or decision.issuer_id != issuer_id:
+            raise CompanyResearchSnapshotError(
+                f"{name} rating evidence must bind snapshot dimension and issuer"
+            )
+        if _instant(decision.as_of, f"{name} rating evidence as_of") > generated:
+            raise CompanyResearchSnapshotError(
+                f"{name} rating evidence cannot follow snapshot generation"
+            )
+        if result.status == "formal" and not decision.core_rating_eligible:
+            raise CompanyResearchSnapshotError(
+                f"formal {name} requires official disclosure rating evidence"
+            )
     if not input_source_versions or any(
         not key or not value for key, value in input_source_versions.items()
     ):
@@ -317,6 +364,27 @@ def build_company_research_snapshot(
     )
     statuses = {quality.status, upside.status, downside.status}
     status = cast(CoreStatus, next(item for item in status_priority if item in statuses))
+    evidence_summaries: dict[RatingDimension, RatingEvidenceSummary] = {
+        dimension: RatingEvidenceSummary(
+            dimension=decision.dimension,
+            core_rating_eligible=decision.core_rating_eligible,
+            ineligibility_reason=decision.ineligibility_reason,
+            core_evidence_ids=list(decision.core_evidence_ids),
+            core_disclosure_kinds=list(decision.core_disclosure_kinds),
+            supplemental_evidence_ids=list(decision.supplemental_evidence_ids),
+            extra_points=float(decision.extra_points),
+            unavailable_inputs=list(decision.unavailable_inputs),
+            checklist_unresolved_ids=list(decision.checklist_unresolved_ids),
+            policy_as_of=decision.as_of,
+            policy_version=decision.policy_version,
+        )
+        for dimension, decision in rating_evidence.items()
+    }
+    source_versions = dict(input_source_versions)
+    source_versions["rating_evidence_policy"] = "OfficialDisclosureRatingPolicy.v1"
+    rating_disposition: Literal["FORMAL", "RESEARCH_ONLY"] = (
+        "FORMAL" if statuses == {"formal"} else "RESEARCH_ONLY"
+    )
     return CompanyResearchSnapshot(
         issuer_id=issuer_id,
         security_code=security_code,
@@ -325,13 +393,15 @@ def build_company_research_snapshot(
         generated_at=generated_at,
         status=status,
         ai_status="AI_unavailable",
-        input_source_versions=dict(sorted(input_source_versions.items())),
+        input_source_versions=dict(sorted(source_versions.items())),
         quality=quality,
         upside=upside,
         downside=downside,
+        rating_evidence=evidence_summaries,
         twelve_month_return=twelve_month_return,
         industry_route=industry_route,
         official_events=sorted(admitted_events, key=lambda item: item.available_at),
+        rating_disposition=rating_disposition,
     )
 
 
@@ -341,6 +411,7 @@ __all__ = [
     "DownsideCoreResult",
     "OfficialMaterialEvent",
     "QualityCoreResult",
+    "RatingEvidenceSummary",
     "UpsideCoreResult",
     "build_company_research_snapshot",
 ]
