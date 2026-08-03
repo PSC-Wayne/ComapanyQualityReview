@@ -48,6 +48,9 @@ from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
+from company_quality.company_analysis.growth_check_producers import (
+    GrowthCheckAssessment,
+)
 from company_quality.company_analysis.detailed_analysis import (
     build_detailed_analysis,
     build_financial_deterioration,
@@ -1499,6 +1502,7 @@ def build_report_from_evidence(
     esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
+    growth_check_assessment: GrowthCheckAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1517,6 +1521,7 @@ def build_report_from_evidence(
         esg_legal_evidence=esg_legal_evidence,
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
+        growth_check_assessment=growth_check_assessment,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     core = next(
@@ -1533,6 +1538,7 @@ def build_report_from_evidence(
                 _unique_citations((
                     *esg_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                    *(growth_check_assessment.citations if growth_check_assessment else ()),
                 ))
             ),
             source_coverage=bundle.source_coverage,
@@ -1560,6 +1566,7 @@ def build_report_from_evidence(
                     if forecast_capital_assessment is not None
                     else ()
                 ),
+                *(growth_check_assessment.limitations if growth_check_assessment else ()),
             ),
             checklist_assessment=checklist_assessment,
             status="blocked",
@@ -1582,6 +1589,7 @@ def build_report_from_evidence(
         esg_legal_evidence,
         forecast_capital_assessment,
         governance_evidence,
+        growth_check_assessment,
     )
     if detailed.available:
         limitations = [
@@ -1600,6 +1608,7 @@ def build_report_from_evidence(
                     *financial_citations,
                     *esg_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+                    *(growth_check_assessment.citations if growth_check_assessment else ()),
                 )
             ),
             source_coverage=bundle.source_coverage,
@@ -1625,6 +1634,7 @@ def build_report_from_evidence(
             limitations=tuple((
                 *limitations,
                 *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+                *(growth_check_assessment.limitations if growth_check_assessment else ()),
             )),
             financial_deterioration=financial_deterioration,
             checklist_assessment=checklist_assessment,
@@ -1671,6 +1681,7 @@ def build_report_from_evidence(
             *financial_citations,
             *esg_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
+            *(growth_check_assessment.citations if growth_check_assessment else ()),
         )),
         source_coverage=bundle.source_coverage,
         downside=DownsideCase(
@@ -1698,6 +1709,7 @@ def build_report_from_evidence(
         limitations=tuple((
             *limitations,
             *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+            *(growth_check_assessment.limitations if growth_check_assessment else ()),
         )),
         financial_deterioration=financial_deterioration,
         checklist_assessment=checklist_assessment,
