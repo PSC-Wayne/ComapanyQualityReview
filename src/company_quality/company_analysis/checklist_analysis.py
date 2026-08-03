@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Any, Iterable, Literal
 
@@ -34,6 +34,7 @@ from company_quality.company_analysis.checklist_evidence import (
     collect_checklist_document_evidence,
 )
 from company_quality.company_analysis.evidence_bundle import CompanyEvidenceBundle
+from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -968,43 +969,30 @@ def _document_checks(
 
     note_by_id = dict(getattr(document_evidence, "note_citations", ()))
     commitment_note = note_by_id.get("N13_commitments")
-    if commitment_note is not None:
-        for check_id, monitoring in (
-            ("R38", ("未付款承諾", "取消條款", "資金來源")),
-            ("I-MFG-03", ("原料長約", "不可取消承諾", "預付款", "成本轉嫁")),
-        ):
-            if (
-                check_id == "I-MFG-03"
-                and not any(
-                    keyword in commitment_note.verbatim_excerpt
-                    for keyword in ("原料", "採購", "不可取消", "預付", "長約", "設備承諾")
-                )
-            ):
-                continue
-            if check_id not in rows or rows[check_id].status == "evaluated":
-                continue
-            rows[check_id] = ChecklistCheckResult(
-                check_id=check_id,
-                domain=rows[check_id].domain,
-                applicability="triggered",
-                status="evaluated",
-                first_detectable_at=commitment_note.available_at,
-                financial_period=commitment_note.period,
-                observations=(commitment_note.verbatim_excerpt,),
-                evidence_ids=(commitment_note.evidence_id,),
-                supporting_evidence=("已取得官方重大承諾附註原文。",),
-                counterevidence=(),
-                inference_chain=("官方重大承諾附註 → 長約／承諾題",),
-                mechanism="長約、採購或其他不可取消承諾形成未來固定現金需求。",
-                leading_warnings=monitoring,
-                buffers=(),
-                monitoring_metrics=monitoring,
-                monitoring_date=None,
-                invalidation_or_resolution_conditions=("新一期官方附註更新承諾內容。",),
-                severity="medium",
-                confidence="high",
-                unresolved_reasons=(),
-            )
+    if commitment_note is not None and rows["R38"].status != "evaluated":
+        monitoring = ("未付款承諾", "取消條款", "資金來源")
+        rows["R38"] = ChecklistCheckResult(
+            check_id="R38",
+            domain=rows["R38"].domain,
+            applicability="triggered",
+            status="evaluated",
+            first_detectable_at=commitment_note.available_at,
+            financial_period=commitment_note.period,
+            observations=(commitment_note.verbatim_excerpt,),
+            evidence_ids=(commitment_note.evidence_id,),
+            supporting_evidence=("已取得官方重大承諾附註原文。",),
+            counterevidence=(),
+            inference_chain=("官方重大承諾附註 → 長約／承諾題",),
+            mechanism="長約、採購或其他不可取消承諾形成未來固定現金需求。",
+            leading_warnings=monitoring,
+            buffers=(),
+            monitoring_metrics=monitoring,
+            monitoring_date=None,
+            invalidation_or_resolution_conditions=("新一期官方附註更新承諾內容。",),
+            severity="medium",
+            confidence="high",
+            unresolved_reasons=(),
+        )
     working = findings.get("downside:working-capital-discipline")
     if working is not None and working.direction == "counter":
         for check_id, note_id, monitoring in (
@@ -1068,15 +1056,6 @@ def _document_checks(
             severity="not_applicable",
             confidence="low",
             unresolved_reasons=(reason,),
-        )
-
-    if "I-MFG-03" in rows:
-        documented_finding(
-            "I-MFG-03",
-            "downside:long-term-commitments",
-            "關鍵原料、設備或能源長約及不可取消承諾形成固定採購與現金義務。",
-            ("原料長約", "不可取消承諾", "預付款", "成本轉嫁"),
-            "medium",
         )
 
     capex_finding = findings.get("downside:capex-intensity")
@@ -1205,6 +1184,40 @@ def _transmission_from_overview(
     return tuple(result)
 
 
+def _apply_esg_legal_evidence(
+    checks: tuple[ChecklistCheckResult, ...],
+    evidence: EsgLegalEvidence | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Overlay claim-specific rows; context cannot erase stronger evidence."""
+
+    if evidence is None:
+        return checks
+    rows = {item.check_id: item for item in checks}
+    for incoming in evidence.checks:
+        current = rows.get(incoming.check_id)
+        if current is None:
+            # I-MFG-03 is absent outside the official manufacturing route.
+            continue
+        if incoming.status == "evaluated":
+            rows[incoming.check_id] = incoming
+        elif current.status != "evaluated":
+            rows[incoming.check_id] = replace(
+                incoming,
+                observations=tuple(
+                    dict.fromkeys((*current.observations, *incoming.observations))
+                ),
+                evidence_ids=tuple(
+                    dict.fromkeys((*current.evidence_ids, *incoming.evidence_ids))
+                ),
+                unresolved_reasons=tuple(
+                    dict.fromkeys(
+                        (*current.unresolved_reasons, *incoming.unresolved_reasons)
+                    )
+                ),
+            )
+    return tuple(rows[item.check_id] for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1218,6 +1231,7 @@ def build_checklist_assessment(
     financial_section: FinancialDeteriorationSection | None,
     detailed_analysis: object | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    esg_legal_evidence: EsgLegalEvidence | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1422,17 +1436,20 @@ def build_checklist_assessment(
             monitoring,
         )
 
-    checks = _apply_peer_financial_comparison(
-        _document_checks(
-            _quantitative_checks(
-                overview,
-                "該題尚未完成權威逐項 producer 與反證准入。",
-                industry_route,
+    checks = _apply_esg_legal_evidence(
+        _apply_peer_financial_comparison(
+            _document_checks(
+                _quantitative_checks(
+                    overview,
+                    "該題尚未完成權威逐項 producer 與反證准入。",
+                    industry_route,
+                ),
+                document_evidence,
+                detailed_analysis,
             ),
-            document_evidence,
-            detailed_analysis,
+            peer_financial_comparison,
         ),
-        peer_financial_comparison,
+        esg_legal_evidence,
     )
     transmission = _transmission_from_overview(overview)
     growth_rows = tuple(item for item in checks if item.domain == "growth")

@@ -30,6 +30,10 @@ from company_quality.company_analysis.financial_anomalies import (
     FinancialChangeObservation,
     detect_financial_anomaly_candidates,
 )
+from company_quality.company_analysis.esg_supply_chain import (
+    ClaimEvidence,
+    build_esg_legal_evidence,
+)
 from company_quality.company_analysis.valuation import (
     MarketValuationCollector,
     ValuationEvidenceError,
@@ -49,7 +53,11 @@ from company_quality.company_analysis.report_orchestrator import (
     build_report_from_evidence,
     publish_four_downside_sections,
 )
-from company_quality.company_analysis.contracts import CompanyAnalysisRequest, SourceCoverage
+from company_quality.company_analysis.contracts import (
+    CompanyAnalysisRequest,
+    EvidenceCitation,
+    SourceCoverage,
+)
 from company_quality.dashboard_server import _INDEX
 from company_quality.identity import CompanyIdentity
 from company_quality.sources.financial import FinancialArtifact, PeriodCollection
@@ -384,6 +392,51 @@ def test_builds_valid_blocked_report_without_inventing_narrative(tmp_path: Path)
     assert report.citations[0].source_format == "html"
     assert "綜合損益表" in report.citations[0].verbatim_excerpt
     assert "KAM" in " ".join(report.limitations)
+
+
+def test_report_reuses_generic_checklist_and_citations_for_esg_evidence(
+    tmp_path: Path,
+) -> None:
+    excerpt = "關鍵原料A目前為單一供應來源，尚無合格替代供應商。"
+    citation = EvidenceCitation(
+        evidence_id="annual:supplier-risk",
+        source_id="annual-report:114",
+        source_tier="issuer_primary",
+        url="https://issuer.example/annual-report.pdf",
+        content_sha256=sha256(excerpt.encode()).hexdigest(),
+        period="114",
+        available_at="2026-03-31T18:00:00+08:00",
+        page=42,
+        coordinate=(Decimal("0"), Decimal("0"), Decimal("1"), Decimal("1")),
+        verbatim_excerpt=excerpt,
+        source_format="pdf",
+        locator="page:42",
+    )
+    esg = build_esg_legal_evidence(
+        openapi=(),
+        claims=(
+            ClaimEvidence(
+                claim_type="supplier_concentration",
+                signal="risk",
+                terms=("single_source", "no_qualified_alternative"),
+                citation=citation,
+            ),
+        ),
+    )
+
+    report = build_report_from_evidence(
+        bundle=_bundle(tmp_path),
+        generation_id=GENERATION,
+        generated_at=GENERATED_AT,
+        esg_legal_evidence=esg,
+    )
+
+    assert report.checklist_assessment is not None
+    r40 = next(
+        item for item in report.checklist_assessment.checks if item.check_id == "R40"
+    )
+    assert (r40.status, r40.applicability) == ("evaluated", "triggered")
+    assert citation.evidence_id in {item.evidence_id for item in report.citations}
 
 
 def test_same_generation_formal_calibration_enters_upside_probabilities(tmp_path: Path) -> None:

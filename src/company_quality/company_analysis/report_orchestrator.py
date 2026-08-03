@@ -44,6 +44,7 @@ from company_quality.company_analysis.evidence_bundle import (
     CompanyEvidenceBundle,
     collect_company_evidence_bundle,
 )
+from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.detailed_analysis import (
     build_detailed_analysis,
     build_financial_deterioration,
@@ -1472,6 +1473,7 @@ def build_report_from_evidence(
     calibration_unavailable_reason: str | None = None,
     candidate_adapter: HermesCandidateAdapter | None = None,
     peer_financial_comparison: PeerFinancialComparison | None = None,
+    esg_legal_evidence: EsgLegalEvidence | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1482,9 +1484,13 @@ def build_report_from_evidence(
     if generated.tzinfo is None or generated.utcoffset() is None:
         raise ReportOrchestrationError("generated_at must be timezone-aware")
     checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, None,
+        bundle,
+        generation_id,
+        None,
         peer_financial_comparison=peer_financial_comparison,
+        esg_legal_evidence=esg_legal_evidence,
     )
+    esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
         None,
@@ -1495,7 +1501,7 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=(),
+            citations=_unique_citations(esg_citations),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -1528,8 +1534,12 @@ def build_report_from_evidence(
     )
     detailed = build_detailed_analysis(bundle)
     checklist_assessment = build_checklist_assessment(
-        bundle, generation_id, financial_deterioration, detailed,
+        bundle,
+        generation_id,
+        financial_deterioration,
+        detailed,
         peer_financial_comparison,
+        esg_legal_evidence,
     )
     if detailed.available:
         limitations = [
@@ -1542,7 +1552,9 @@ def build_report_from_evidence(
             request=bundle.request,
             generation_id=generation_id,
             generated_at=generated_at,
-            citations=_unique_citations((*detailed.citations, *financial_citations)),
+            citations=_unique_citations(
+                (*detailed.citations, *financial_citations, *esg_citations)
+            ),
             source_coverage=bundle.source_coverage,
             downside=DownsideCase(
                 generation_id=generation_id,
@@ -1604,7 +1616,7 @@ def build_report_from_evidence(
         request=bundle.request,
         generation_id=generation_id,
         generated_at=generated_at,
-        citations=_unique_citations((citation, *financial_citations)),
+        citations=_unique_citations((citation, *financial_citations, *esg_citations)),
         source_coverage=bundle.source_coverage,
         downside=DownsideCase(
             generation_id=generation_id,

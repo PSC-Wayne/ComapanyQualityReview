@@ -288,13 +288,13 @@ def test_manufacturing_add_on_preserves_partial_evidence_and_fail_closed() -> No
         )
     }
 
-    assert rows["I-MFG-03"].status == "evaluated"
+    assert rows["I-MFG-03"].status == "unresolved"
     assert rows["I-MFG-01"].status == "unresolved"
     assert rows["I-MFG-01"].evidence_ids == ("evidence:capex", "evidence:kam")
     assert "稼動率" in rows["I-MFG-01"].unresolved_reasons[0]
 
 
-def test_commitment_note_directly_evaluates_r38_and_manufacturing_commitments() -> None:
+def test_commitment_note_evaluates_r38_but_keywords_do_not_complete_i_mfg_03() -> None:
     citation = SimpleNamespace(
         evidence_id="evidence:n13",
         period="114Q4",
@@ -322,9 +322,9 @@ def test_commitment_note_directly_evaluates_r38_and_manufacturing_commitments() 
     }
 
     assert rows["R38"].status == "evaluated"
-    assert rows["I-MFG-03"].status == "evaluated"
+    assert rows["I-MFG-03"].status == "unresolved"
     assert rows["R38"].evidence_ids == ("evidence:n13",)
-    assert rows["I-MFG-03"].evidence_ids == ("evidence:n13",)
+    assert rows["I-MFG-03"].evidence_ids == ()
 
     citation.verbatim_excerpt = "重大承諾：產品權利金及銀行保證票據。"
     rows = {
