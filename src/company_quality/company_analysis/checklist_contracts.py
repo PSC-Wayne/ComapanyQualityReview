@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Literal
 
+from company_quality.company_analysis.history_context import HistoricalContextAssessment
+
 AUTHORITY_DOCUMENT = "Financial_Statement_Growth_Risk_Checklist.md"
 CoverageStatus = Literal["complete", "unresolved", "not_applicable"]
 Judgement = Literal["improving", "stable", "deteriorating", "unresolved"]
@@ -271,6 +273,7 @@ class ChecklistAssessment:
     checks: tuple[ChecklistCheckResult, ...] = ()
     growth_transmission: tuple[GrowthTransmissionStage, ...] = ()
     industry_route: IndustryRoute = "unresolved"
+    historical_context: HistoricalContextAssessment | None = None
     detailed_check_status: Literal["complete", "incomplete_unresolved", "not_applicable_company_route"] = field(init=False)
     schema_version: Literal["ChecklistAssessment.v1"] = "ChecklistAssessment.v1"
 
@@ -336,6 +339,12 @@ class ChecklistAssessment:
             reasons.append("分析口徑紀錄尚未建立。")
         if self.financial_overview is None:
             reasons.append("權威財務總覽尚未建立。")
+        if self.historical_context is not None:
+            reasons.extend(
+                item.unresolved_reason
+                for item in self.historical_context.coverage
+                if item.status != "full" and item.unresolved_reason is not None
+            )
         return tuple(dict.fromkeys(reason for reason in reasons if reason))
 
 

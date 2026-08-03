@@ -51,6 +51,7 @@ from company_quality.company_analysis.forecast_capital import (
 from company_quality.company_analysis.growth_check_producers import (
     GrowthCheckAssessment,
 )
+from company_quality.company_analysis.history_context import HistoricalContextAssessment
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1509,6 +1510,7 @@ def build_report_from_evidence(
     growth_check_assessment: GrowthCheckAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
+    historical_context: HistoricalContextAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1530,6 +1532,7 @@ def build_report_from_evidence(
         growth_check_assessment=growth_check_assessment,
         solvency_commitment_assessment=solvency_commitment_assessment,
         working_capital_risk=working_capital_risk,
+        historical_context=historical_context,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     solvency_citations = (
@@ -1615,6 +1618,7 @@ def build_report_from_evidence(
         growth_check_assessment,
         solvency_commitment_assessment,
         working_capital_risk,
+        historical_context,
     )
     if detailed.available:
         limitations = [

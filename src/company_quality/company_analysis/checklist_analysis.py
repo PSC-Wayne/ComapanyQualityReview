@@ -41,6 +41,10 @@ from company_quality.company_analysis.forecast_capital import (
 from company_quality.company_analysis.growth_check_producers import (
     GrowthCheckAssessment,
 )
+from company_quality.company_analysis.history_context import (
+    HistoricalContextAssessment,
+    build_bundle_history_context,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1265,6 +1269,7 @@ def build_checklist_assessment(
     growth_check_assessment: GrowthCheckAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
+    historical_context: HistoricalContextAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1278,6 +1283,11 @@ def build_checklist_assessment(
     basis_records = _basis_records(bundle)
     overview = build_financial_overview(bundle)
     industry_route = _industry_route(bundle, route)
+    context = historical_context or build_bundle_history_context(bundle)
+    if context.issuer_id != bundle.identity.issuer_id:
+        raise ValueError("historical context issuer mismatch")
+    if context.as_of != bundle.request.as_of:
+        raise ValueError("historical context as_of mismatch")
     document_evidence = getattr(detailed_analysis, "checklist_document_evidence", None)
     if document_evidence is None:
         document_evidence = collect_checklist_document_evidence(
@@ -1297,6 +1307,7 @@ def build_checklist_assessment(
             checks=_placeholder_checks(reason, industry_route),
             growth_transmission=_transmission(reason),
             industry_route=industry_route,
+            historical_context=context,
         )
 
     annual = [item for item in bundle.periods if item.is_annual and item.financial]
@@ -1561,36 +1572,19 @@ def build_checklist_assessment(
     coverage["missing_evidence_preserved_as_unresolved"] = _complete(
         "missing_evidence_preserved_as_unresolved", completion_evidence
     )
-    detailed_findings = (
-        *getattr(detailed_analysis, "downside_findings", ()),
-        *getattr(detailed_analysis, "upside_findings", ()),
-    )
-    business_findings = tuple(
-        item
-        for item in detailed_findings
-        if item.finding_id == "upside:guidance:issuer:business-model"
-    )
     context_evidence = tuple(
         dict.fromkeys(
             (
-                *financial_ids,
-                *monthly_ids,
+                *(evidence for axis in context.coverage for evidence in axis.evidence_ids),
                 *(peer_financial_comparison.evidence_ids if peer_financial_comparison else ()),
-                *(
-                    evidence_id
-                    for item in business_findings
-                    for evidence_id in item.evidence_ids
-                ),
             )
         )
     )
-    context_gaps: list[str] = []
-    if len(annual) < 5:
-        context_gaps.append("五年歷史")
-    if len(bundle.monthly_revenue) < 36:
-        context_gaps.append("36個月季節性")
-    if not business_findings:
-        context_gaps.append("官方商業模式")
+    context_gaps = [
+        item.unresolved_reason or f"{item.axis}未完整"
+        for item in context.coverage
+        if item.status != "full"
+    ]
     if peer_financial_comparison is None or peer_financial_comparison.status != "available":
         context_gaps.extend(
             peer_financial_comparison.unresolved_reasons
@@ -1619,6 +1613,7 @@ def build_checklist_assessment(
         checks=checks,
         growth_transmission=transmission,
         industry_route=industry_route,
+        historical_context=context,
     )
 
 
