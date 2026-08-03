@@ -1,10 +1,10 @@
 """Small producer seam for point-in-time, multi-source checklist evidence.
 
-TWSE/TPEx OpenAPI feeds are discovery windows.  They can identify work but can
-never, by themselves, satisfy a substantive checklist claim.  MOPS and issuer
-published documents may carry substantive evidence after a downstream producer
-has preserved the document boundary and supplied a non-summary evidence handle.
-This module only admits lineage; it does not redefine source authority by topic.
+TWSE/TPEx OpenAPI feeds are additional official source windows, not the sole
+authority.  Whether one item can support a substantive checklist claim depends
+on its endpoint, field, period, and claim-specific producer rather than its
+source family alone.  This module admits lineage; it does not redefine source
+authority by topic.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ SourceFamily = Literal[
 ]
 Market = Literal["TWSE", "TPEx"]
 RegistryStatus = Literal["available", "unresolved"]
+EvidenceRole = Literal["discovery", "substantive"]
 
 SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
     "twse_openapi",
@@ -33,9 +34,6 @@ SOURCE_FAMILIES: tuple[SourceFamily, ...] = (
     "annual_report",
     "sustainability_report",
 )
-SUPPLEMENTARY_SOURCE_FAMILIES = frozenset({"twse_openapi", "tpex_openapi"})
-
-
 class ProducerRegistryError(ValueError):
     """Raised for invalid registry configuration or evidence contracts."""
 
@@ -74,6 +72,7 @@ class MultiSourceEvidence:
     retrieved_at: str
     available_at: str
     as_of: str
+    evidence_role: EvidenceRole
     is_summary_only: bool = False
     schema_version: Literal["MultiSourceEvidence.v1"] = "MultiSourceEvidence.v1"
 
@@ -81,6 +80,10 @@ class MultiSourceEvidence:
         _family(self.source_family)
         if self.market not in {"TWSE", "TPEx"}:
             raise ProducerRegistryError(f"unsupported market: {self.market}")
+        if self.evidence_role not in {"discovery", "substantive"}:
+            raise ProducerRegistryError(
+                f"unsupported evidence role: {self.evidence_role}"
+            )
         required = {
             "evidence_id": self.evidence_id,
             "evidence_handle": self.evidence_handle,
@@ -220,11 +223,6 @@ class EvidenceProducerRegistry:
                         f"security_code_mismatch:{family}:{item.evidence_id}"
                     )
                     continue
-                if item.reported_company_name != reported_company_name:
-                    reasons.append(
-                        f"reported_company_name_mismatch:{family}:{item.evidence_id}"
-                    )
-                    continue
                 if _instant(item.as_of, "evidence as_of") != decision_time:
                     reasons.append(f"as_of_mismatch:{family}:{item.evidence_id}")
                     continue
@@ -253,26 +251,18 @@ class EvidenceProducerRegistry:
         substantive = tuple(
             item
             for item in temporal
-            if item.source_family not in SUPPLEMENTARY_SOURCE_FAMILIES
-            and not item.is_summary_only
+            if item.evidence_role == "substantive" and not item.is_summary_only
         )
         substantive_ids = tuple(dict.fromkeys(item.evidence_id for item in substantive))
         reasons.extend(
             f"summary_only:{item.source_family}:{item.evidence_id}"
             for item in temporal
-            if item.source_family not in SUPPLEMENTARY_SOURCE_FAMILIES
-            and item.is_summary_only
+            if item.evidence_role == "substantive" and item.is_summary_only
         )
 
         temporal_families = {item.source_family for item in temporal}
-        substantive_families = {item.source_family for item in substantive}
         for family in required:
-            available_families = (
-                temporal_families
-                if family in SUPPLEMENTARY_SOURCE_FAMILIES
-                else substantive_families
-            )
-            if family not in available_families:
+            if family not in temporal_families:
                 reasons.append(f"missing:{family}")
 
         unresolved = tuple(dict.fromkeys(reasons))
@@ -289,9 +279,10 @@ class EvidenceProducerRegistry:
 
 __all__ = [
     "SOURCE_FAMILIES",
-    "SUPPLEMENTARY_SOURCE_FAMILIES",
+    "EvidenceRole",
     "EvidenceProducer",
     "EvidenceProducerRegistry",
+    "Market",
     "MultiSourceEvidence",
     "ProducerEvidenceResult",
     "ProducerRegistryError",

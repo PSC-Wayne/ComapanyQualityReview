@@ -3,9 +3,12 @@ from dataclasses import replace
 import pytest
 
 from company_quality.company_analysis.evidence_producers import (
+    EvidenceRole,
     EvidenceProducerRegistry,
+    Market,
     MultiSourceEvidence,
     ProducerRegistryError,
+    SourceFamily,
 )
 
 
@@ -17,9 +20,9 @@ REPORTED_COMPANY_NAME = "台灣積體電路製造股份有限公司"
 
 def _evidence(
     evidence_id: str,
-    source_family: str,
+    source_family: SourceFamily,
     *,
-    market: str = "TWSE",
+    market: Market = "TWSE",
     issuer_id: str = ISSUER_ID,
     security_code: str = SECURITY_CODE,
     reported_company_name: str = REPORTED_COMPANY_NAME,
@@ -28,6 +31,7 @@ def _evidence(
     observed_period: str = "115Q1",
     available_at: str = "2026-05-15T18:00:00+08:00",
     evidence_handle: str | None = None,
+    evidence_role: EvidenceRole = "substantive",
     is_summary_only: bool = False,
 ) -> MultiSourceEvidence:
     return MultiSourceEvidence(
@@ -45,13 +49,17 @@ def _evidence(
         retrieved_at="2026-08-03T11:00:00+08:00",
         available_at=available_at,
         as_of=AS_OF,
+        evidence_role=evidence_role,
         is_summary_only=is_summary_only,
     )
 
 
 class Producer:
     def __init__(
-        self, producer_id: str, source_family: str, *evidence: MultiSourceEvidence
+        self,
+        producer_id: str,
+        source_family: SourceFamily,
+        *evidence: MultiSourceEvidence,
     ) -> None:
         self.producer_id = producer_id
         self.source_family = source_family
@@ -64,7 +72,7 @@ class Producer:
         issuer_id: str,
         security_code: str,
         reported_company_name: str,
-        market: str,
+        market: Market,
         as_of: str,
     ):
         self.calls.append(
@@ -85,7 +93,7 @@ def _collect(registry: EvidenceProducerRegistry, **kwargs):
 
 
 def test_registry_collects_all_supported_source_windows_with_lineage() -> None:
-    families = (
+    families: tuple[SourceFamily, ...] = (
         "twse_openapi",
         "tpex_openapi",
         "mops",
@@ -148,13 +156,15 @@ def test_duplicate_producer_identity_fails_closed_even_across_families() -> None
         registry.register(Producer("official.filing", "annual_report"))
 
 
-def test_openapi_windows_are_supplementary_and_never_sole_completion_evidence() -> None:
+def test_openapi_discovery_item_cannot_support_completion() -> None:
     registry = EvidenceProducerRegistry()
     registry.register(
         Producer(
             "twse.discovery",
             "twse_openapi",
-            _evidence("twse:summary", "twse_openapi"),
+            _evidence(
+                "twse:summary", "twse_openapi", evidence_role="discovery"
+            ),
         )
     )
     registry.register(
@@ -169,6 +179,26 @@ def test_openapi_windows_are_supplementary_and_never_sole_completion_evidence() 
     assert result.substantive_evidence_ids == ("mops:filing",)
     assert result.can_support_completion(("twse:summary",)) is False
     assert result.can_support_completion(("mops:filing",)) is True
+
+
+def test_claim_specific_openapi_item_can_be_substantive() -> None:
+    registry = EvidenceProducerRegistry()
+    registry.register(
+        Producer(
+            "twse.claim-specific",
+            "twse_openapi",
+            _evidence(
+                "twse:official-field",
+                "twse_openapi",
+                evidence_role="substantive",
+            ),
+        )
+    )
+
+    result = _collect(registry, required_families=("twse_openapi",))
+
+    assert result.status == "available"
+    assert result.can_support_completion(("twse:official-field",)) is True
 
 
 @pytest.mark.parametrize(
@@ -218,7 +248,6 @@ def test_conflicting_evidence_is_absent_from_admitted_result() -> None:
     [
         ("issuer_id", "wrong-issuer"),
         ("security_code", "2317"),
-        ("reported_company_name", "其他股份有限公司"),
     ],
 )
 def test_registry_rejects_cross_issuer_output(field, value) -> None:
@@ -231,6 +260,19 @@ def test_registry_rejects_cross_issuer_output(field, value) -> None:
     assert result.status == "unresolved"
     assert result.evidence == ()
     assert any(f"{field}_mismatch" in item for item in result.unresolved_reasons)
+
+
+def test_registry_preserves_source_reported_name_variation() -> None:
+    registry = EvidenceProducerRegistry()
+    evidence = _evidence(
+        "short-name", "twse_openapi", reported_company_name="台積電"
+    )
+    registry.register(Producer("twse.short-name", "twse_openapi", evidence))
+
+    result = _collect(registry)
+
+    assert result.status == "available"
+    assert result.evidence == (evidence,)
 
 
 def test_registry_rejects_cross_market_or_cross_as_of_output() -> None:
