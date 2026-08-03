@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "CompanyResearchSnapshot.v1",
-  "title": "CompanyResearchSnapshot.v1",
+  "$id": "CompanyResearchSnapshot.v2",
+  "title": "CompanyResearchSnapshot.v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "issuer_id", "security_code", "market", "generation_id", "generated_at",
     "status", "ai_status", "input_source_versions", "quality", "upside",
-    "downside", "twelve_month_return", "industry_route", "official_events", "rating_disposition", "schema_version"
+    "downside", "rating_evidence", "twelve_month_return", "industry_route", "official_events", "rating_disposition", "schema_version"
   ],
   "$defs": {
     "status": {
@@ -24,6 +24,44 @@
         "status": {"$ref": "#/$defs/status"},
         "model_version": {"type": "string", "minLength": 1},
         "data_as_of": {"type": "string", "format": "date"}
+      }
+    },
+    "ratingEvidenceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dimension", "core_rating_eligible", "ineligibility_reason",
+        "core_evidence_ids", "core_disclosure_kinds", "supplemental_evidence_ids",
+        "extra_points", "unavailable_inputs", "checklist_unresolved_ids",
+        "policy_as_of", "policy_version"
+      ],
+      "properties": {
+        "dimension": {"enum": ["quality", "upside", "downside"]},
+        "core_rating_eligible": {"type": "boolean"},
+        "ineligibility_reason": {"enum": ["official_primary_disclosure_missing", null]},
+        "core_evidence_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "core_disclosure_kinds": {
+          "type": "array", "uniqueItems": true,
+          "items": {"enum": ["financial_statement", "financial_note", "auditor_report", "kam", "exchange_or_mops_disclosure", "official_material_event"]}
+        },
+        "supplemental_evidence_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "extra_points": {"type": "number", "minimum": 0},
+        "unavailable_inputs": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "checklist_unresolved_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "policy_as_of": {"type": "string", "format": "date-time"},
+        "policy_version": {"const": "OfficialDisclosureRatingPolicy.v1"}
       }
     },
     "returnLabel": {
@@ -186,6 +224,16 @@
         }
       ]
     },
+    "rating_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quality", "upside", "downside"],
+      "properties": {
+        "quality": {"$ref": "#/$defs/ratingEvidenceSummary"},
+        "upside": {"$ref": "#/$defs/ratingEvidenceSummary"},
+        "downside": {"$ref": "#/$defs/ratingEvidenceSummary"}
+      }
+    },
     "twelve_month_return": {
       "oneOf": [
         {"type": "null"},
@@ -202,7 +250,7 @@
       "type": "array",
       "items": {"$ref": "#/$defs/officialEvent"}
     },
-    "rating_disposition": {"const": "NO_RATING_NOT_APPLICABLE"},
-    "schema_version": {"const": "CompanyResearchSnapshot.v1"}
+    "rating_disposition": {"enum": ["FORMAL", "RESEARCH_ONLY"]},
+    "schema_version": {"const": "CompanyResearchSnapshot.v2"}
   }
 }

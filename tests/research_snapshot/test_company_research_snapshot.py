@@ -7,6 +7,11 @@ import jsonschema
 import pytest
 
 from company_quality.lab.outcome_labels import TwelveMonthReturnLabel
+from company_quality.company_analysis.contracts import EvidenceCitation
+from company_quality.company_analysis.rating_evidence_policy import (
+    RatingEvidenceInput,
+    admit_rating_evidence,
+)
 from company_quality.research_snapshot import (
     CompanyResearchSnapshotError,
     DownsideCoreResult,
@@ -95,7 +100,15 @@ def test_real_non_publishable_artifacts_build_one_closed_research_snapshot() -> 
     assert snapshot.quality.score is None
     assert snapshot.upside.stars is None
     assert snapshot.downside.faces is None
-    assert snapshot.rating_disposition == "NO_RATING_NOT_APPLICABLE"
+    assert snapshot.rating_disposition == "RESEARCH_ONLY"
+    assert snapshot.schema_version == "CompanyResearchSnapshot.v2"
+    assert set(snapshot.rating_evidence) == {"quality", "upside", "downside"}
+    assert all(
+        not item.core_rating_eligible for item in snapshot.rating_evidence.values()
+    )
+    assert snapshot.input_source_versions["rating_evidence_policy"] == (
+        "OfficialDisclosureRatingPolicy.v1"
+    )
 
 
 def test_snapshot_carries_same_generation_twelve_month_label_without_publishing_stars() -> None:
@@ -146,4 +159,85 @@ def test_snapshot_rejects_mixed_generations() -> None:
             quality=snapshot.quality,
             upside=snapshot.upside,
             downside=mismatched,
+        )
+
+
+def _official_policy_decision(dimension: str, *, unresolved: tuple[str, ...] = ()):
+    citation = EvidenceCitation(
+        evidence_id=f"mops:{dimension}:statement",
+        source_id="mops:financial-statement",
+        source_tier="official",
+        url="https://mops.twse.com.tw/example",
+        content_sha256="a" * 64,
+        period="2025Q4",
+        available_at="2026-07-24T18:00:00+08:00",
+        page=None,
+        coordinate=None,
+        verbatim_excerpt="正式財報揭露",
+        source_format="html",
+        locator="row:1",
+    )
+    return admit_rating_evidence(
+        dimension=dimension,  # type: ignore[arg-type]
+        issuer_id="REAL_VALIDATION_COHORT",
+        as_of="2026-07-25T00:00:00+00:00",
+        evidence=(
+            RatingEvidenceInput(
+                issuer_id="REAL_VALIDATION_COHORT",
+                disclosure_kind="financial_statement",
+                role="core",
+                citation=citation,
+            ),
+        ),
+        checklist_unresolved_ids=unresolved,
+    )
+
+
+def test_snapshot_carries_policy_summary_without_demoting_for_checklist_gaps() -> None:
+    snapshot = _real_research_snapshot()
+    rebuilt = build_company_research_snapshot(
+        issuer_id=snapshot.issuer_id,
+        security_code=snapshot.security_code,
+        market=snapshot.market,
+        generated_at=snapshot.generated_at,
+        input_source_versions=snapshot.input_source_versions,
+        quality=snapshot.quality,
+        upside=snapshot.upside,
+        downside=snapshot.downside,
+        rating_evidence={
+            "quality": _official_policy_decision("quality", unresolved=("R11", "R17")),
+            "upside": _official_policy_decision("upside"),
+            "downside": _official_policy_decision("downside"),
+        },
+    )
+
+    assert rebuilt.status == "research_only"
+    assert rebuilt.rating_evidence["quality"].core_rating_eligible is True
+    assert rebuilt.rating_evidence["quality"].checklist_unresolved_ids == ["R11", "R17"]
+    assert rebuilt.rating_evidence["quality"].extra_points == 0.0
+
+
+def test_formal_core_rejects_missing_official_rating_evidence() -> None:
+    snapshot = _real_research_snapshot()
+    formal_quality = QualityCoreResult(
+        generation_id=snapshot.generation_id,
+        status="formal",
+        score=75.0,
+        confidence=0.8,
+        model_version="formal-quality.v1",
+        data_as_of=snapshot.quality.data_as_of,
+    )
+
+    with pytest.raises(
+        CompanyResearchSnapshotError, match="formal quality requires official disclosure"
+    ):
+        build_company_research_snapshot(
+            issuer_id=snapshot.issuer_id,
+            security_code=snapshot.security_code,
+            market=snapshot.market,
+            generated_at=snapshot.generated_at,
+            input_source_versions=snapshot.input_source_versions,
+            quality=formal_quality,
+            upside=snapshot.upside,
+            downside=snapshot.downside,
         )
