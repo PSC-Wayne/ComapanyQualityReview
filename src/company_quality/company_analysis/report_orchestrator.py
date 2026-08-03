@@ -52,6 +52,9 @@ from company_quality.company_analysis.growth_check_producers import (
     GrowthCheckAssessment,
 )
 from company_quality.company_analysis.manufacturing import ManufacturingAssessment
+from company_quality.company_analysis.impairment_capital_risk import (
+    ImpairmentCapitalRiskAssessment,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1508,6 +1511,7 @@ def build_report_from_evidence(
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
     growth_check_assessment: GrowthCheckAssessment | None = None,
+    impairment_capital_assessment: ImpairmentCapitalRiskAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
     manufacturing_assessment: ManufacturingAssessment | None = None,
@@ -1530,6 +1534,7 @@ def build_report_from_evidence(
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
         growth_check_assessment=growth_check_assessment,
+        impairment_capital_assessment=impairment_capital_assessment,
         solvency_commitment_assessment=solvency_commitment_assessment,
         working_capital_risk=working_capital_risk,
         manufacturing_assessment=manufacturing_assessment,
@@ -1545,6 +1550,11 @@ def build_report_from_evidence(
     )
     manufacturing_citations = (
         manufacturing_assessment.citations if manufacturing_assessment is not None else ()
+    )
+    impairment_capital_citations = (
+        impairment_capital_assessment.citations
+        if impairment_capital_assessment is not None
+        else ()
     )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
@@ -1562,6 +1572,7 @@ def build_report_from_evidence(
                     *solvency_citations,
                     *working_capital_citations,
                     *manufacturing_citations,
+                    *impairment_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                     *(growth_check_assessment.citations if growth_check_assessment else ()),
                 ))
@@ -1597,6 +1608,11 @@ def build_report_from_evidence(
                     if solvency_commitment_assessment is not None
                     else ()
                 ),
+                *(
+                    impairment_capital_assessment.limitations
+                    if impairment_capital_assessment is not None
+                    else ()
+                ),
             ),
             checklist_assessment=checklist_assessment,
             status="blocked",
@@ -1615,14 +1631,15 @@ def build_report_from_evidence(
         generation_id,
         financial_deterioration,
         detailed,
-        peer_financial_comparison,
-        esg_legal_evidence,
-        forecast_capital_assessment,
-        governance_evidence,
-        growth_check_assessment,
-        solvency_commitment_assessment,
-        working_capital_risk,
-        manufacturing_assessment,
+        peer_financial_comparison=peer_financial_comparison,
+        esg_legal_evidence=esg_legal_evidence,
+        forecast_capital_assessment=forecast_capital_assessment,
+        governance_evidence=governance_evidence,
+        growth_check_assessment=growth_check_assessment,
+        impairment_capital_assessment=impairment_capital_assessment,
+        solvency_commitment_assessment=solvency_commitment_assessment,
+        working_capital_risk=working_capital_risk,
+        manufacturing_assessment=manufacturing_assessment,
     )
     if detailed.available:
         limitations = [
@@ -1643,6 +1660,7 @@ def build_report_from_evidence(
                     *solvency_citations,
                     *working_capital_citations,
                     *manufacturing_citations,
+                    *impairment_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                     *(growth_check_assessment.citations if growth_check_assessment else ()),
                 )
@@ -1671,6 +1689,7 @@ def build_report_from_evidence(
                 *limitations,
                 *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
                 *(growth_check_assessment.limitations if growth_check_assessment else ()),
+                *(impairment_capital_assessment.limitations if impairment_capital_assessment else ()),
                 *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
             )),
             financial_deterioration=financial_deterioration,
@@ -1720,6 +1739,7 @@ def build_report_from_evidence(
             *solvency_citations,
             *working_capital_citations,
             *manufacturing_citations,
+            *impairment_capital_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
             *(growth_check_assessment.citations if growth_check_assessment else ()),
         )),
@@ -1750,6 +1770,7 @@ def build_report_from_evidence(
             *limitations,
             *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
             *(growth_check_assessment.limitations if growth_check_assessment else ()),
+            *(impairment_capital_assessment.limitations if impairment_capital_assessment else ()),
             *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
         )),
         financial_deterioration=financial_deterioration,

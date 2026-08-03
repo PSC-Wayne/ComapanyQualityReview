@@ -41,6 +41,9 @@ from company_quality.company_analysis.forecast_capital import (
 from company_quality.company_analysis.growth_check_producers import (
     GrowthCheckAssessment,
 )
+from company_quality.company_analysis.impairment_capital_risk import (
+    ImpairmentCapitalRiskAssessment,
+)
 from company_quality.company_analysis.solvency_commitment_risk import (
     SolvencyCommitmentRiskAssessment,
 )
@@ -1302,6 +1305,7 @@ def build_checklist_assessment(
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
     growth_check_assessment: GrowthCheckAssessment | None = None,
+    impairment_capital_assessment: ImpairmentCapitalRiskAssessment | None = None,
     solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
     working_capital_risk: WorkingCapitalRiskEvidence | None = None,
     manufacturing_assessment: ManufacturingAssessment | None = None,
@@ -1544,6 +1548,15 @@ def build_checklist_assessment(
         from company_quality.sources.governance_insiders import apply_governance_checks
 
         checks = apply_governance_checks(checks, governance_evidence)
+    if impairment_capital_assessment is not None:
+        # Owns only residual R29--R36; capital-event R43--R48 stay with #124.
+        replacements = impairment_capital_assessment.by_check_id
+        checks = tuple(replacements.get(item.check_id, item) for item in checks)
+        capital_conclusion = (
+            impairment_capital_assessment.shareholder_dilution_and_capital_allocation
+        )
+        if capital_conclusion is not None:
+            risks[capital_conclusion.dimension] = capital_conclusion
     if solvency_commitment_assessment is not None:
         replacements = solvency_commitment_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
