@@ -48,6 +48,9 @@ from company_quality.company_analysis.esg_supply_chain import EsgLegalEvidence
 from company_quality.company_analysis.forecast_capital import (
     ForecastDividendCapitalAssessment,
 )
+from company_quality.company_analysis.solvency_commitment_risk import (
+    SolvencyCommitmentRiskAssessment,
+)
 from company_quality.company_analysis.detailed_analysis import (
     build_detailed_analysis,
     build_financial_deterioration,
@@ -1499,6 +1502,7 @@ def build_report_from_evidence(
     esg_legal_evidence: EsgLegalEvidence | None = None,
     forecast_capital_assessment: ForecastDividendCapitalAssessment | None = None,
     governance_evidence: GovernanceEvidenceCollection | None = None,
+    solvency_commitment_assessment: SolvencyCommitmentRiskAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1517,8 +1521,14 @@ def build_report_from_evidence(
         esg_legal_evidence=esg_legal_evidence,
         forecast_capital_assessment=forecast_capital_assessment,
         governance_evidence=governance_evidence,
+        solvency_commitment_assessment=solvency_commitment_assessment,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
+    solvency_citations = (
+        solvency_commitment_assessment.citations
+        if solvency_commitment_assessment is not None
+        else ()
+    )
     core = next(
         (item for item in bundle.source_coverage if item.family == "three_statement_html"),
         None,
@@ -1532,6 +1542,7 @@ def build_report_from_evidence(
             citations=(
                 _unique_citations((
                     *esg_citations,
+                    *solvency_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                 ))
             ),
@@ -1560,6 +1571,11 @@ def build_report_from_evidence(
                     if forecast_capital_assessment is not None
                     else ()
                 ),
+                *(
+                    solvency_commitment_assessment.limitations
+                    if solvency_commitment_assessment is not None
+                    else ()
+                ),
             ),
             checklist_assessment=checklist_assessment,
             status="blocked",
@@ -1582,6 +1598,7 @@ def build_report_from_evidence(
         esg_legal_evidence,
         forecast_capital_assessment,
         governance_evidence,
+        solvency_commitment_assessment,
     )
     if detailed.available:
         limitations = [
@@ -1599,6 +1616,7 @@ def build_report_from_evidence(
                     *detailed.citations,
                     *financial_citations,
                     *esg_citations,
+                    *solvency_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                 )
             ),
@@ -1625,6 +1643,7 @@ def build_report_from_evidence(
             limitations=tuple((
                 *limitations,
                 *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+                *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
             )),
             financial_deterioration=financial_deterioration,
             checklist_assessment=checklist_assessment,
@@ -1670,6 +1689,7 @@ def build_report_from_evidence(
             citation,
             *financial_citations,
             *esg_citations,
+            *solvency_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
         )),
         source_coverage=bundle.source_coverage,
@@ -1698,6 +1718,7 @@ def build_report_from_evidence(
         limitations=tuple((
             *limitations,
             *(forecast_capital_assessment.limitations if forecast_capital_assessment else ()),
+            *(solvency_commitment_assessment.limitations if solvency_commitment_assessment else ()),
         )),
         financial_deterioration=financial_deterioration,
         checklist_assessment=checklist_assessment,
