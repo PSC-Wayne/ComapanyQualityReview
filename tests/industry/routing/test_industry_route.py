@@ -60,7 +60,7 @@ def test_routes_general_company_by_exact_official_industry() -> None:
     assert result.reason is None
 
 
-@pytest.mark.parametrize("industry", ["14", "15", "17", "22"])
+@pytest.mark.parametrize("industry", ["14", "15", "17"])
 def test_owner_excluded_industries_are_unsupported(industry) -> None:
     result = route_industry(identity(), authority(industry=industry))
     assert result.status == "unsupported_scope"

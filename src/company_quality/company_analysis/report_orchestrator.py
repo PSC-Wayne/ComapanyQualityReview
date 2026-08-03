@@ -55,6 +55,7 @@ from company_quality.company_analysis.history_context import HistoricalContextAs
 from company_quality.company_analysis.manufacturing import ManufacturingAssessment
 from company_quality.company_analysis.software_ai import SoftwareAIAssessment
 from company_quality.company_analysis.ecommerce_epc import EcommerceEpcAssessment
+from company_quality.company_analysis.special_industries import SpecialIndustryAssessment
 from company_quality.company_analysis.impairment_capital_risk import (
     ImpairmentCapitalRiskAssessment,
 )
@@ -1521,6 +1522,7 @@ def build_report_from_evidence(
     manufacturing_assessment: ManufacturingAssessment | None = None,
     software_ai_assessment: SoftwareAIAssessment | None = None,
     ecommerce_epc_assessment: EcommerceEpcAssessment | None = None,
+    special_industry_assessment: SpecialIndustryAssessment | None = None,
 ) -> SingleCompanyResearchReport:
     """Produce a valid conservative report without inventing unimplemented analysis."""
 
@@ -1547,6 +1549,7 @@ def build_report_from_evidence(
         manufacturing_assessment=manufacturing_assessment,
         software_ai_assessment=software_ai_assessment,
         ecommerce_epc_assessment=ecommerce_epc_assessment,
+        special_industry_assessment=special_industry_assessment,
     )
     esg_citations = esg_legal_evidence.citations if esg_legal_evidence is not None else ()
     solvency_citations = (
@@ -1565,6 +1568,11 @@ def build_report_from_evidence(
     )
     ecommerce_epc_citations = (
         ecommerce_epc_assessment.citations if ecommerce_epc_assessment is not None else ()
+    )
+    special_industry_citations = (
+        special_industry_assessment.citations
+        if special_industry_assessment is not None
+        else ()
     )
     impairment_capital_citations = (
         impairment_capital_assessment.citations
@@ -1589,6 +1597,7 @@ def build_report_from_evidence(
                     *manufacturing_citations,
                     *software_ai_citations,
                     *ecommerce_epc_citations,
+                    *special_industry_citations,
                     *impairment_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                     *(growth_check_assessment.citations if growth_check_assessment else ()),
@@ -1659,6 +1668,7 @@ def build_report_from_evidence(
         manufacturing_assessment=manufacturing_assessment,
         software_ai_assessment=software_ai_assessment,
         ecommerce_epc_assessment=ecommerce_epc_assessment,
+        special_industry_assessment=special_industry_assessment,
         historical_context=historical_context,
     )
     if detailed.available:
@@ -1682,6 +1692,7 @@ def build_report_from_evidence(
                     *manufacturing_citations,
                     *software_ai_citations,
                     *ecommerce_epc_citations,
+                    *special_industry_citations,
                     *impairment_capital_citations,
                     *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
                     *(growth_check_assessment.citations if growth_check_assessment else ()),
@@ -1763,6 +1774,7 @@ def build_report_from_evidence(
             *manufacturing_citations,
             *software_ai_citations,
             *ecommerce_epc_citations,
+            *special_industry_citations,
             *impairment_capital_citations,
             *(forecast_capital_assessment.citations if forecast_capital_assessment else ()),
             *(growth_check_assessment.citations if growth_check_assessment else ()),

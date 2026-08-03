@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from company_quality.company_analysis.manufacturing import ManufacturingAssessment
     from company_quality.company_analysis.ecommerce_epc import EcommerceEpcAssessment
     from company_quality.company_analysis.software_ai import SoftwareAIAssessment
+    from company_quality.company_analysis.special_industries import SpecialIndustryAssessment
 
 
 _CANONICAL_GROWTH_METRICS = {
@@ -1340,6 +1341,21 @@ def _apply_software_ai_assessment(
     return tuple(rows[item.check_id] for item in checks)
 
 
+def _apply_special_industry_assessment(
+    checks: tuple[ChecklistCheckResult, ...],
+    assessment: SpecialIndustryAssessment | None,
+) -> tuple[ChecklistCheckResult, ...]:
+    """Apply the exact routed biotech or energy rows, preserving checklist order."""
+
+    if assessment is None:
+        return checks
+    rows = {item.check_id: item for item in checks}
+    for incoming in assessment.checks:
+        if incoming.check_id in rows:
+            rows[incoming.check_id] = incoming
+    return tuple(rows[item.check_id] for item in checks)
+
+
 def _transmission(reason: str) -> tuple[GrowthTransmissionStage, ...]:
     return tuple(
         GrowthTransmissionStage(item, "unresolved", (), reason)
@@ -1364,6 +1380,7 @@ def build_checklist_assessment(
     manufacturing_assessment: ManufacturingAssessment | None = None,
     ecommerce_epc_assessment: EcommerceEpcAssessment | None = None,
     software_ai_assessment: SoftwareAIAssessment | None = None,
+    special_industry_assessment: SpecialIndustryAssessment | None = None,
 ) -> ChecklistAssessment:
     route: CompanyRoute = (
         "financial_institution_unrouted"
@@ -1382,6 +1399,11 @@ def build_checklist_assessment(
     if context.as_of != bundle.request.as_of:
         raise ValueError("historical context as_of mismatch")
     industry_route = _industry_route(bundle, route, context, ecommerce_epc_assessment)
+    if special_industry_assessment is not None:
+        if special_industry_assessment.issuer_id != bundle.identity.issuer_id:
+            raise ValueError("special-industry assessment issuer mismatch")
+        if special_industry_assessment.industry_route != industry_route:
+            raise ValueError("special-industry assessment route mismatch")
     document_evidence = getattr(detailed_analysis, "checklist_document_evidence", None)
     if document_evidence is None:
         document_evidence = collect_checklist_document_evidence(
@@ -1615,6 +1637,8 @@ def build_checklist_assessment(
         if software_ai_assessment.as_of != bundle.request.as_of:
             raise ValueError("software assessment as_of mismatch")
         checks = _apply_software_ai_assessment(checks, software_ai_assessment)
+    if industry_route in {"biotech", "energy"}:
+        checks = _apply_special_industry_assessment(checks, special_industry_assessment)
     if forecast_capital_assessment is not None:
         replacements = forecast_capital_assessment.by_check_id
         checks = tuple(replacements.get(item.check_id, item) for item in checks)
