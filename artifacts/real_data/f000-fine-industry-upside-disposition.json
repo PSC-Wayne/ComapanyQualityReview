@@ -1,0 +1,67 @@
+{
+  "schema_version": "FineIndustryUpsideDisposition.v1",
+  "status": "research_only",
+  "reason": "pre_oos_gates_failed",
+  "publishable": false,
+  "formal_stars_enabled": false,
+  "final_oos_read": false,
+  "champion_candidate_id": null,
+  "candidate_id": "f000_multilabel_partial_pooling_ridge_v1",
+  "failed_gates": [
+    "mae_5pct_better_than_naive_and_linear",
+    "auc_at_least_0_62"
+  ],
+  "diagnostics": {
+    "metrics": {
+      "n": 204,
+      "mae": 0.3262230537,
+      "naive_mae": 0.3485700539,
+      "linear_mae": 0.3264509022,
+      "spearman": 0.508333,
+      "direction_pp": 7.3529,
+      "auc": 0.594724,
+      "coverage": 0.789216
+    },
+    "gates": {
+      "mae_5pct_better_than_naive_and_linear": false,
+      "spearman_at_least_0_10": true,
+      "direction_improvement_at_least_5pp": true,
+      "auc_at_least_0_62": false,
+      "interval_coverage_0_75_to_0_85": true
+    }
+  },
+  "source_status": {
+    "schema_version": "TPExF000HistoricalPITReport.v1",
+    "eligible_decision_dates": [
+      "2016-06-30", "2017-06-30", "2018-06-30",
+      "2019-06-30", "2020-06-30", "2021-06-30"
+    ],
+    "excluded_decision_dates": {
+      "2014-06-30": "NO_PRE_DECISION_SNAPSHOT",
+      "2015-06-30": "NO_PRE_DECISION_SNAPSHOT",
+      "2022-06-30": "STALE_AUDIT_ONLY"
+    },
+    "current_backfill_used": false
+  },
+  "primary_business_status": {
+    "schema_version": "TPExF000PrimaryBusinessPilot.v1",
+    "observation_count": 8,
+    "attributed_count": 7,
+    "ambiguous_count": 1,
+    "attributed_coverage": 0.875,
+    "scale_recommendation": "CONDITIONAL_SCALE_WITH_EXCLUSION",
+    "current_backfill_used": false
+  },
+  "routing": {
+    "route_key": "official_industry_code=25",
+    "cross_market_pooling": true,
+    "market_used_as_route_key": false,
+    "market_used_as_model_feature": false,
+    "observation_key_excludes_market": true
+  },
+  "evidence_refs": [
+    "https://github.com/PSC-Wayne/ComapanyQualityReview/pull/178",
+    "https://github.com/PSC-Wayne/ComapanyQualityReview/pull/179",
+    "https://github.com/PSC-Wayne/ComapanyQualityReview/pull/180"
+  ]
+}
