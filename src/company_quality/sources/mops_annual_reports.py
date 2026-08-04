@@ -12,6 +12,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from enum import StrEnum
 from html import unescape
 from html.parser import HTMLParser
+import http.client
 import os
 from pathlib import Path
 import re
@@ -351,7 +352,7 @@ class MopsAnnualReportAcquirer:
         for attempt in range(self.max_attempts):
             try:
                 return parse(self._request(method, url, data)), None
-            except (urllib.error.URLError, OSError) as exc:
+            except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
                 last = _ResponseFailure("transport_error", f"MOPS transport failed: {exc}")
             except _ResponseFailure as exc:
                 last = exc
