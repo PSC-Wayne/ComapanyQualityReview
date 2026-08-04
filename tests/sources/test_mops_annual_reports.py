@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http.client import BadStatusLine
 from pathlib import Path
 from urllib.error import URLError
 
@@ -164,6 +165,19 @@ def test_transport_failures_retry_bounded_and_record_final_probe(tmp_path: Path)
     assert result.failure_kind == "transport_error"
     assert result.request_count == 3
     assert client.probes == (result,)
+    assert_throttled(transport)
+
+
+def test_bad_http_status_line_is_bounded_transport_failure(tmp_path: Path) -> None:
+    error = BadStatusLine('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">')
+    client, transport, _clock = acquirer(tmp_path, [error, error, error])
+
+    result = client.acquire("6203", 2023, "2024-06-30")
+
+    assert result.state is AnnualReportSourceState.SOURCE_UNAVAILABLE
+    assert result.failure_kind == "transport_error"
+    assert result.request_count == 3
+    assert len(transport.calls) == 3
     assert_throttled(transport)
 
 
