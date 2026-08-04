@@ -178,6 +178,11 @@ def _parse_listing(
         raise _ResponseFailure("security_response", "MOPS returned a security page")
     lowered = text.lower()
     valid_shell = (
+        "電子資料查詢作業" in text
+        and "t57sb01" in lowered
+        and "readfile" in lowered
+        and "<table" in lowered
+    ) or (
         "公開資訊觀測站" in text
         and "t57sb01" in lowered
         and "<table" in lowered
@@ -250,11 +255,20 @@ def _parse_pdf_url(body: bytes, filename: str) -> str:
         raw = match.group(1) if match else candidate
         url = urllib.parse.urljoin(_LISTING_URL, raw)
         parsed = urllib.parse.urlparse(url)
+        candidate_name = Path(urllib.parse.unquote(parsed.path)).name
+        requested_stem = Path(filename).stem
+        matches_transient_name = (
+            candidate_name == filename
+            or (
+                candidate_name.startswith(requested_stem + "_")
+                and candidate_name.lower().endswith(".pdf")
+            )
+        )
         if (
             parsed.scheme == "https"
             and (parsed.hostname or "").lower() == _OFFICIAL_HOST
             and parsed.path.startswith("/pdf/")
-            and Path(urllib.parse.unquote(parsed.path)).name == filename
+            and matches_transient_name
         ):
             return url
     raise _ResponseFailure(
