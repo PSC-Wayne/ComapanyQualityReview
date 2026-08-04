@@ -35,7 +35,7 @@ def _column(frame: pd.DataFrame, code: str) -> pd.Series:
         column for column in frame.columns if str(column).split()[0] == code
     ]
     if not candidates:
-        return pd.Series(dtype=float)
+        return pd.Series(index=pd.DatetimeIndex([]), dtype=float)
     values = frame.loc[:, candidates].apply(pd.to_numeric, errors="coerce")
     if (values.nunique(axis=1, dropna=True) > 1).any():
         raise ValueError(f"conflicting alias values for security {code}")
