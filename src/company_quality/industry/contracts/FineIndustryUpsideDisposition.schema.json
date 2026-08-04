@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://company-quality.local/contracts/FineIndustryUpsideDisposition.v1.schema.json",
+  "title": "FineIndustryUpsideDisposition.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "status", "reason", "publishable", "formal_stars_enabled",
+    "final_oos_read", "champion_candidate_id", "candidate_id", "failed_gates",
+    "diagnostics", "source_status", "primary_business_status", "routing"
+  ],
+  "properties": {
+    "schema_version": {"const": "FineIndustryUpsideDisposition.v1"},
+    "status": {"enum": ["research_only", "industry_sample_insufficient"]},
+    "reason": {"type": "string", "minLength": 1},
+    "publishable": {"const": false},
+    "formal_stars_enabled": {"const": false},
+    "final_oos_read": {"const": false},
+    "champion_candidate_id": {"type": "null"},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "failed_gates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "diagnostics": {
+      "type": "object", "additionalProperties": false, "required": ["metrics", "gates"],
+      "properties": {
+        "metrics": {"type": "object"},
+        "gates": {"type": "object", "additionalProperties": {"type": "boolean"}}
+      }
+    },
+    "source_status": {"type": "object"},
+    "primary_business_status": {"type": "object"},
+    "routing": {"type": "object"},
+    "evidence_refs": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string", "format": "uri"}}
+  }
+}
