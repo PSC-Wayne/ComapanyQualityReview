@@ -31,3 +31,14 @@ def test_column_accepts_equal_overlap_but_blocks_conflicting_alias_values() -> N
     )
     with pytest.raises(ValueError, match="conflicting alias values for security 2204"):
         _column(conflicting, "2204")
+
+
+def test_column_preserves_datetime_index_type_when_security_is_missing() -> None:
+    frame = pd.DataFrame(
+        {"2330": [100.0]}, index=pd.DatetimeIndex(["2020-01-01"])
+    )
+
+    result = _column(frame, "5280")
+
+    assert result.empty
+    assert isinstance(result.index, pd.DatetimeIndex)
