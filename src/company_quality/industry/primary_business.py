@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from html import unescape
 import re
 from typing import Iterable
+import unicodedata
 from urllib.parse import urlparse
 
 
@@ -29,7 +31,150 @@ class ReportedRevenueCategory:
     revenue_share_pct: float
     node_code: str | None
     page: int
-    summary: str
+    source_text: str
+
+    @property
+    def summary(self) -> str:
+        """Backward-compatible evidence text name used by the #183 contract."""
+        return self.source_text
+
+
+@dataclass(frozen=True, slots=True)
+class ProductRevenueExtraction:
+    status: str
+    rows: tuple[ReportedRevenueCategory, ...]
+    reason: str | None = None
+
+
+_CATEGORY_HEADERS = ("產品別", "產品類別", "產品項目", "產品名稱")
+_SHARE_HEADERS = ("營業收入比重", "營業收入占比", "營收比重", "營收占比")
+_TOTAL_LABELS = {"合計", "總計"}
+_SHARE_ROW = re.compile(
+    r"^(?P<category>.+?)\s+(?P<share>\S+)\s*[%％]$"
+)
+
+
+def _normalized_exact_name(value: str) -> str:
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", value)).casefold()
+
+
+def _is_revenue_table_header(line: str) -> bool:
+    compact = _normalized_exact_name(line)
+    return any(label in compact for label in _CATEGORY_HEADERS) and any(
+        label in compact for label in _SHARE_HEADERS
+    )
+
+
+def _parse_revenue_table(
+    *,
+    page: int,
+    lines: list[str],
+    header_index: int,
+    node_code_by_name: dict[str, str | None],
+) -> tuple[ReportedRevenueCategory, ...] | None:
+    parsed: list[tuple[str, str, Decimal, str]] = []
+    total: Decimal | None = None
+    for source_line in lines[header_index + 1 :]:
+        source_text = source_line.strip()
+        if not source_text:
+            continue
+        if re.fullmatch(r"單位\s*[:：]?\s*[%％]", source_text):
+            continue
+        match = _SHARE_ROW.fullmatch(source_text)
+        if match is None:
+            return None
+        category = match.group("category").strip()
+        try:
+            share = Decimal(unicodedata.normalize("NFKC", match.group("share")))
+        except InvalidOperation:
+            return None
+        if share < 0 or share > 100:
+            return None
+        normalized_category = _normalized_exact_name(category)
+        if normalized_category in _TOTAL_LABELS:
+            total = share
+            break
+        if not normalized_category or any(
+            normalized_category == existing
+            for existing, _, _, _ in parsed
+        ):
+            return None
+        parsed.append((normalized_category, category, share, source_line))
+
+    if not parsed or total is None:
+        return None
+    tolerance = Decimal("0.05")
+    row_total = sum((share for _, _, share, _ in parsed), Decimal("0"))
+    if abs(total - Decimal("100")) > tolerance or abs(row_total - total) > tolerance:
+        return None
+
+    rows: list[ReportedRevenueCategory] = []
+    for normalized_category, category, share, source_text in parsed:
+        rows.append(
+            ReportedRevenueCategory(
+                category=category,
+                revenue_share_pct=float(share),
+                node_code=node_code_by_name.get(normalized_category),
+                page=page,
+                source_text=source_text,
+            )
+        )
+    return tuple(rows)
+
+
+def extract_product_revenue_evidence(
+    *,
+    pages: Iterable[tuple[int, str]],
+    candidate_nodes: Iterable[dict[str, str]],
+) -> ProductRevenueExtraction:
+    """Extract one explicit, reconciled product-revenue composition table.
+
+    Mapping is deliberately limited to a unique normalized exact node-name match.
+    The caller supplies PDF page text; this function performs no PDF or OCR work.
+    """
+    node_codes_by_name: dict[str, list[str]] = {}
+    for candidate in candidate_nodes:
+        code = str(candidate.get("node_code", "")).strip()
+        name = str(candidate.get("node_name", "")).strip()
+        if not code or not name:
+            raise PrimaryBusinessEvidenceError(
+                "decision-time TPEx candidate nodes require node_code and node_name"
+            )
+        node_codes_by_name.setdefault(_normalized_exact_name(name), []).append(code)
+    if not node_codes_by_name:
+        raise PrimaryBusinessEvidenceError("decision-time TPEx candidate nodes required")
+    node_code_by_name = {
+        name: codes[0] if len(codes) == 1 else None
+        for name, codes in node_codes_by_name.items()
+    }
+
+    page_rows = list(pages)
+    for page, text in page_rows:
+        if not isinstance(page, int) or page <= 0 or not isinstance(text, str):
+            raise PrimaryBusinessEvidenceError(
+                "annual-report pages require positive page numbers and text"
+            )
+    if not any(text.strip() for _, text in page_rows):
+        return ProductRevenueExtraction("missing_evidence", (), "no_text")
+
+    detected: list[tuple[ReportedRevenueCategory, ...] | None] = []
+    for page, text in page_rows:
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if _is_revenue_table_header(line):
+                detected.append(
+                    _parse_revenue_table(
+                        page=page,
+                        lines=lines,
+                        header_index=index,
+                        node_code_by_name=node_code_by_name,
+                    )
+                )
+    if not detected:
+        return ProductRevenueExtraction("missing_evidence", (), "no_table")
+    if len(detected) != 1 or detected[0] is None:
+        return ProductRevenueExtraction("missing_evidence", (), "malformed_table")
+    return ProductRevenueExtraction("extracted", detected[0])
 
 
 def _official_mops_locator(url: str) -> None:
@@ -270,7 +415,8 @@ def validate_primary_business_pilot(payload: dict[str, object]) -> dict[str, int
 
 
 __all__ = [
-    "AnnualReportDocument", "PrimaryBusinessEvidenceError", "ReportedRevenueCategory",
-    "build_primary_business_pit_observation", "parse_mops_annual_report_listing",
+    "AnnualReportDocument", "PrimaryBusinessEvidenceError", "ProductRevenueExtraction",
+    "ReportedRevenueCategory", "build_primary_business_pit_observation",
+    "extract_product_revenue_evidence", "parse_mops_annual_report_listing",
     "select_pre_decision_annual_report", "validate_primary_business_pilot",
 ]
