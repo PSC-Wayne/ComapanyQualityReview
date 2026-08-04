@@ -138,6 +138,8 @@ def test_fixed_pit_multilabel_comparison_is_pooled_unique_and_research_only() ->
     assert report["route_key"] == "official_industry_code=25"
     assert report["market_used_as_route_key"] is False
     assert report["market_used_as_model_feature"] is False
+    assert report["observation_key"] == ["issuer_id", "security_code", "decision_date"]
+    assert report["duplicate_candidate_observation_count"] == 0
     assert report["eligible_decision_dates"] == [
         "2016-06-30", "2017-06-30", "2018-06-30",
         "2019-06-30", "2020-06-30", "2021-06-30",

@@ -531,6 +531,8 @@ def build_f000_multilabel_comparison(
         "market_used_as_route_key": False,
         "market_used_as_model_feature": False,
         "official_market_benchmark_labels_retained": True,
+        "observation_key": list(_OBSERVATION_KEY),
+        "duplicate_candidate_observation_count": 0,
         "eligible_decision_dates": list(_ELIGIBLE_DATES),
         "excluded_decision_dates": dict(_EXCLUDED_DATES),
         "fixed_model_contract": {
