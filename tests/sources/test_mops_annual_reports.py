@@ -86,7 +86,7 @@ def test_available_f04_is_selected_pre_decision_resolved_through_step9_and_dedup
     assert first.document.filename == "2023_6203_20240531F04.pdf"
     assert first.document.available_at == "2024-05-31T09:30:00+08:00"
     assert first.pdf_url == (
-        "https://doc.twse.com.tw/pdf/2023_6203_20240531F04.pdf?download=1"
+        "https://doc.twse.com.tw/pdf/2023_6203_20240531F04_20260804_132500.pdf"
     )
     assert first.pdf_path is not None
     assert first.pdf_path.read_bytes() == PDF
