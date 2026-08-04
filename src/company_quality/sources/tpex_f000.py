@@ -259,45 +259,48 @@ def _iso_utc(value: datetime | str) -> str:
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def _validate_official_url(url: str) -> None:
+def _validate_official_url(url: str, chain_code: str = _CHAIN_CODE) -> None:
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
     if (
         parsed.scheme not in {"http", "https"}
         or (parsed.hostname or "").lower() != "ic.tpex.org.tw"
         or parsed.path.rstrip("/") != "/introduce.php"
-        or query.get("ic") != [_CHAIN_CODE]
+        or query.get("ic") != [chain_code]
     ):
-        raise F000SourceError("source is not the official TPEx F000 page")
+        raise F000SourceError(f"source is not the official TPEx {chain_code} page")
 
 
-def _validate_replay_url(url: str) -> None:
+def _validate_replay_url(url: str, chain_code: str = _CHAIN_CODE) -> None:
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.hostname != "web.archive.org":
         raise F000SourceError("historical source is not a Wayback replay")
     match = re.match(r"^/web/\d{14}(?:id_)?/(https?://.+)$", parsed.path + ("?" + parsed.query if parsed.query else ""))
     if not match:
         raise F000SourceError("historical Wayback replay URL is malformed")
-    _validate_official_url(match.group(1))
+    _validate_official_url(match.group(1), chain_code)
 
 
-def parse_f000_snapshot(
+def parse_chain_snapshot(
     body: bytes,
     *,
+    chain_code: str,
     snapshot_at: datetime | str,
     source_url: str,
     replay_url: str | None,
     issuer_by_security_code: Mapping[str, str] | None = None,
 ) -> ParsedF000Snapshot:
     """Parse one official page capture without executing scripts or using a private API."""
-    _validate_official_url(source_url)
+    if not re.fullmatch(r"[A-Z0-9]{4}", chain_code):
+        raise F000SourceError(f"invalid TPEx chain code: {chain_code}")
+    _validate_official_url(source_url, chain_code)
     if replay_url is not None:
-        _validate_replay_url(replay_url)
+        _validate_replay_url(replay_url, chain_code)
     snapshot_iso = _iso_utc(snapshot_at)
     try:
         text = body.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise F000SourceError("official TPEx F000 page must be UTF-8") from exc
+        raise F000SourceError(f"official TPEx {chain_code} page must be UTF-8") from exc
     parser = _F000HTMLParser()
     parser.feed(text)
     chain_headers = [
@@ -306,23 +309,26 @@ def parse_f000_snapshot(
         if value.endswith("產業鏈簡介")
     ]
     if not chain_headers:
-        raise F000SourceError("official TPEx F000 chain heading is missing")
+        raise F000SourceError(f"official TPEx {chain_code} chain heading is missing")
     chain_name = chain_headers[0]
 
     raw_nodes: dict[str, tuple[str, str]] = {}
     for stage, code, name in parser.nodes:
-        if stage not in {"上游", "中游", "下游"} or not re.fullmatch(r"F[A-Z0-9]{3}", code) or not name:
-            raise F000SourceError("official TPEx F000 node is malformed")
-        value = (stage, name)
+        if not re.fullmatch(r"[A-Z0-9]{4,8}", code) or not name:
+            raise F000SourceError(f"official TPEx {chain_code} node is malformed")
+        # Newer chains use domain stages instead of 上/中/下游; several legacy
+        # pages publish nodes without a stage heading at all.
+        value = (stage or "未分層", name)
         if code in raw_nodes and raw_nodes[code] != value:
-            raise F000SourceError("official TPEx F000 node code is conflicting")
+            raise F000SourceError(f"official TPEx {chain_code} node code is conflicting")
         raw_nodes[code] = value
     if not raw_nodes:
-        raise F000SourceError("official TPEx F000 page contains no nodes")
+        raise F000SourceError(f"official TPEx {chain_code} page contains no nodes")
 
+    node_order = {code: position for position, (_, code, _) in enumerate(parser.nodes)}
     nodes = tuple(
         F000Node(
-            chain_code=_CHAIN_CODE,
+            chain_code=chain_code,
             chain_name=chain_name,
             stage=stage,
             node_code=code,
@@ -331,20 +337,20 @@ def parse_f000_snapshot(
             source_url=source_url,
             replay_url=replay_url,
         )
-        for code, (stage, name) in sorted(raw_nodes.items(), key=lambda item: parser.nodes.index((item[1][0], item[0], item[1][1])))
+        for code, (stage, name) in sorted(raw_nodes.items(), key=lambda item: node_order[item[0]])
     )
     issuers = issuer_by_security_code or {}
     unique: dict[tuple[str, str, str], F000Membership] = {}
     for node_code, group, code, name in parser.memberships:
         node = raw_nodes.get(node_code)
         if node is None:
-            raise F000SourceError("membership references an unknown F000 node")
+            raise F000SourceError(f"membership references an unknown {chain_code} node")
         market = _group_kind(group)
         if market is None:
             continue
         issuer_id = str(issuers.get(code, "")).strip() or None
         row = F000Membership(
-            chain_code=_CHAIN_CODE,
+            chain_code=chain_code,
             chain_name=chain_name,
             stage=node[0],
             node_code=node_code,
@@ -363,20 +369,21 @@ def parse_f000_snapshot(
         key = (node_code, group, code)
         prior = unique.get(key)
         if prior is not None and prior.security_name != name:
-            raise F000SourceError("duplicate F000 membership has conflicting company names")
+            raise F000SourceError(f"duplicate {chain_code} membership has conflicting company names")
         unique[key] = row
     memberships = tuple(sorted(unique.values(), key=lambda row: (row.node_code, row.security_market, row.security_code)))
     security_codes = {row.security_code for row in memberships}
     resolved_codes = {row.security_code for row in memberships if row.identity_status == "resolved"}
     report: dict[str, object] = {
-        "schema_version": "TPExF000SnapshotReport.v1",
+        "schema_version": "TPExValueChainSnapshotReport.v1",
         "source_kind": "wayback_official_replay" if replay_url else "current_official_page",
-        "chain_code": _CHAIN_CODE,
+        "chain_code": chain_code,
         "chain_name": chain_name,
         "snapshot_at": snapshot_iso,
         "source_url": source_url,
         "replay_url": replay_url,
         "node_count": len(nodes),
+        "unlabeled_stage_node_count": sum(not stage for stage, _, _ in parser.nodes),
         "deduplicated_membership_count": len(memberships),
         "unique_security_count": len(security_codes),
         "resolved_unique_security_count": len(resolved_codes),
@@ -385,6 +392,27 @@ def parse_f000_snapshot(
         "market_is_not_route_key": True,
     }
     return ParsedF000Snapshot(nodes, memberships, report)
+
+
+def parse_f000_snapshot(
+    body: bytes,
+    *,
+    snapshot_at: datetime | str,
+    source_url: str,
+    replay_url: str | None,
+    issuer_by_security_code: Mapping[str, str] | None = None,
+) -> ParsedF000Snapshot:
+    """Backward-compatible F000 parser over the generalized chain parser."""
+    parsed = parse_chain_snapshot(
+        body,
+        chain_code=_CHAIN_CODE,
+        snapshot_at=snapshot_at,
+        source_url=source_url,
+        replay_url=replay_url,
+        issuer_by_security_code=issuer_by_security_code,
+    )
+    parsed.report["schema_version"] = "TPExF000SnapshotReport.v1"
+    return parsed
 
 
 def _decision_day(value: str) -> date:
@@ -617,5 +645,6 @@ __all__ = [
     "collect_current_f000",
     "discover_wayback_captures",
     "materialize_f000",
+    "parse_chain_snapshot",
     "parse_f000_snapshot",
 ]
