@@ -1,0 +1,196 @@
+{
+  "schema_version": "TPExF000PrimaryBusinessPilot.v1",
+  "status": "RESEARCH_PILOT",
+  "decision_date": "2025-06-30",
+  "taxonomy_source": {
+    "source_url": "http://ic.tpex.org.tw:80/introduce.php?ic=F000",
+    "snapshot_at": "2025-01-17T11:30:32Z",
+    "replay_url": "https://web.archive.org/web/20250117113032id_/https://ic.tpex.org.tw/introduce.php?ic=F000"
+  },
+  "current_backfill_used": false,
+  "observations": [
+    {
+      "issuer_id": "53687704",
+      "security_code": "6669",
+      "company_name": "緯穎",
+      "market": "TWSE",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [{"node_code": "FM00", "node_name": "伺服器"}],
+      "status": "attributed",
+      "primary_child": {"node_code": "FM00", "node_name": "伺服器"},
+      "reported_revenue_share_pct": 100.0,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=6669&year=114&seamon=&mtype=F",
+        "document_filename": "2024_6669_20250529F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-09T08:05:35+08:00",
+        "page": 75,
+        "summary": "年報營業比重表列資料中心產品占113年度營收100%，主要商品包含多節點、儲存及AI伺服器。"
+      }
+    },
+    {
+      "issuer_id": "05155853",
+      "security_code": "2395",
+      "company_name": "研華",
+      "market": "TWSE",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [{"node_code": "FK00", "node_name": "工業電腦"}],
+      "status": "attributed",
+      "primary_child": {"node_code": "FK00", "node_name": "工業電腦"},
+      "reported_revenue_share_pct": 49.0,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=2395&year=114&seamon=&mtype=F",
+        "document_filename": "2024_2395_20250529F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-09T15:19:07+08:00",
+        "page": 92,
+        "summary": "年報列產業電腦及工業控制49%、嵌入式板卡及系統41%，官方F000候選節點只有工業電腦。"
+      }
+    },
+    {
+      "issuer_id": "23826200",
+      "security_code": "2399",
+      "company_name": "映泰",
+      "market": "TWSE",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [{"node_code": "F600", "node_name": "主機板"}],
+      "status": "attributed",
+      "primary_child": {"node_code": "F600", "node_name": "主機板"},
+      "reported_revenue_share_pct": 56.0,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=2399&year=114&seamon=&mtype=F",
+        "document_filename": "2024_2399_20250620F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-27T14:49:59+08:00",
+        "page": 29,
+        "summary": "年報明載113年合併營收以電腦主機板為主，占56%；顯示卡11%、工業電腦10%。"
+      }
+    },
+    {
+      "issuer_id": "04329168",
+      "security_code": "6203",
+      "company_name": "海韻電",
+      "market": "TPEx",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [{"node_code": "F800", "node_name": "電源供應器"}],
+      "status": "attributed",
+      "primary_child": {"node_code": "F800", "node_name": "電源供應器"},
+      "reported_revenue_share_pct": 98.34,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=6203&year=114&seamon=&mtype=F",
+        "document_filename": "2024_6203_20250613F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-23T17:43:27+08:00",
+        "page": 85,
+        "summary": "年報主要產品營業比重表列113年度電源供應器占98.34%。"
+      }
+    },
+    {
+      "issuer_id": "16619628",
+      "security_code": "3324",
+      "company_name": "雙鴻",
+      "market": "TPEx",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [{"node_code": "FB00", "node_name": "散熱片、風扇馬達、散熱模組"}],
+      "status": "attributed",
+      "primary_child": {"node_code": "FB00", "node_name": "散熱片、風扇馬達、散熱模組"},
+      "reported_revenue_share_pct": 100.0,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=3324&year=114&seamon=&mtype=F",
+        "document_filename": "2024_3324_20250516F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-04-18T17:32:20+08:00",
+        "page": 65,
+        "summary": "年報主要產品類別及營業比重表列113年度散熱模組占100%。"
+      }
+    },
+    {
+      "issuer_id": "84166074",
+      "security_code": "2495",
+      "company_name": "普安",
+      "market": "TWSE",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [
+        {"node_code": "FG00", "node_name": "磁碟儲存系統"},
+        {"node_code": "FW00", "node_name": "安全監控系統"}
+      ],
+      "status": "attributed",
+      "primary_child": {"node_code": "FG00", "node_name": "磁碟儲存系統"},
+      "reported_revenue_share_pct": 100.0,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=2495&year=114&seamon=&mtype=F",
+        "document_filename": "2024_2495_20250613F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-09T17:20:43+08:00",
+        "page": 64,
+        "summary": "年報明載磁碟陣列、網路附加儲存、儲存軟體及周邊組件營業比重100%。"
+      }
+    },
+    {
+      "issuer_id": "12649951",
+      "security_code": "8299",
+      "company_name": "群聯",
+      "market": "TPEx",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [
+        {"node_code": "F500", "node_name": "記憶體"},
+        {"node_code": "FO00", "node_name": "隨身碟、記憶卡讀卡機"},
+        {"node_code": "FX00", "node_name": "其他電腦及週邊設備之零組件"}
+      ],
+      "status": "attributed",
+      "primary_child": {"node_code": "F500", "node_name": "記憶體"},
+      "reported_revenue_share_pct": 72.43,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=8299&year=114&seamon=&mtype=F",
+        "document_filename": "2024_8299_20250527F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-08T09:10:48+08:00",
+        "page": 76,
+        "summary": "年報產品營業比重表列快閃記憶體模組產品占72.43%，控制晶片16.40%。"
+      }
+    },
+    {
+      "issuer_id": "22044755",
+      "security_code": "2376",
+      "company_name": "技嘉",
+      "market": "TWSE",
+      "decision_date": "2025-06-30",
+      "candidate_nodes": [
+        {"node_code": "F400", "node_name": "顯示器模組"},
+        {"node_code": "F600", "node_name": "主機板"},
+        {"node_code": "F700", "node_name": "機殼"},
+        {"node_code": "F800", "node_name": "電源供應器"},
+        {"node_code": "FB00", "node_name": "散熱片、風扇馬達、散熱模組"},
+        {"node_code": "FD00", "node_name": "顯示卡"},
+        {"node_code": "FI00", "node_name": "筆記型電腦"},
+        {"node_code": "FJ00", "node_name": "桌上型電腦"},
+        {"node_code": "FK00", "node_name": "工業電腦"},
+        {"node_code": "FL00", "node_name": "精簡型電腦"},
+        {"node_code": "FM00", "node_name": "伺服器"},
+        {"node_code": "FN00", "node_name": "其他電腦及週邊設備"}
+      ],
+      "status": "ambiguous",
+      "primary_child": null,
+      "reported_revenue_share_pct": null,
+      "evidence": {
+        "source_url": "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&kind=F&co_id=2376&year=114&seamon=&mtype=F",
+        "document_filename": "2024_2376_20250610F04.pdf",
+        "document_year": 2024,
+        "available_at": "2025-05-21T16:52:38+08:00",
+        "page": 66,
+        "summary": "年報列網通產品64.27%、電腦組件31.22%，但網通產品無法唯一映射到12個TPEx候選節點，故不指定主業子集合。"
+      }
+    }
+  ],
+  "summary": {
+    "observation_count": 8,
+    "attributed_count": 7,
+    "ambiguous_count": 1,
+    "missing_evidence_count": 0,
+    "attributed_coverage": 0.875,
+    "market_count": 2,
+    "primary_node_count": 7,
+    "scale_recommendation": "CONDITIONAL_SCALE_WITH_EXCLUSION"
+  },
+  "conclusion": "官方年報產品營收可對純業務公司建立唯一主業節點；多業務且營收類別無法直接映射TPEx節點者必須標示ambiguous並排除。可條件式擴大，但不可自動把全部F000公司硬歸唯一節點。"
+}
