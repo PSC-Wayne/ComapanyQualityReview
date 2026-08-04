@@ -123,6 +123,28 @@ def test_scanned_empty_or_no_explicit_table_is_missing_evidence(pages, reason) -
     assert result.rows == ()
 
 
+def test_extracts_amount_share_table_but_does_not_guess_specialized_node() -> None:
+    result = extract_product_revenue_evidence(
+        pages=[
+            (
+                54,
+                "鋰電池組 56,761,535 97.7%\n"
+                "其他銷貨 1,358,803 2.3%\n"
+                "營業收入總額 58,120,338 100.0%\n"
+                "3.公司目前之產品項目：",
+            )
+        ],
+        candidate_nodes=[{"node_code": "FA00", "node_name": "電池"}],
+    )
+
+    assert result.status == "extracted"
+    assert [(row.category, row.revenue_share_pct, row.node_code) for row in result.rows] == [
+        ("鋰電池組", 97.7, None),
+        ("其他銷貨", 2.3, None),
+    ]
+    assert all(row.page == 54 for row in result.rows)
+
+
 @pytest.mark.parametrize(
     "table",
     [

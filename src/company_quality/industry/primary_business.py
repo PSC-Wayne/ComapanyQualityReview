@@ -52,6 +52,11 @@ _TOTAL_LABELS = {"合計", "總計"}
 _SHARE_ROW = re.compile(
     r"^(?P<category>.+?)\s+(?P<share>\S+)\s*[%％]$"
 )
+_AMOUNT_SHARE_ROW = re.compile(
+    r"^(?P<category>.+?)\s+(?P<amount>[\d,()]+)\s+"
+    r"(?P<share>\d+(?:\.\d+)?)\s*[%％]$"
+)
+_REVENUE_TOTAL_LABELS = {"營業收入總額", "銷貨收入總額"}
 
 
 def _normalized_exact_name(value: str) -> str:
@@ -122,6 +127,56 @@ def _parse_revenue_table(
     return tuple(rows)
 
 
+def _parse_total_terminated_revenue_table(
+    *,
+    page: int,
+    lines: list[str],
+    node_code_by_name: dict[str, str | None],
+) -> tuple[ReportedRevenueCategory, ...] | None:
+    for total_index, total_line in enumerate(lines):
+        total_match = _AMOUNT_SHARE_ROW.fullmatch(total_line.strip())
+        if total_match is None:
+            continue
+        total_label = _normalized_exact_name(total_match.group("category"))
+        if total_label not in _REVENUE_TOTAL_LABELS or Decimal(total_match.group("share")) != 100:
+            continue
+        parsed: list[tuple[str, str, Decimal, str]] = []
+        for source_line in reversed(lines[:total_index]):
+            source_text = source_line.strip()
+            if not source_text:
+                if parsed:
+                    break
+                continue
+            match = _AMOUNT_SHARE_ROW.fullmatch(source_text)
+            if match is None:
+                if parsed:
+                    break
+                continue
+            category = match.group("category").strip()
+            normalized = _normalized_exact_name(category)
+            share = Decimal(match.group("share"))
+            if normalized in _REVENUE_TOTAL_LABELS or share < 0 or share > 100:
+                return None
+            parsed.append((normalized, category, share, source_line))
+        parsed.reverse()
+        if len(parsed) < 2:
+            continue
+        row_total = sum((row[2] for row in parsed), Decimal("0"))
+        if abs(row_total - Decimal("100")) > Decimal("0.05"):
+            return None
+        return tuple(
+            ReportedRevenueCategory(
+                category=category,
+                revenue_share_pct=float(share),
+                node_code=node_code_by_name.get(normalized),
+                page=page,
+                source_text=source_text,
+            )
+            for normalized, category, share, source_text in parsed
+        )
+    return None
+
+
 def extract_product_revenue_evidence(
     *,
     pages: Iterable[tuple[int, str]],
@@ -170,6 +225,15 @@ def extract_product_revenue_evidence(
                         node_code_by_name=node_code_by_name,
                     )
                 )
+    if not detected:
+        for page, text in page_rows:
+            fallback = _parse_total_terminated_revenue_table(
+                page=page,
+                lines=text.splitlines(),
+                node_code_by_name=node_code_by_name,
+            )
+            if fallback is not None:
+                detected.append(fallback)
     if not detected:
         return ProductRevenueExtraction("missing_evidence", (), "no_table")
     if len(detected) != 1 or detected[0] is None:
