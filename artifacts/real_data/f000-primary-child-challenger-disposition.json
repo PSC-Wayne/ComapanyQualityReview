@@ -1,0 +1,38 @@
+{
+  "schema_version": "F000PrimaryChildChallengerDisposition.v1",
+  "status": "industry_sample_insufficient",
+  "publication_status": "research_only",
+  "input_artifacts": [
+    "artifacts/real_data/tpex-f000-primary-business-pit-2016-2018.json",
+    "artifacts/real_data/tpex-f000-primary-business-pit-2019-2021.json"
+  ],
+  "attempted_count": 601,
+  "admitted_training_count": 0,
+  "excluded_count": 601,
+  "coverage_pct": 0.0,
+  "exclusion_counts": {
+    "ambiguous": 2,
+    "document_not_listed": 7,
+    "missing_evidence": 327,
+    "source_unavailable": 265
+  },
+  "route_results": [],
+  "competition_run": false,
+  "gate_results": {
+    "mae_improvement_gte_5pct": "not_run_sample_insufficient",
+    "spearman_gte_0_10": "not_run_sample_insufficient",
+    "direction_improvement_gte_5pp": "not_run_sample_insufficient",
+    "auc_gte_0_62": "not_run_sample_insufficient",
+    "interval_coverage_75_to_85pct": "not_run_sample_insufficient"
+  },
+  "champion": null,
+  "stars": null,
+  "frozen_candidate": null,
+  "current_backfill_used": false,
+  "parent_fallback_used": false,
+  "sibling_pooling_used": false,
+  "hierarchical_pooling_used": false,
+  "market_feature_used": false,
+  "final_oos_read": false,
+  "reason": "No official-evidence unique primary-child observation was admitted for 2016-2021."
+}
